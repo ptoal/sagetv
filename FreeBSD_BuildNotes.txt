@@ -1,0 +1,1 @@
+setenv JDK_HOME /usr/local/openjdk8/

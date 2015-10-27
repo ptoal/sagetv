@@ -1,8 +1,13 @@
 
 JDK_HOME ?= /usr/local/j2sdk
+UNAME_S := $(shell uname -s)
 
 CC=gcc
+ifeq ($(UNAME_S),FreeBSD)
+CFLAGS = -g -c -fPIC -I$(JDK_HOME)/include/ -I$(JDK_HOME)/include/freebsd -DO_BINARY=0 -Dstricmp=strcasecmp -I../../../native/include
+else
 CFLAGS = -g -c -fPIC -I$(JDK_HOME)/include/ -I$(JDK_HOME)/include/linux -DO_BINARY=0 -Dstricmp=strcasecmp -I../../../native/include
+endif
 BINDIR=/usr/local/bin
 
 OBJFILES=sage_media_image_ImageLoader.o imageload.o

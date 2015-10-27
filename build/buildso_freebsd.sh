@@ -32,18 +32,18 @@ cp ../../third_party/jtux_freebsd/native/so/*.so .
 #cp ../../native/so/FirewireCapture/*.so .
 ${MAKE} -C ../../native/so/MPEGParser2.0 || { echo "Build failed, exiting."; exit 1; }
 cp ../../native/so/MPEGParser2.0/*.so .
-${MAKE} -C ../../native/so/HDHomeRun2.0 || { echo "Build failed, exiting."; exit 1; }
-cp ../../native/so/HDHomeRun2.0/*.so .
+#${MAKE} -C ../../native/so/HDHomeRun2.0 || { echo "Build failed, exiting."; exit 1; }
+#cp ../../native/so/HDHomeRun2.0/*.so .
 
-mkdir irtunerplugins
-cd irtunerplugins
-${MAKE} -C ../../../native/so/PVR150Tuning || { echo "Build failed, exiting."; exit 1; }
-cp ../../../native/so/PVR150Tuning/*.so .
-${MAKE} -C ../../../native/so/DirecTVSerialControl || { echo "Build failed, exiting."; exit 1; }
-cp ../../../native/so/DirecTVSerialControl/*.so .
-${MAKE} -C ../../../native/so/FirewireTuning || { echo "Build failed, exiting."; exit 1; }
-cp ../../../native/so/FirewireTuning/*.so .
-cd ..
+#mkdir irtunerplugins
+#cd irtunerplugins
+#${MAKE} -C ../../../native/so/PVR150Tuning || { echo "Build failed, exiting."; exit 1; }
+#cp ../../../native/so/PVR150Tuning/*.so .
+#${MAKE} -C ../../../native/so/DirecTVSerialControl || { echo "Build failed, exiting."; exit 1; }
+#cp ../../../native/so/DirecTVSerialControl/*.so .
+#${MAKE} -C ../../../native/so/FirewireTuning || { echo "Build failed, exiting."; exit 1; }
+#cp ../../../native/so/FirewireTuning/*.so .
+#cd ..
 
 # build the image library dependencies
 ${MAKE} -C ../../third_party/swscale || { echo "Build failed, exiting."; exit 1; }
