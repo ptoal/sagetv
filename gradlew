@@ -30,6 +30,7 @@ die ( ) {
 cygwin=false
 msys=false
 darwin=false
+freebsd=false
 case "`uname`" in
   CYGWIN* )
     cygwin=true
@@ -39,6 +40,9 @@ case "`uname`" in
     ;;
   MINGW* )
     msys=true
+    ;;
+  FreeBSD* )
+    freebsd=true
     ;;
 esac
 

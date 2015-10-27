@@ -13,8 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <pthread.h>
+#ifdef __FreeBSD__
+#include <stdlib.h>
+#else
 #include <malloc.h>
+#include <pthread_np.h>
+#endif
+#include <pthread.h>
 #include <sys/time.h>
 #include <signal.h>
 #include <errno.h>

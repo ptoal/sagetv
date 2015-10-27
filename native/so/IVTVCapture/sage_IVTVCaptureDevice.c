@@ -21,7 +21,6 @@
 #include <signal.h>
 #include <sys/errno.h>
 #include <unistd.h>
-#include <features.h> 
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
@@ -29,16 +28,21 @@
 #include <errno.h>
 #include <sys/time.h>
 #include <math.h>
-#include <linux/types.h>
 #include <time.h>
 #include <sys/timeb.h>
 #include <sys/types.h>
+#ifndef __FreeBSD__
+#include <features.h> 
+#include <linux/types.h>
+#include "videodev2.h"
+#else
+#include "linux/videodev2.h"
+#endif
 #include <sys/un.h>
 #include <sys/stat.h>
 #include <dirent.h>
 #include "sage_IVTVCaptureDevice.h"
 #include "sage_LinuxIVTVCaptureManager.h"
-#include "videodev2.h"
 #include "thread_util.h"
 #include "circbuffer.h"
 

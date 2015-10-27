@@ -20,6 +20,10 @@
 #include <sys/param.h>
 #include <sys/mount.h>
 #include <machine/types.h>
+#endif
+#ifdef __FreeBSD__
+#include <sys/param.h>
+#include <sys/mount.h>
 #else
 #include <sys/vfs.h>
 #include <linux/types.h>
@@ -267,7 +271,7 @@ JNIEXPORT jint JNICALL Java_sage_Sage_getFileSystemIdentifier(JNIEnv *env, jclas
   
   (*env)->ReleaseStringUTFChars(env, volRoot, str);
 
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(__FreeBSD__)
   return (fs.f_fsid.val[0]);
 #else
   return (fs.f_fsid.__val[0]);

@@ -27,6 +27,8 @@ CC=gcc
 CFLAGS = -c -fPIC -I$(JDK_HOME)/include -I$(JDK_HOME)/include/linux -D_FILE_OFFSET_BITS=64
 ifeq ($(UNAME_S),Darwin)
 CFLAGS = -c -fPIC -I$(JDK_HOME)/include -I$(JDK_HOME)/include/darwin -D_FILE_OFFSET_BITS=64
+else ifeq ($(UNAME_S),FreeBSD)
+CFLAGS = -c -fPIC -I$(JDK_HOME)/include -I$(JDK_HOME)/include/freebsd -I/usr/local/include -D_FILE_OFFSET_BITS=64
 endif
 BINDIR=/usr/local/bin
 
@@ -34,6 +36,8 @@ OBJFILES=sage_Sage.o sage_MMC.o sage_VideoFrame.o sage_BasicVideoFrame.o
 
 # Apple OS/X build only non X11 library for now
 ifeq ($(UNAME_S),Darwin)
+all: libSage.so
+else ifeq ($(UNAME_S),FreeBSD)
 all: libSage.so
 else
 all: libSageX11.so libSage.so
@@ -43,8 +47,11 @@ libSageX11.so: $(OBJFILES) sage_UIManagerX11.o
 	$(CC) -shared -o libSageX11.so  $(OBJFILES) sage_UIManagerX11.o -L$(JDK_HOME)/jre/lib/$(JAVA_ARCH) -ldl -lX11 -ljawt 
 
 libSage.so: $(OBJFILES) sage_UIManagerNOX11.o
-	$(CC) -shared -o libSage.so  $(OBJFILES) sage_UIManagerNOX11.o -ldl
-
+        ifeq ($(UNAME_S),FreeBSD)
+	    $(CC) -shared -o libSage.so  $(OBJFILES) sage_UIManagerNOX11.o 
+        else
+	    $(CC) -shared -o libSage.so  $(OBJFILES) sage_UIManagerNOX11.o -ldl
+        endif
 sage_UIManagerX11.o: sage_UIManager.c
 	$(CC) $(CFLAGS) -c -o sage_UIManagerX11.o -DWITH_X11 sage_UIManager.c
 
