@@ -33,7 +33,9 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-#define __STDC_FORMAT_MACROS
+#ifndef  __STDC_FORMAT_MACROS
+#define  __STDC_FORMAT_MACROS
+#endif
 #include <inttypes.h>
 
 typedef struct PS_PARSER_DUMPER

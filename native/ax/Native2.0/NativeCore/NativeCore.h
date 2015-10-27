@@ -26,7 +26,9 @@ extern "C" {
 
 #define _USE_32BIT_TIME_T
 
-#define __STDC_FORMAT_MACROS
+#ifndef  __STDC_FORMAT_MACROS
+#define  __STDC_FORMAT_MACROS
+#endif
 #include <inttypes.h>
 
 typedef	int64_t  LONGLONG;
@@ -75,7 +77,7 @@ typedef LONGLONG REFERENCE_TIME;
 #define inline __inline__
 #endif
 
-#ifdef Linux   //
+#if defined(Linux) || defined(FreeBSD)   //
 #include <stdio.h>
 #include <sys/ioctl.h>
 #include <sys/types.h>

@@ -32,8 +32,8 @@ cp ../../third_party/jtux_freebsd/native/so/*.so .
 #cp ../../native/so/FirewireCapture/*.so .
 ${MAKE} -C ../../native/so/MPEGParser2.0 || { echo "Build failed, exiting."; exit 1; }
 cp ../../native/so/MPEGParser2.0/*.so .
-#${MAKE} -C ../../native/so/HDHomeRun2.0 || { echo "Build failed, exiting."; exit 1; }
-#cp ../../native/so/HDHomeRun2.0/*.so .
+${MAKE} -C ../../native/so/HDHomeRun2.0 || { echo "Build failed, exiting."; exit 1; }
+cp ../../native/so/HDHomeRun2.0/*.so .
 
 #mkdir irtunerplugins
 #cd irtunerplugins

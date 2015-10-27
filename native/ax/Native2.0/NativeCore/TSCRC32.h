@@ -13,7 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#define __STDC_FORMAT_MACROS
+#ifndef  __STDC_FORMAT_MACROS
+#define  __STDC_FORMAT_MACROS
+#endif
 #include <inttypes.h>
 
 #ifdef __cplusplus

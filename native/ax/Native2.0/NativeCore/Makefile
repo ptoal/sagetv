@@ -53,7 +53,7 @@ JAVA_HOME ?= /opt/jdk1.5.0_02
 JSDK=-I$(JAVA_HOME)/include -I$(JAVA_HOME)/include/freebsd -I$(JAVA_HOME)/include/linux 
 
 #CFLAGS=-fPIC -D_FILE_OFFSET_BITS=64 -Wall -Wno-missing-braces $(DEBUG) $(OS)
-CFLAGS= -O3 -fPIC -D_FILE_OFFSET_BITS=64 -finline-functions -Wall -Wno-missing-braces -DLinux $(DEBUG) $(OS) $(CPU_TUNE)
+CFLAGS= -O3 -fPIC -D_FILE_OFFSET_BITS=64 -finline-functions -Wall -Wno-missing-braces $(DEBUG) $(OS) $(CPU_TUNE)
 
 SRCS=ATSCPSIParser.c AVAnalyzer.c AVTrack.c Bits.c BlockBuffer.c ChannelScan.c Demuxer.c DVBPSIParser.c ESAnalyzer.c GetAVInf.c NativeCore.c \
      NativeMemory.c PSBuilder.c PSIParser.c PSIParserConstData.c PSParser.c Remuxer.c SectionData.c TSBuilder.c TSCRC32.c TSFilter.c TSParser.c \
