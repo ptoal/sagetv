@@ -42,7 +42,7 @@ STRIP:=$(CROSS_PREFIX)strip
 #CC=mipsel-unknown-linux-gnu-gcc
 #CC=gcc
 
-CFLAGS =-g $(TSNATIVE_INC) $(NATIVECORE_INC) $(DEBUG_OPTION) $(RMV_FLAG) -I../../include -c -fPIC -I$(JDK_HOME)/include/ -I$(JDK_HOME)/include/linux -D_FILE_OFFSET_BITS=64
+CFLAGS =-g $(TSNATIVE_INC) $(NATIVECORE_INC) $(DEBUG_OPTION) $(RMV_FLAG) -I../../include -c -fPIC -I$(JDK_HOME)/include/ -I$(JDK_HOME)/include/linux -I$(JDK_HOME)/include/freebsd -D_FILE_OFFSET_BITS=64
 BINDIR=/usr/local/bin
 
 

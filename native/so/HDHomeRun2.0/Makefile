@@ -81,6 +81,10 @@ ifeq ($(UNAME_S),Darwin)
 CFLAGS = -fPIC -Wall -Wno-unknown-pragmas -Wno-write-strings $(NATIVECORE_INC) $(CHANNEL_INC) $(DEBUG_OPTION) -I$(HDHR_DIR) -I../../include -Istage/include -Istage/include/hdhomerun -c -fPIC -I$(JDK_HOME)/include/ -I$(JDK_HOME)/include/darwin -DSAGE_DTV_ONLY=1 -D_FILE_OFFSET_BITS=64 -DDarwin
 LDFLAGS =-Lstage/lib -L. -L$(JDK_HOME)/lib -framework JavaVM
 endif
+ifeq ($(UNAME_S),FreeBSD)
+CFLAGS = -fPIC -Wall -Wno-unknown-pragmas -Wno-write-strings $(NATIVECORE_INC) $(CHANNEL_INC) $(DEBUG_OPTION) -I$(HDHR_DIR) -I../../include -Istage/include -Istage/include/hdhomerun -c -fPIC -I$(JDK_HOME)/include/ -I$(JDK_HOME)/include/freebsd -DSAGE_DTV_ONLY=1 -D_FILE_OFFSET_BITS=64 -DFreeBSD
+LDFLAGS =-Lstage/lib -L. -L$(JDK_HOME)/lib -framework JavaVM
+endif
 
 STAGE_DIR=$(abspath ./stage)
 

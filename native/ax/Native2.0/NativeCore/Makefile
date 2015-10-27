@@ -19,11 +19,14 @@
 UNAME_S := $(shell uname -s)
 
 #Select debug you want
-DEBUG=-DDEBUG_LINUX
+#DEBUG=-DDEBUG_LINUX
 CPU_TUNE=
 OS=-DLinux
 ifeq ($(UNAME_S),Darwin)
 OS=-DDarwin
+endif
+ifeq ($(UNAME_S),FreeBSD)
+OS=-DFreeBSD
 endif
 
 #CC=gcc
@@ -47,7 +50,7 @@ STRIP:=$(CROSS_PREFIX)strip
 # allow the jdk to reside elsewhere, just export JAVA_HOME
 JAVA_HOME ?= /opt/jdk1.5.0_02
 #JSDK=-I/usr/local/j2sdk/include/ -I/usr/local/j2sdk/include/linux
-JSDK=-I$(JAVA_HOME)/include -I$(JAVA_HOME)/include/linux
+JSDK=-I$(JAVA_HOME)/include -I$(JAVA_HOME)/include/freebsd -I$(JAVA_HOME)/include/linux 
 
 #CFLAGS=-fPIC -D_FILE_OFFSET_BITS=64 -Wall -Wno-missing-braces $(DEBUG) $(OS)
 CFLAGS= -O3 -fPIC -D_FILE_OFFSET_BITS=64 -finline-functions -Wall -Wno-missing-braces -DLinux $(DEBUG) $(OS) $(CPU_TUNE)
@@ -80,6 +83,8 @@ $(TARGETDIR):
 
 $(TARGETDIR)/libNativeCore.so: $(TARGETDIR) $(OBJS)
 ifeq ($(UNAME_S),Darwin)
+	$(CC) -shared -o $(TARGETDIR)/libNativeCore.so $(OBJS) $(CPU_TUNE)
+else ifeq ($(UNAME_S),FreeBSD)
 	$(CC) -shared -o $(TARGETDIR)/libNativeCore.so $(OBJS) $(CPU_TUNE)
 else
 	$(CC) -shared -Wl,-Map=libNativeCore.map -o $(TARGETDIR)/libNativeCore.so $(OBJS) $(CPU_TUNE)

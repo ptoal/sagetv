@@ -49,7 +49,7 @@
 
 //*********************** WINDOWS section *********************
 #else
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(__FreeBSD__)
 //*********************** MAC section *************************
 #include <sys/ioctl.h>
 #include <sys/types.h>
@@ -76,7 +76,11 @@
 // Apple OS/X has no features.h
 // Apple OS/X has no linux/dvb/frontend.h
 // Apple OS/X handles types via machine/types.h
+#ifdef __APPLE__
 #include <machine/types.h>
+#else
+#include <sys/types.h>
+#endif
 
 //*********************** MAC section *************************
 #else

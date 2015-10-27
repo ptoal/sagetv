@@ -20,16 +20,16 @@ mkdir so
 cd so
 ${MAKE} -C ../../native/so/SageLinux || { echo "Build failed, exiting."; exit 1; }
 cp ../../native/so/SageLinux/*.so .
-#${MAKE} -C ../../native/so/IVTVCapture || { echo "Build failed, exiting."; exit 1; }
-#cp ../../native/so/IVTVCapture/*.so .
-${MAKE} -C ../../third_party/jtux/native/so || { echo "Build failed, exiting."; exit 1; }
-cp ../../third_party/jtux/native/so/*.so .
-${MAKE} -C ../../native/so/PVR150Input || { echo "Build failed, exiting."; exit 1; }
-cp ../../native/so/PVR150Input/*.so .
-${MAKE} -C ../../native/so/DVBCapture2.0 || { echo "Build failed, exiting."; exit 1; }
-cp ../../native/so/DVBCapture2.0/*.so .
-${MAKE} -C ../../native/so/FirewireCapture || { echo "Build failed, exiting."; exit 1; }
-cp ../../native/so/FirewireCapture/*.so .
+${MAKE} -C ../../native/so/IVTVCapture || { echo "Build failed, exiting."; exit 1; }
+cp ../../native/so/IVTVCapture/*.so .
+${MAKE} -C ../../third_party/jtux_freebsd/native/so || { echo "Build failed, exiting."; exit 1; }
+cp ../../third_party/jtux_freebsd/native/so/*.so .
+#${MAKE} -C ../../native/so/PVR150Input || { echo "Build failed, exiting."; exit 1; }
+#cp ../../native/so/PVR150Input/*.so .
+#${MAKE} -C ../../native/so/DVBCapture2.0 || { echo "Build failed, exiting."; exit 1; }
+#cp ../../native/so/DVBCapture2.0/*.so .
+#${MAKE} -C ../../native/so/FirewireCapture || { echo "Build failed, exiting."; exit 1; }
+#cp ../../native/so/FirewireCapture/*.so .
 ${MAKE} -C ../../native/so/MPEGParser2.0 || { echo "Build failed, exiting."; exit 1; }
 cp ../../native/so/MPEGParser2.0/*.so .
 ${MAKE} -C ../../native/so/HDHomeRun2.0 || { echo "Build failed, exiting."; exit 1; }

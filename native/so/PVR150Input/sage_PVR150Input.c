@@ -22,8 +22,11 @@
 #include <sys/ioctl.h>
 #include <fcntl.h>
 //#include <linux/compiler.h>
+#ifdef __FreeBSD__
+#else
 #include <linux/i2c.h>
 #include <linux/i2c-dev.h>
+#endif
 #include <unistd.h>
 #include <inttypes.h>
 #include <ctype.h>
