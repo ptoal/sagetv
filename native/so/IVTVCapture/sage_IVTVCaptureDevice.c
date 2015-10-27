@@ -29,12 +29,12 @@
 #include <sys/time.h>
 #include <math.h>
 #include <time.h>
-#include <sys/timeb.h>
 #include <sys/types.h>
 #ifndef __FreeBSD__
 #include <features.h> 
 #include <linux/types.h>
 #include "videodev2.h"
+#include <sys/timeb.h>
 #else
 #include "linux/videodev2.h"
 #endif

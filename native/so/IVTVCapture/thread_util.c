@@ -15,9 +15,9 @@
  */
 #ifdef __FreeBSD__
 #include <stdlib.h>
+#include <pthread_np.h>
 #else
 #include <malloc.h>
-#include <pthread_np.h>
 #endif
 #include <pthread.h>
 #include <sys/time.h>
@@ -34,7 +34,11 @@ ACL_mutex * ACL_CreateMutex()
     if(NULL!=mutex)
     {
         pthread_mutexattr_init(&attr);
+      #ifdef __FreeBSD__
+        pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+      #else
         pthread_mutexattr_setkind_np(&attr, PTHREAD_MUTEX_RECURSIVE_NP);
+      #endif
         if(pthread_mutex_init(&mutex->id, &attr)!=0)
         {
             free(mutex);
