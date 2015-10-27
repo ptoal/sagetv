@@ -125,7 +125,7 @@ struct hdhomerun_device_t *hdhomerun_device_selector_find_device(struct hdhomeru
 static int hdhomerun_device_selector_load_from_str_discover(struct hdhomerun_device_selector_t *hds, uint32_t target_ip, uint32_t device_id)
 {
 	struct hdhomerun_discover_device_t result_list[64];
-	int discover_count = hdhomerun_discover_find_devices_custom(target_ip, HDHOMERUN_DEVICE_TYPE_TUNER, device_id, result_list, 64);
+	int discover_count = hdhomerun_discover_find_devices_custom_v2(target_ip, HDHOMERUN_DEVICE_TYPE_TUNER, device_id, result_list, 64);
 
 	int count = 0;
 	int result_index;

@@ -94,7 +94,7 @@ static bool_t hdhomerun_control_connect_sock(struct hdhomerun_control_sock_t *cs
 
 	/* Find device. */
 	struct hdhomerun_discover_device_t result;
-	if (hdhomerun_discover_find_devices_custom(cs->desired_device_ip, HDHOMERUN_DEVICE_TYPE_WILDCARD, cs->desired_device_id, &result, 1) <= 0) {
+	if (hdhomerun_discover_find_devices_custom_v2(cs->desired_device_ip, HDHOMERUN_DEVICE_TYPE_WILDCARD, cs->desired_device_id, &result, 1) <= 0) {
 		hdhomerun_debug_printf(cs->dbg, "hdhomerun_control_connect_sock: device not found\n");
 		return FALSE;
 	}

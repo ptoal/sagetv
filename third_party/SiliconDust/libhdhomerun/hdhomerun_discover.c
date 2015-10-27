@@ -1,7 +1,7 @@
 /*
  * hdhomerun_discover.c
  *
- * Copyright © 2006-2010 Silicondust USA Inc. <www.silicondust.com>.
+ * Copyright © 2006-2015 Silicondust USA Inc. <www.silicondust.com>.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -231,8 +231,31 @@ static bool_t hdhomerun_discover_send(struct hdhomerun_discover_t *ds, uint32_t 
 	}
 }
 
+static bool_t hdhomerun_discover_is_legacy(uint32_t device_id)
+{
+	switch (device_id >> 20) {
+	case 0x100: /* TECH-US/TECH3-US */
+		return (device_id < 0x10040000);
+
+	case 0x120: /* TECH3-EU */
+		return (device_id < 0x12030000);
+
+	case 0x101: /* HDHR-US */
+	case 0x102: /* HDHR-T1-US */
+	case 0x103: /* HDHR3-US */
+	case 0x111: /* HDHR3-DT */
+	case 0x121: /* HDHR-EU */
+	case 0x122: /* HDHR3-EU */
+		return TRUE;
+
+	default:
+		return FALSE;
+	}
+}
+
 static bool_t hdhomerun_discover_recv_internal(struct hdhomerun_discover_t *ds, struct hdhomerun_discover_sock_t *dss, struct hdhomerun_discover_device_t *result)
 {
+	static char hdhomerun_discover_recv_base64_encode_table[64 + 1] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 	struct hdhomerun_pkt_t *rx_pkt = &ds->rx_pkt;
 	hdhomerun_pkt_reset(rx_pkt);
 
@@ -253,10 +276,12 @@ static bool_t hdhomerun_discover_recv_internal(struct hdhomerun_discover_t *ds, 
 		return FALSE;
 	}
 
+	memset(result, 0, sizeof(struct hdhomerun_discover_device_t));
 	result->ip_addr = remote_addr;
-	result->device_type = 0;
-	result->device_id = 0;
-	result->tuner_count = 0;
+
+	hdhomerun_sprintf(result->base_url, result->base_url + sizeof(result->base_url), "http://%u.%u.%u.%u:80",
+		(remote_addr >> 24) & 0xFF, (remote_addr >> 16) & 0xFF, (remote_addr >> 8) & 0xFF, (remote_addr >> 0) & 0xFF
+	);
 
 	while (1) {
 		uint8_t tag;
@@ -266,6 +291,7 @@ static bool_t hdhomerun_discover_recv_internal(struct hdhomerun_discover_t *ds, 
 			break;
 		}
 
+		int i;
 		switch (tag) {
 		case HDHOMERUN_TAG_DEVICE_TYPE:
 			if (len != 4) {
@@ -279,6 +305,7 @@ static bool_t hdhomerun_discover_recv_internal(struct hdhomerun_discover_t *ds, 
 				break;
 			}
 			result->device_id = hdhomerun_pkt_read_u32(rx_pkt);
+			result->is_legacy = hdhomerun_discover_is_legacy(result->device_id);
 			break;
 
 		case HDHOMERUN_TAG_TUNER_COUNT:
@@ -286,6 +313,39 @@ static bool_t hdhomerun_discover_recv_internal(struct hdhomerun_discover_t *ds, 
 				break;
 			}
 			result->tuner_count = hdhomerun_pkt_read_u8(rx_pkt);
+			break;
+
+		case HDHOMERUN_TAG_DEVICE_AUTH_STR:
+			if (len >= sizeof(result->device_auth)) {
+				break;
+			}
+			hdhomerun_pkt_read_mem(rx_pkt, result->device_auth, len);
+			result->device_auth[len] = 0;
+			break;
+
+		case HDHOMERUN_TAG_DEVICE_AUTH_BIN:
+			if (len != 18) {
+				break;
+			}
+			for (i = 0; i < 24; i += 4) {
+				uint32_t raw24;
+				raw24  = (uint32_t)hdhomerun_pkt_read_u8(rx_pkt) << 16;
+				raw24 |= (uint32_t)hdhomerun_pkt_read_u8(rx_pkt) << 8;
+				raw24 |= (uint32_t)hdhomerun_pkt_read_u8(rx_pkt) << 0;
+				result->device_auth[i + 0] = hdhomerun_discover_recv_base64_encode_table[(raw24 >> 18) & 0x3F];
+				result->device_auth[i + 1] = hdhomerun_discover_recv_base64_encode_table[(raw24 >> 12) & 0x3F];
+				result->device_auth[i + 2] = hdhomerun_discover_recv_base64_encode_table[(raw24 >> 6) & 0x3F];
+				result->device_auth[i + 3] = hdhomerun_discover_recv_base64_encode_table[(raw24 >> 0) & 0x3F];
+			}
+			result->device_auth[24] = 0;
+			break;
+
+		case HDHOMERUN_TAG_BASE_URL:
+			if (len >= sizeof(result->base_url)) {
+				break;
+			}
+			hdhomerun_pkt_read_mem(rx_pkt, result->base_url, len);
+			result->base_url[len] = 0;
 			break;
 
 		default:
@@ -343,7 +403,7 @@ static struct hdhomerun_discover_device_t *hdhomerun_discover_find_in_list(struc
 	return NULL;
 }
 
-int hdhomerun_discover_find_devices(struct hdhomerun_discover_t *ds, uint32_t target_ip, uint32_t device_type, uint32_t device_id, struct hdhomerun_discover_device_t result_list[], int max_count)
+int hdhomerun_discover_find_devices_v2(struct hdhomerun_discover_t *ds, uint32_t target_ip, uint32_t device_type, uint32_t device_id, struct hdhomerun_discover_device_t result_list[], int max_count)
 {
 	hdhomerun_discover_sock_detect(ds);
 
@@ -395,7 +455,7 @@ int hdhomerun_discover_find_devices(struct hdhomerun_discover_t *ds, uint32_t ta
 	return count;
 }
 
-int hdhomerun_discover_find_devices_custom(uint32_t target_ip, uint32_t device_type, uint32_t device_id, struct hdhomerun_discover_device_t result_list[], int max_count)
+int hdhomerun_discover_find_devices_custom_v2(uint32_t target_ip, uint32_t device_type, uint32_t device_id, struct hdhomerun_discover_device_t result_list[], int max_count)
 {
 	if (hdhomerun_discover_is_ip_multicast(target_ip)) {
 		return 0;
@@ -406,7 +466,7 @@ int hdhomerun_discover_find_devices_custom(uint32_t target_ip, uint32_t device_t
 		return -1;
 	}
 
-	int ret = hdhomerun_discover_find_devices(ds, target_ip, device_type, device_id, result_list, max_count);
+	int ret = hdhomerun_discover_find_devices_v2(ds, target_ip, device_type, device_id, result_list, max_count);
 
 	hdhomerun_discover_destroy(ds);
 	return ret;

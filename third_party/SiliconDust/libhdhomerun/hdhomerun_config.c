@@ -101,7 +101,7 @@ static int discover_print(char *target_ip_str)
 	}
 
 	struct hdhomerun_discover_device_t result_list[64];
-	int count = hdhomerun_discover_find_devices_custom(target_ip, HDHOMERUN_DEVICE_TYPE_TUNER, HDHOMERUN_DEVICE_ID_WILDCARD, result_list, 64);
+	int count = hdhomerun_discover_find_devices_custom_v2(target_ip, HDHOMERUN_DEVICE_TYPE_TUNER, HDHOMERUN_DEVICE_ID_WILDCARD, result_list, 64);
 	if (count < 0) {
 		fprintf(stderr, "error sending discover request\n");
 		return -1;
