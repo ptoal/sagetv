@@ -14,7 +14,7 @@
 #
 # native/so/HDHomeRun2.0 Makefile - builds a shared library - interface of libhdhomerun to Java part of SageTV
 
-# set system name (will be Linux or Darwin)
+# set system name (will be Linux, FreeBSD or Darwin)
 UNAME_S := $(shell uname -s)
 
 #TSNATIVE_LIB=../../lib/TSnative/libTSnative.so
@@ -64,7 +64,8 @@ ifdef TARGET
 else
 	CROSS_PREFIX:=
 endif
-CC:=$(CROSS_PREFIX)gcc
+CC?=$(CROSS_PREFIX)gcc
+#CXX=clang++
 LD:=$(CROSS_PREFIX)ld
 AR:=$(CROSS_PREFIX)ar
 RANLIB:=$(CROSS_PREFIX)ranlib
@@ -88,7 +89,7 @@ endif
 
 STAGE_DIR=$(abspath ./stage)
 
-LIBS = -lhdhomerun $(HDHR_LIBS) -lstdc++ -lNativeCore -lchannel
+LIBS = -lhdhomerun $(HDHR_LIBS) -lc++ -lNativeCore -lchannel
 
 #TODO verfiy this setting of optimzed versus debug
 #NOTE: not optiomized until stable
@@ -119,13 +120,13 @@ foo:
 OBJFILES=sage_HDHomeRun.o HDHRDevice.o DTVChannel.o SageTuner.o
 
 DTVChannel.o: DTVChannel.cpp
-	$(CC) $(CFLAGS) $(OPT_FLAGS) -o $@ $^
+	$(CXX) $(CFLAGS) $(OPT_FLAGS) -o $@ $^
 
 SageTuner.o: SageTuner.cpp
-	$(CC) $(CFLAGS) $(OPT_FLAGS) -o $@ $^
+	$(CXX) $(CFLAGS) $(OPT_FLAGS) -o $@ $^
 
 %.o: %.cpp
-	$(CC) $(CFLAGS) $(OPT_FLAGS) -o $@ $^
+	$(CXX) $(CFLAGS) $(OPT_FLAGS) -o $@ $^
 
 libHDHomeRunCapture.so: libNativeCore.so libchannel.a stage/lib/libhdhomerun.a $(OBJFILES)
 	$(CC) -shared -Wall $(LDFLAGS) -o libHDHomeRunCapture.so $(OBJFILES) $(LIBS)

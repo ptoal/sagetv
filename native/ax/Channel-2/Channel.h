@@ -25,7 +25,7 @@
 #endif
 
 #ifndef _WIN32
-#define _MAX_PATH 	256
+#define _MAX_PATH 	512
 #endif
 
 #define TIMEOUT_CNT    6

@@ -30,7 +30,9 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/time.h>
+#ifndef __FreeBSD__
 #include <sys/timeb.h>
+#endif
 #include <sys/wait.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>

@@ -36,6 +36,8 @@ else
     LIBEXT := .dylib
     SHARED := -dynamiclib -install_name libhdhomerun$(LIBEXT)
   endif
+  ifeq ($(OS),FreeBSD)
+  endif
 endif
 
 all : hdhomerun_config$(BINEXT) libhdhomerun$(LIBEXT)
