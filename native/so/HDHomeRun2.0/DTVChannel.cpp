@@ -18,9 +18,6 @@
 #define FILETRANSITION
 #endif
 
-#include "DTVChannel.h"
-#include "SageTuner.h"
-
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -53,6 +50,18 @@
 #include <sys/types.h>
 #include <sys/un.h>
 #endif
+
+// FreeBSD specific includes
+#ifdef __FreeBSD__
+#include <sys/time.h>
+#include <time.h>
+#include <sys/types.h>
+#include <sys/un.h>
+#endif
+
+#include "DTVChannel.h"
+#include "SageTuner.h"
+
 
 #define EPG_MSG_TYPE	10
 #define AV_INF_TYPE		11
@@ -102,7 +111,8 @@ uint32_t msElapsed( uint32_t start_time )
 {
 	uint32_t ms;
 	struct timeval tv;
-	gettimeofday(&tv, NULL);
+        struct timezone tz;
+	gettimeofday(&tv, &tz);
 	ms = tv.tv_sec * 1000 + tv.tv_usec/1000;
 	return (ms - start_time);
 }
@@ -795,7 +805,7 @@ static int verifyPSBlock(unsigned char *data, int videotype)
             if((cur&0xFFFFFF00)==0x00000100)
             {
                 /* video */
-                if((b==0xB3))
+                if(b==0xB3)
                 {
                     return 1;
                 }

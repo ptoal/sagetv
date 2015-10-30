@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include <vector>
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
@@ -26,7 +27,6 @@
 #include "sage_HDHomeRunCaptureManager.h"
 #include "sage_HDHomeRunCaptureDevice.h"
 
-#include <vector>
 
 // we cast pointers to 64 bit Java longs, which produces compiler warnings on 32 bit machines
 // this macro gets around these warnings by converting to a 32 bit int first, then casting to a pointer

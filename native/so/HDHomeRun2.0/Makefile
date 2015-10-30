@@ -65,7 +65,7 @@ else
 	CROSS_PREFIX:=
 endif
 CC?=$(CROSS_PREFIX)gcc
-#CXX=clang++
+CXX?=$(CROSS_PREFIX)g++
 LD:=$(CROSS_PREFIX)ld
 AR:=$(CROSS_PREFIX)ar
 RANLIB:=$(CROSS_PREFIX)ranlib
@@ -84,12 +84,12 @@ LDFLAGS =-Lstage/lib -L. -L$(JDK_HOME)/lib -framework JavaVM
 endif
 ifeq ($(UNAME_S),FreeBSD)
 CFLAGS = -fPIC -Wall -Wno-unknown-pragmas -Wno-write-strings $(NATIVECORE_INC) $(CHANNEL_INC) $(DEBUG_OPTION) -I$(HDHR_DIR) -I../../include -Istage/include -Istage/include/hdhomerun -c -fPIC -I$(JDK_HOME)/include/ -I$(JDK_HOME)/include/freebsd -DSAGE_DTV_ONLY=1 -D_FILE_OFFSET_BITS=64 -DFreeBSD
-LDFLAGS =-Lstage/lib -L. -L$(JDK_HOME)/lib -framework JavaVM
+LDFLAGS =-Lstage/lib -L. -L$(JDK_HOME)/lib
 endif
 
 STAGE_DIR=$(abspath ./stage)
 
-LIBS = -lhdhomerun $(HDHR_LIBS) -lc++ -lNativeCore -lchannel
+LIBS = -lhdhomerun $(HDHR_LIBS) -lstdc++ -lNativeCore -lchannel
 
 #TODO verfiy this setting of optimzed versus debug
 #NOTE: not optiomized until stable
