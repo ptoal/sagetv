@@ -1,5 +1,23 @@
-/** 
- * \file subopt-helper.c
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
+/**
+ * \file
  *
  * \brief Compensates the suboption parsing code duplication a bit.
  *
@@ -22,6 +40,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <limits.h>
 #include <assert.h>
 
@@ -29,214 +48,6 @@
   #define NDEBUG
 #endif
 
-/* prototypes for argument parsing */
-static char const * parse_int( char const * const str, int * const valp );
-static char const * parse_str( char const * const str, strarg_t * const valp );
-static char const * parse_float( char const * const str, float * const valp );
-
-/**
- * \brief Try to parse all options in str and fail if it was not possible.
- *
- * \param str Pointer to the zero terminated string to be parsed.
- * \param opts Pointer to a options array. The array must be terminated
- *             with an element having set name to NULL in its opt_t structure.
- *
- * \return The return value is zero if the string could be parsed
- *         else a non-zero value is returned.
- *
- */
-int subopt_parse( char const * const str, opt_t * opts )
-{
-  int parse_err = 0, idx;
-  unsigned int parse_pos = 0;
-
-  /* Initialize set member to false.          *
-   * It is set to true if it was found in str */
-  for ( idx=0; opts[idx].name; ++idx )
-  {
-    opts[idx].set = 0;
-  }
-
-  if ( str )
-  {
-    while ( str[parse_pos] && !parse_err )
-    {
-      int next = 0;
-
-      idx = 0; // reset index for the below loop
-      while ( opts[idx].name )
-      {
-        int opt_len;
-        int substr_len;
-
-        // get length of the option we test against */
-        opt_len = strlen( opts[idx].name );
-
-        // get length of the current substring of str */
-        {
-          char * delim, * arg_delim;
-
-          /* search nearest delimiter ( option or argument delimiter ) */ 
-          delim = strchr( &str[parse_pos], ':' );
-          arg_delim = strchr( &str[parse_pos], '=' );
-
-          if ( ( delim && arg_delim && delim > arg_delim ) ||
-               delim == NULL )
-          {
-            delim = strchr( &str[parse_pos], '=' );
-          }
-          
-          substr_len = delim ? // is a delim present
-                         delim - &str[parse_pos] : // yes
-                         strlen( &str[parse_pos] ); // no, end of string
-        }
-
-        //printf( "substr_len=%d, opt_len=%d\n", substr_len, opt_len );
-
-        /* Check if the length of the current option matches the *
-         * length of the option we want to test again.           */
-        if ( substr_len == opt_len )
-{
-        /* check if option was activated/deactivated */
-        if( strncmp( &str[parse_pos], opts[idx].name, opt_len ) == 0 )
-        {
-          /* option was found */
-          opts[idx].set = 1; next = 1;
-
-          assert( opts[idx].valp && "Need a pointer to store the arg!" );
-
-          /* type specific code */
-          if ( opts[idx].type == OPT_ARG_BOOL )
-          {
-            /* Handle OPT_ARG_BOOL separately so *
-             * the others can share code.        */
-
-            /* set option to true */
-            *((int *)(opts[idx].valp)) = 1;
-
-            /* increment position */
-            parse_pos += opt_len;
-          }
-          else
-          {
-            /* Type is not OPT_ARG_BOOL, means we have to parse *
-             * for the arg delimiter character and eventually   *
-             * call a test function.                            */
-            char const * last;
-
-            /* increment position to check for arg */
-            parse_pos += opt_len;
-
-            if ( str[parse_pos] != '=' )
-            {
-              parse_err = 1; break;
-            }
-
-            /* '=' char was there, so let's move after it */
-            ++parse_pos;
-
-            switch ( opts[idx].type )
-            {
-              case OPT_ARG_INT:
-                last = parse_int( &str[parse_pos],
-                                  (int *)opts[idx].valp );
-
-                break;
-              case OPT_ARG_STR:
-                last = parse_str( &str[parse_pos],
-                                  (strarg_t *)opts[idx].valp );
-                break;
-              case OPT_ARG_MSTRZ:
-                {
-                  char **valp = opts[idx].valp;
-                  strarg_t tmp;
-                  tmp.str = NULL;
-                  tmp.len = 0;
-                  last = parse_str( &str[parse_pos], &tmp );
-                  if (*valp)
-                    free(*valp);
-                  *valp = NULL;
-                  if (tmp.str && tmp.len > 0) {
-                    *valp = malloc(tmp.len + 1);
-                    memcpy(*valp, tmp.str, tmp.len);
-                    (*valp)[tmp.len] = 0;
-                  }
-                  break;
-                }
-              case OPT_ARG_FLOAT:
-                last = parse_float( &str[parse_pos],
-                                  (float *)opts[idx].valp );
-                break;
-              default:
-                assert( 0 && "Arg type of suboption doesn't exist!" );
-                last = NULL; // break parsing!
-            }
-
-            /* was the conversion succesful? */
-            if ( !last )
-            {
-              parse_err = 1; break;
-            }
-
-            /* make test if supplied */
-            if ( opts[idx].test && !opts[idx].test( opts[idx].valp ) )
-            {
-              parse_err = 1; break;
-            }
-
-            /* we succeded, set position */
-            parse_pos = last - str;
-          }
-        }
-}
-else if ( substr_len == opt_len+2 )
-{
-             if ( opts[idx].type == OPT_ARG_BOOL && // check for no<opt>
-                  strncmp( &str[parse_pos], "no", 2 ) == 0 &&
-                  strncmp( &str[parse_pos+2], opts[idx].name, opt_len ) == 0 )
-        {
-          /* option was found but negated */
-          opts[idx].set = 1; next = 1;
-
-          /* set arg to false */
-          *((int *)(opts[idx].valp)) = 0;
-
-          /* increment position */
-          parse_pos += opt_len+2;
-        }
-}
-
-        ++idx; // test against next option
-
-        /* break out of the loop, if this subopt is processed */
-        if ( next ) { break; }
-      }
-      
-      /* if we had a valid suboption the current pos should *
-       * equal the delimiter char, which should be ':' for  *
-       * suboptions.                                        */
-      if ( !parse_err && str[parse_pos] == ':' ) { ++parse_pos; }
-      else if ( str[parse_pos] ) { parse_err = 1; }
-    }
-  }
-
-  /* if an error was encountered */
-  if (parse_err)
-  {
-    unsigned int i;
-    mp_msg( MSGT_VO, MSGL_FATAL, "Could not parse arguments at the position indicated below:\n%s\n", str );
-    for ( i = 0; i < parse_pos; ++i )
-    {
-      mp_msg(MSGT_VO, MSGL_FATAL, " ");
-    }
-    mp_msg(MSGT_VO, MSGL_FATAL, "^\n");
-
-    return -1;
-  }
-
-  /* we could parse everything */
-  return 0;
-}
 
 static char const * parse_int( char const * const str, int * const valp )
 {
@@ -304,21 +115,216 @@ static char const * parse_str( char const * str, strarg_t * const valp )
 }
 
 
+/**
+ * \brief Try to parse all options in str and fail if it was not possible.
+ *
+ * \param str Pointer to the zero terminated string to be parsed.
+ * \param opts Pointer to a options array. The array must be terminated
+ *             with an element having set name to NULL in its opt_t structure.
+ *
+ * \return The return value is zero if the string could be parsed
+ *         else a non-zero value is returned.
+ *
+ */
+int subopt_parse( char const * const str, const opt_t * opts )
+{
+  int parse_err = 0, idx;
+  unsigned int parse_pos = 0;
+
+  if ( str )
+  {
+    while ( str[parse_pos] && !parse_err )
+    {
+      int next = 0;
+
+      idx = 0; // reset index for the below loop
+      while ( opts[idx].name )
+      {
+        int opt_len;
+        int substr_len;
+
+        // get length of the option we test against */
+        opt_len = strlen( opts[idx].name );
+
+        // get length of the current substring of str */
+        {
+          char * delim, * arg_delim;
+
+          /* search nearest delimiter ( option or argument delimiter ) */
+          delim = strchr( &str[parse_pos], ':' );
+          arg_delim = strchr( &str[parse_pos], '=' );
+
+          if ( ( delim && arg_delim && delim > arg_delim ) ||
+               delim == NULL )
+          {
+            delim = strchr( &str[parse_pos], '=' );
+          }
+
+          substr_len = delim ? // is a delim present
+                         delim - &str[parse_pos] : // yes
+                         strlen( &str[parse_pos] ); // no, end of string
+        }
+
+        //printf( "substr_len=%d, opt_len=%d\n", substr_len, opt_len );
+
+        /* Check if the length of the current option matches the *
+         * length of the option we want to test again.           */
+        if ( substr_len == opt_len )
+{
+        /* check if option was activated/deactivated */
+        if( strncmp( &str[parse_pos], opts[idx].name, opt_len ) == 0 )
+        {
+          /* option was found */
+          next = 1;
+
+          assert( opts[idx].valp && "Need a pointer to store the arg!" );
+
+          /* type specific code */
+          if ( opts[idx].type == OPT_ARG_BOOL )
+          {
+            /* Handle OPT_ARG_BOOL separately so *
+             * the others can share code.        */
+
+            /* set option to true */
+            *((int *)(opts[idx].valp)) = 1;
+
+            /* increment position */
+            parse_pos += opt_len;
+          }
+          else
+          {
+            /* Type is not OPT_ARG_BOOL, means we have to parse *
+             * for the arg delimiter character and eventually   *
+             * call a test function.                            */
+            char const * last;
+
+            /* increment position to check for arg */
+            parse_pos += opt_len;
+
+            if ( str[parse_pos] != '=' )
+            {
+              parse_err = 1; break;
+            }
+
+            /* '=' char was there, so let's move after it */
+            ++parse_pos;
+
+            switch ( opts[idx].type )
+            {
+              case OPT_ARG_INT:
+                last = parse_int( &str[parse_pos],
+                                  (int *)opts[idx].valp );
+
+                break;
+              case OPT_ARG_STR:
+                last = parse_str( &str[parse_pos],
+                                  (strarg_t *)opts[idx].valp );
+                break;
+              case OPT_ARG_MSTRZ:
+                {
+                  char **valp = opts[idx].valp;
+                  strarg_t tmp;
+                  tmp.str = NULL;
+                  tmp.len = 0;
+                  last = parse_str( &str[parse_pos], &tmp );
+                  free(*valp);
+                  *valp = NULL;
+                  if (tmp.str && tmp.len > 0) {
+                    *valp = malloc(tmp.len + 1);
+                    memcpy(*valp, tmp.str, tmp.len);
+                    (*valp)[tmp.len] = 0;
+                  }
+                  break;
+                }
+              case OPT_ARG_FLOAT:
+                last = parse_float( &str[parse_pos],
+                                  (float *)opts[idx].valp );
+                break;
+              default:
+                assert( 0 && "Arg type of suboption doesn't exist!" );
+                last = NULL; // break parsing!
+            }
+
+            /* was the conversion succesful? */
+            if ( !last )
+            {
+              parse_err = 1; break;
+            }
+
+            /* make test if supplied */
+            if ( opts[idx].test && !opts[idx].test( opts[idx].valp ) )
+            {
+              parse_err = 1; break;
+            }
+
+            /* we succeded, set position */
+            parse_pos = last - str;
+          }
+        }
+}
+else if ( substr_len == opt_len+2 )
+{
+             if ( opts[idx].type == OPT_ARG_BOOL && // check for no<opt>
+                  strncmp( &str[parse_pos], "no", 2 ) == 0 &&
+                  strncmp( &str[parse_pos+2], opts[idx].name, opt_len ) == 0 )
+        {
+          /* option was found but negated */
+          next = 1;
+
+          /* set arg to false */
+          *((int *)(opts[idx].valp)) = 0;
+
+          /* increment position */
+          parse_pos += opt_len+2;
+        }
+}
+
+        ++idx; // test against next option
+
+        /* break out of the loop, if this subopt is processed */
+        if ( next ) { break; }
+      }
+
+      /* if we had a valid suboption the current pos should *
+       * equal the delimiter char, which should be ':' for  *
+       * suboptions.                                        */
+      if ( !parse_err && str[parse_pos] == ':' ) { ++parse_pos; }
+      else if ( str[parse_pos] ) { parse_err = 1; }
+    }
+  }
+
+  /* if an error was encountered */
+  if (parse_err)
+  {
+    unsigned int i;
+    mp_msg( MSGT_VO, MSGL_FATAL, "Could not parse arguments at the position indicated below:\n%s\n", str );
+    for ( i = 0; i < parse_pos; ++i )
+    {
+      mp_msg(MSGT_VO, MSGL_FATAL, " ");
+    }
+    mp_msg(MSGT_VO, MSGL_FATAL, "^\n");
+
+    return -1;
+  }
+
+  /* we could parse everything */
+  return 0;
+}
+
+
 /*** common test functions ***/
 
 /** \brief Test if i is not negative */
-int int_non_neg( int * i )
+int int_non_neg(void *iptr)
 {
-  if ( *i < 0 ) { return 0; }
-
-  return 1;
+  int *i = iptr;
+  return *i >= 0;
 }
 /** \brief Test if i is positive. */
-int int_pos( int * i )
+int int_pos(void *iptr)
 {
-  if ( *i > 0 ) { return 1; }
-
-  return 0;
+  int *i = iptr;
+  return *i > 0;
 }
 
 /*** little helpers */
@@ -338,4 +344,3 @@ int strargcasecmp(strarg_t *arg, char *str) {
     res = arg->len - strlen(str);
   return res;
 }
-

@@ -1,4 +1,23 @@
-/* windows TermIO for MPlayer          (C) 2003 Sascha Sommer */
+/* Windows TermIO
+ *
+ * copyright (C) 2003 Sascha Sommer
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 // See  http://msdn.microsoft.com/library/default.asp?url=/library/en-us/winui/WinUI/WindowsUserInterface/UserInput/VirtualKeyCodes.asp
 // for additional virtual keycodes
@@ -6,37 +25,27 @@
 
 #include "config.h"
 #include <stdio.h>
+#include <stdint.h>
+#include <string.h>
 #include <windows.h>
 #include "keycodes.h"
 #include "input/input.h"
-// HACK, stdin is used as something else below
-#undef stdin
+#include "mp_fifo.h"
+#include "getch2.h"
 
-int mp_input_win32_slave_cmd_func(int fd,char* dest,int size){
-  DWORD retval, dw1, dw2;
-  int i;
-  HANDLE stdin = GetStdHandle(STD_INPUT_HANDLE);
-  if(!PeekNamedPipe(stdin, dest, size, &retval, &dw1, &dw2) || !retval){
+int mp_input_slave_cmd_func(int fd,char* dest,int size){
+  DWORD retval;
+  HANDLE in = GetStdHandle(STD_INPUT_HANDLE);
+  if(PeekNamedPipe(in, NULL, size, &retval, NULL, NULL)){
+    if (size > retval) size = retval;
+  } else {
+    if (WaitForSingleObject(in, 0))
+      size = 0;
+  }
+  if(!size){
 	  return MP_INPUT_NOTHING;
   }
-  // Find the first \n and stop there so we don't miss any commands
-  for (i = 0; i < retval; i++)
-  {
-  	if (dest[i] == '\n')
-  	{
-  		retval = i + 1;
-  		break;
-  	}
-  }
-  if(retval>size)retval=size;
-  ReadFile(stdin, dest, retval, &retval, NULL);
-  // MPlayer likes \n terminated lines instead of \r\n terminated
-  if (dest[retval - 2] == '\r')
-  {
-	  dest[retval - 2] = '\n';
-	  retval--;
-  }
-  dest[retval] = '\0';
+  ReadFile(in, dest, size, &retval, NULL);
   if(retval)return retval;
   return MP_INPUT_NOTHING;
 }
@@ -45,37 +54,45 @@ int screen_width=80;
 int screen_height=24;
 char * erase_to_end_of_line = NULL;
 
-void get_screen_size(){
+void get_screen_size(void){
 }
 
-static HANDLE stdin;
+static HANDLE in;
 static int getch2_status=0;
 
-int getch2(int time){
+static int getch2_internal(void)
+{
 	INPUT_RECORD eventbuffer[128];
     DWORD retval;
    	int i=0;
-    if(!getch2_status)return -1;    
+    if(!getch2_status){
+      // supports e.g. MinGW xterm, unfortunately keys are only received after
+      // enter was pressed.
+      uint8_t c;
+      if (!PeekNamedPipe(in, NULL, 1, &retval, NULL, NULL) || !retval)
+        return -1;
+      ReadFile(in, &c, 1, &retval, NULL);
+      return retval == 1 ? c : -1;
+    }
     /*check if there are input events*/
-	WaitForSingleObject(stdin, time);
-	if(!GetNumberOfConsoleInputEvents(stdin,&retval))
+	if(!GetNumberOfConsoleInputEvents(in,&retval))
 	{
 		printf("getch2: can't get number of input events: %i\n",GetLastError());
 		return -1;
 	}
     if(retval<=0)return -1;
-    
-	/*read all events*/	
-	if(!ReadConsoleInput(stdin,eventbuffer,128,&retval))
+
+	/*read all events*/
+	if(!ReadConsoleInput(in,eventbuffer,128,&retval))
 	{
 		printf("getch: can't read input events\n");
 		return -1;
 	}
- 
+
 	/*filter out keyevents*/
-    for (i = 0; i < retval; i++) 
+    for (i = 0; i < retval; i++)
     {
-		switch(eventbuffer[i].EventType) 
+		switch(eventbuffer[i].EventType)
 		{
 			case KEY_EVENT:
 				/*only a pressed key is interresting for us*/
@@ -111,35 +128,42 @@ int getch2(int time){
 					case VK_DOWN:
 						return KEY_DOWN;
                     case VK_SHIFT:
-                        continue;              
+                        continue;
 					}
 					/*check for function keys*/
         			if(0x87 >= eventbuffer[i].Event.KeyEvent.wVirtualKeyCode && eventbuffer[i].Event.KeyEvent.wVirtualKeyCode >= 0x70)
-						return (KEY_F + 1 + eventbuffer[i].Event.KeyEvent.wVirtualKeyCode - 0x70);
- 						
+						return KEY_F + 1 + eventbuffer[i].Event.KeyEvent.wVirtualKeyCode - 0x70;
+
 					/*only characters should be remaining*/
-					//printf("getch2: YOU PRESSED \"%c\" \n",eventbuffer[i].Event.KeyEvent.uChar.AsciiChar); 
+					//printf("getch2: YOU PRESSED \"%c\" \n",eventbuffer[i].Event.KeyEvent.uChar.AsciiChar);
 				    return eventbuffer[i].Event.KeyEvent.uChar.AsciiChar;
 				}
-				break; 
-			
+				break;
+
 			case MOUSE_EVENT:
-            case WINDOW_BUFFER_SIZE_EVENT: 
-            case FOCUS_EVENT:  
+            case WINDOW_BUFFER_SIZE_EVENT:
+            case FOCUS_EVENT:
             case MENU_EVENT:
             default:
-				//printf("getch2: unsupported event type"); 
-			    break; 
-        } 
+				//printf("getch2: unsupported event type");
+			    break;
+        }
     }
 	return -1;
 }
 
+void getch2(void)
+{
+    int r = getch2_internal();
+    if (r >= 0)
+	mplayer_put_key(r);
+}
 
-void getch2_enable(){
+void getch2_enable(void)
+{
 	DWORD retval;
-    stdin = GetStdHandle(STD_INPUT_HANDLE);
-   	if(!GetNumberOfConsoleInputEvents(stdin,&retval))
+    in = GetStdHandle(STD_INPUT_HANDLE);
+   	if(!GetNumberOfConsoleInputEvents(in,&retval))
 	{
 		printf("getch2: %i can't get number of input events  [disabling console input]\n",GetLastError());
 		getch2_status = 0;
@@ -147,12 +171,13 @@ void getch2_enable(){
     else getch2_status=1;
 }
 
-void getch2_disable(){
+void getch2_disable(void)
+{
     if(!getch2_status) return; // already disabled / never enabled
     getch2_status=0;
 }
 
-#ifdef USE_ICONV
+#ifdef CONFIG_ICONV
 static const struct {
     unsigned cp;
     char* alias;
@@ -173,10 +198,10 @@ static const struct {
     { 65001, "UTF-8" },
     { 0, NULL }
 };
- 
+
 char* get_term_charset(void)
 {
-    static char codepage[10];
+    char codepage[10];
     unsigned i, cpno = GetConsoleOutputCP();
     if (!cpno)
         cpno = GetACP();
@@ -185,9 +210,9 @@ char* get_term_charset(void)
 
     for (i = 0; cp_alias[i].cp; i++)
         if (cpno == cp_alias[i].cp)
-            return cp_alias[i].alias;
+            return strdup(cp_alias[i].alias);
 
     snprintf(codepage, sizeof(codepage), "CP%u", cpno);
-    return codepage;
+    return strdup(codepage);
 }
 #endif

@@ -16,12 +16,14 @@ Also read the man page to learn how to use MPlayer.
 
 
 Requirements:
+- POSIX system: You need a POSIX-compatible shell and POSIX-compatible system
+  tools like grep, sed, awk, etc. in your path.
 - You need a working development environment that can compile programs.
   On popular Linux distributions, this means having the glibc development
   package(s) installed.
 - To compile MPlayer with X11 support, you need to have the X Window System
   development packages (like for XFree86 or X.Org) installed.
-- For the GUI you need the libpng and GTK development packages.
+- For the GUI you need the GTK development packages.
 
 
 Before you start...
@@ -41,6 +43,16 @@ and a number of different skins for the GUI are available from the download
 section of our homepage at
 
   http://www.mplayerhq.hu/dload.html
+
+MPlayer has builtin support for the most common audio and video formats. For a
+few formats no native decoder exists and external binary codecs are required
+to handle them. Examples are newer RealVideo variants and a variety of rare
+formats. However, binary codecs are NOT required in this day and age, they are
+strictly optional.
+
+Please note that binary codecs only work on the processor architecture they
+were compiled for. Choose the correct package for your processor. No other
+package is necessary.
 
 The GUI needs at least one skin and codec packages add support for some more
 video and audio formats. MPlayer does not come with any of these by default,
@@ -63,13 +75,6 @@ from within that directory.
 _______________________________
 STEP1: Installing Binary Codecs
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-MPlayer has builtin support for the most common audio and video formats. For a
-few formats no native decoder exists and external binary codecs are required
-to handle them, for example newer RealVideo variants and a variety of uncommon
-formats. This step is not mandatory, but recommended for getting MPlayer to
-play a broader range of formats. Please note that binary codecs only work on
-the processor architecture they were compiled for.
 
 Unpack the codecs archives and put the contents in a directory where MPlayer
 will find them. The default directory is /usr/local/lib/codecs/ (it used to be
@@ -100,7 +105,7 @@ to see the available options and select what you need.
 
 The configure script prints a summary of enabled and disabled options. If you
 have something installed that configure fails to detect, check the file
-configure.log for errors and reasons for the failure. Repeat this step until
+config.log for errors and reasons for the failure. Repeat this step until
 you are satisfied with the enabled feature set.
 
 
@@ -128,22 +133,19 @@ Sometimes running 'ldconfig' is enough to fix the problem.
 NOTE: If you run Debian you can configure, compile and build a proper Debian
 .deb package with only one command:
 
-  fakeroot debian/rules binary
+  debian/daily-build.sh -b
 
-If you want to pass custom options to configure, you can set up the
-DEB_BUILD_OPTIONS environment variable. For instance, if you want GUI
-and OSD menu support you would use:
+You can also pass some variables to the Makefile. For example, if you
+want to compile with gcc 3.4 even if it's not the default compiler, or
+pass extra configure options you would use:
 
-  DEB_BUILD_OPTIONS="--enable-gui --enable-menu" fakeroot debian/rules binary
+  CC=gcc-3.4 DEB_EXTRA_CONFIGURE_FLAGS="--disable-libdvdcss-internal" debian/daily-build.sh -b
 
-You can also pass some variables to the Makefile. For example, if you want
-to compile with gcc 3.4 even if it's not the default compiler:
-
-  CC=gcc-3.4 DEB_BUILD_OPTIONS="--enable-gui" fakeroot debian/rules binary
 
 To clean up the source tree run the following command:
 
   fakeroot debian/rules clean
+  rm debian/changelog
 
 ______________________________________
 STEP4: Choose an onscreen display font

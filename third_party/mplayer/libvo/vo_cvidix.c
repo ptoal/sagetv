@@ -1,12 +1,26 @@
 /*
-    VIDIX accelerated overlay on (black) background
-    
-    should work on any OS
-    
-    (C) Sascha Sommer
-    
- 
-*/
+ * VIDIX-accelerated overlay on (black) background
+ *
+ * should work on any OS
+ *
+ * copyright (C) 2003 Sascha Sommer
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,6 +30,7 @@
 
 #include "config.h"
 #include "video_out.h"
+#define NO_DRAW_FRAME
 #include "video_out_internal.h"
 #include "aspect.h"
 #include "geometry.h"
@@ -23,10 +38,10 @@
 #include "mp_msg.h"
 
 #include "vosub_vidix.h"
-#include "vidix/vidixlib.h"
+#include "vidix/vidix.h"
 
 
-static vo_info_t info = {
+static const vo_info_t info = {
     "console VIDIX",
     "cvidix",
     "Sascha Sommer",
@@ -34,8 +49,6 @@ static vo_info_t info = {
 };
 
 LIBVO_EXTERN(cvidix)
-
-#define UNUSED(x) ((void)(x)) /* Removes warning about unused arguments */
 
 /* VIDIX related */
 static char *vidix_name;
@@ -47,7 +60,7 @@ static vidix_grkey_t gr_key;
 
 static uint32_t setup_vidix(void){
   int x=vo_dx,y=vo_dy;
-  aspect(&vo_dwidth,&vo_dheight,vo_fs ? A_ZOOM : A_NOZOOM);  
+  aspect(&vo_dwidth,&vo_dheight,vo_fs ? A_ZOOM : A_NOZOOM);
   if(vo_fs || center){
     if(vo_dwidth <= vo_screenwidth)x = (vo_screenwidth - vo_dwidth)/2;
     else x=0;
@@ -81,10 +94,15 @@ static int config(uint32_t width, uint32_t height, uint32_t d_width,uint32_t d_h
     if(vo_screenwidth && vo_screenheight){
       if(!vo_geometry)center=1;
     }
-    else mp_msg(MSGT_VO, MSGL_WARN, "vo_cvidix: warn: screenwidth and height not set assuming 640x480\n");
   }
-  if(!vo_screenwidth)vo_screenwidth=640;
-  if(!vo_screenheight)vo_screenheight=480;
+  if(!vo_screenwidth){
+    mp_msg(MSGT_VO, MSGL_WARN, "vo_cvidix: Screen width not set (see -screenw), assuming 640 pixels.\n");
+    vo_screenwidth = 640;
+    }
+  if(!vo_screenheight){
+    mp_msg(MSGT_VO, MSGL_WARN, "vo_cvidix: Screen height not set (see -screenh), assuming 480 pixels.\n");
+    vo_screenheight = 480;
+  }
   swidth = width;
   sheight = height;
   sformat = format;
@@ -104,7 +122,7 @@ static int config(uint32_t width, uint32_t height, uint32_t d_width,uint32_t d_h
 static void check_events(void){
 }
 
-/* draw_osd, flip_page, draw_slice, draw_frame should be
+/* draw_osd, flip_page, draw_slice should be
    overwritten with vidix functions (vosub_vidix.c) */
 static void draw_osd(void){
   mp_msg(MSGT_VO, MSGL_FATAL, "vo_cvidix: error: didn't use vidix draw_osd!\n");
@@ -117,33 +135,19 @@ static void flip_page(void){
 }
 
 static int draw_slice(uint8_t *src[], int stride[],int w, int h, int x, int y){
-  UNUSED(src);
-  UNUSED(stride);
-  UNUSED(w);
-  UNUSED(h);
-  UNUSED(x);
-  UNUSED(y);
   mp_msg(MSGT_VO, MSGL_FATAL, "vo_cvidix: error: didn't use vidix draw_slice!\n");
   return -1;
 }
 
-static int draw_frame(uint8_t *src[]){
-  UNUSED(src);
-  mp_msg(MSGT_VO, MSGL_FATAL, "vo_cvidix: error: didn't use vidix draw_frame!\n");
-  return -1;
-}
-
 static int query_format(uint32_t format){
-  return(vidix_query_fourcc(format));
+  return vidix_query_fourcc(format);
 }
 
 static void uninit(void){
   if(!vo_config_count) return;
   vidix_term();
-  if(vidix_name){
-    free(vidix_name);
-	vidix_name = NULL;
-  }
+  free(vidix_name);
+  vidix_name = NULL;
 }
 
 static int preinit(const char *arg){
@@ -156,7 +160,7 @@ static int preinit(const char *arg){
   return 0;
 }
 
-static int control(uint32_t request, void *data, ...){
+static int control(uint32_t request, void *data){
   switch (request) {
   case VOCTRL_QUERY_FORMAT:
     return query_format(*((uint32_t*)data));
@@ -164,25 +168,7 @@ static int control(uint32_t request, void *data, ...){
     if(vo_fs)vo_fs=0;
     else vo_fs=1;
     setup_vidix();
-    return VO_TRUE;      
-  case VOCTRL_SET_EQUALIZER:
-    {
-      va_list ap;
-      int value;
-      va_start(ap, data);
-      value = va_arg(ap, int);
-      va_end(ap);
-      return vidix_control(request, data, value);
-    }
-  case VOCTRL_GET_EQUALIZER:
-    {
-      va_list ap;
-      int *value;
-      va_start(ap, data);
-      value = va_arg(ap, int *);
-      va_end(ap);
-      return vidix_control(request, data, value);
-    }
-  }  
+    return VO_TRUE;
+  }
   return vidix_control(request, data);
 }

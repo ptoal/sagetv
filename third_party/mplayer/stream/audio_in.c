@@ -1,3 +1,21 @@
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -23,14 +41,14 @@ int audio_in_init(audio_in_t *ai, int type)
     ai->samplesize = -1;
 
     switch (ai->type) {
-#if defined(HAVE_ALSA9) || defined(HAVE_ALSA1X)
+#ifdef CONFIG_ALSA
     case AUDIO_IN_ALSA:
 	ai->alsa.handle = NULL;
 	ai->alsa.log = NULL;
 	ai->alsa.device = strdup("default");
 	return 0;
 #endif
-#ifdef USE_OSS_AUDIO
+#ifdef CONFIG_OSS_AUDIO
     case AUDIO_IN_OSS:
 	ai->oss.audio_fd = -1;
 	ai->oss.device = strdup("/dev/dsp");
@@ -43,15 +61,15 @@ int audio_in_init(audio_in_t *ai, int type)
 
 int audio_in_setup(audio_in_t *ai)
 {
-    
+
     switch (ai->type) {
-#if defined(HAVE_ALSA9) || defined(HAVE_ALSA1X)
+#ifdef CONFIG_ALSA
     case AUDIO_IN_ALSA:
 	if (ai_alsa_init(ai) < 0) return -1;
 	ai->setup = 1;
 	return 0;
 #endif
-#ifdef USE_OSS_AUDIO
+#ifdef CONFIG_OSS_AUDIO
     case AUDIO_IN_OSS:
 	if (ai_oss_init(ai) < 0) return -1;
 	ai->setup = 1;
@@ -65,14 +83,14 @@ int audio_in_setup(audio_in_t *ai)
 int audio_in_set_samplerate(audio_in_t *ai, int rate)
 {
     switch (ai->type) {
-#if defined(HAVE_ALSA9) || defined(HAVE_ALSA1X)
+#ifdef CONFIG_ALSA
     case AUDIO_IN_ALSA:
 	ai->req_samplerate = rate;
 	if (!ai->setup) return 0;
 	if (ai_alsa_setup(ai) < 0) return -1;
 	return ai->samplerate;
 #endif
-#ifdef USE_OSS_AUDIO
+#ifdef CONFIG_OSS_AUDIO
     case AUDIO_IN_OSS:
 	ai->req_samplerate = rate;
 	if (!ai->setup) return 0;
@@ -87,14 +105,14 @@ int audio_in_set_samplerate(audio_in_t *ai, int rate)
 int audio_in_set_channels(audio_in_t *ai, int channels)
 {
     switch (ai->type) {
-#if defined(HAVE_ALSA9) || defined(HAVE_ALSA1X)
+#ifdef CONFIG_ALSA
     case AUDIO_IN_ALSA:
 	ai->req_channels = channels;
 	if (!ai->setup) return 0;
 	if (ai_alsa_setup(ai) < 0) return -1;
 	return ai->channels;
 #endif
-#ifdef USE_OSS_AUDIO
+#ifdef CONFIG_OSS_AUDIO
     case AUDIO_IN_OSS:
 	ai->req_channels = channels;
 	if (!ai->setup) return 0;
@@ -108,14 +126,14 @@ int audio_in_set_channels(audio_in_t *ai, int channels)
 
 int audio_in_set_device(audio_in_t *ai, char *device)
 {
-#if defined(HAVE_ALSA9) || defined(HAVE_ALSA1X)
+#ifdef CONFIG_ALSA
     int i;
 #endif
     if (ai->setup) return -1;
     switch (ai->type) {
-#if defined(HAVE_ALSA9) || defined(HAVE_ALSA1X)
+#ifdef CONFIG_ALSA
     case AUDIO_IN_ALSA:
-	if (ai->alsa.device) free(ai->alsa.device);
+	free(ai->alsa.device);
 	ai->alsa.device = strdup(device);
 	/* mplayer cannot handle colons in arguments */
 	for (i = 0; i < (int)strlen(ai->alsa.device); i++) {
@@ -123,9 +141,9 @@ int audio_in_set_device(audio_in_t *ai, char *device)
 	}
 	return 0;
 #endif
-#ifdef USE_OSS_AUDIO
+#ifdef CONFIG_OSS_AUDIO
     case AUDIO_IN_OSS:
-	if (ai->oss.device) free(ai->oss.device);
+	free(ai->oss.device);
 	ai->oss.device = strdup(device);
 	return 0;
 #endif
@@ -138,7 +156,7 @@ int audio_in_uninit(audio_in_t *ai)
 {
     if (ai->setup) {
 	switch (ai->type) {
-#if defined(HAVE_ALSA9) || defined(HAVE_ALSA1X)
+#ifdef CONFIG_ALSA
 	case AUDIO_IN_ALSA:
 	    if (ai->alsa.log)
 		snd_output_close(ai->alsa.log);
@@ -148,7 +166,7 @@ int audio_in_uninit(audio_in_t *ai)
 	    ai->setup = 0;
 	    return 0;
 #endif
-#ifdef USE_OSS_AUDIO
+#ifdef CONFIG_OSS_AUDIO
 	case AUDIO_IN_OSS:
 	    close(ai->oss.audio_fd);
 	    ai->setup = 0;
@@ -162,11 +180,11 @@ int audio_in_uninit(audio_in_t *ai)
 int audio_in_start_capture(audio_in_t *ai)
 {
     switch (ai->type) {
-#if defined(HAVE_ALSA9) || defined(HAVE_ALSA1X)
+#ifdef CONFIG_ALSA
     case AUDIO_IN_ALSA:
 	return snd_pcm_start(ai->alsa.handle);
 #endif
-#ifdef USE_OSS_AUDIO
+#ifdef CONFIG_OSS_AUDIO
     case AUDIO_IN_OSS:
 	return 0;
 #endif
@@ -178,9 +196,9 @@ int audio_in_start_capture(audio_in_t *ai)
 int audio_in_read_chunk(audio_in_t *ai, unsigned char *buffer)
 {
     int ret;
-    
+
     switch (ai->type) {
-#if defined(HAVE_ALSA9) || defined(HAVE_ALSA1X)
+#ifdef CONFIG_ALSA
     case AUDIO_IN_ALSA:
 	ret = snd_pcm_readi(ai->alsa.handle, buffer, ai->alsa.chunk_size);
 	if (ret != ai->alsa.chunk_size) {
@@ -200,7 +218,7 @@ int audio_in_read_chunk(audio_in_t *ai, unsigned char *buffer)
 	}
 	return ret;
 #endif
-#ifdef USE_OSS_AUDIO
+#ifdef CONFIG_OSS_AUDIO
     case AUDIO_IN_OSS:
 	ret = read(ai->oss.audio_fd, buffer, ai->blocksize);
 	if (ret != ai->blocksize) {

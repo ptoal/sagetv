@@ -1,15 +1,34 @@
-#include "config.h"
-/* Experimental audio filter that mixes 5.1 and 5.1 with matrix
-   encoded rear channels into headphone signal using FIR filtering
-   with HRTF.
-*/
+/*
+ * Experimental audio filter that mixes 5.1 and 5.1 with matrix
+ * encoded rear channels into headphone signal using FIR filtering
+ * with HRTF.
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
 //#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
 
 #include <math.h>
+#include <libavutil/common.h>
 
+#include "mp_msg.h"
 #include "af.h"
 #include "dsp.h"
 
@@ -21,7 +40,7 @@ typedef struct af_hrtf_s {
     int dlbuflen, hrflen, basslen;
     /* L, C, R, Ls, Rs channels */
     float *lf, *rf, *lr, *rr, *cf, *cr;
-    float *cf_ir, *af_ir, *of_ir, *ar_ir, *or_ir, *cr_ir;
+    const float *cf_ir, *af_ir, *of_ir, *ar_ir, *or_ir, *cr_ir;
     int cf_o, af_o, of_o, ar_o, or_o, cr_o;
     /* Bass */
     float *ba_l, *ba_r;
@@ -58,9 +77,9 @@ typedef struct af_hrtf_s {
  *    nk:	length of the convolution kernel
  *    sx:	ring buffer
  *    sk:	convolution kernel
- *    offset:	offset on the ring buffer, can be 
+ *    offset:	offset on the ring buffer, can be
  */
-static float conv(const int nx, const int nk, float *sx, float *sk,
+static float conv(const int nx, const int nk, const float *sx, const float *sk,
 		  const int offset)
 {
     /* k = reminder of offset / nx */
@@ -74,7 +93,7 @@ static float conv(const int nx, const int nk, float *sx, float *sk,
 }
 
 /* Detect when the impulse response starts (significantly) */
-static int pulse_detect(float *sx)
+static int pulse_detect(const float *sx)
 {
     /* nmax must be the reference impulse response length (128) minus
        s->hrflen */
@@ -259,8 +278,13 @@ static inline void update_ch(af_hrtf_t *s, short *in, const int k)
     }
 
     /* We need to update the bass compensation delay line, too. */
-    s->ba_l[k] = in[0] + in[4] + in[2];
-    s->ba_r[k] = in[4] + in[1] + in[3];
+    // TODO: should this use lf/cf/rf etc. instead?
+    s->ba_l[k] = in[0];
+    s->ba_r[k] = in[1];
+    if (s->decode_mode == HRTF_MIX_51) {
+        s->ba_l[k] += in[4] + in[2];
+        s->ba_r[k] += in[4] + in[3];
+    }
 }
 
 /* Initialization and runtime control */
@@ -276,7 +300,7 @@ static int control(struct af_instance_s *af, int cmd, void* arg)
 	if(af->data->rate != 48000) {
 	    // automatic samplerate adjustment in the filter chain
 	    // is not yet supported.
-	    af_msg(AF_MSG_ERROR,
+	    mp_msg(MSGT_AFILTER, MSGL_ERR,
 		   "[hrtf] ERROR: Sampling rate is not 48000 Hz (%d)!\n",
 		   af->data->rate);
 	    return AF_ERROR;
@@ -294,8 +318,7 @@ static int control(struct af_instance_s *af, int cmd, void* arg)
 	af->data->format = AF_FORMAT_S16_NE;
 	af->data->bps    = 2;
 	test_output_res = af_test_output(af, (af_data_t*)arg);
-	af->mul.n = 2;
-	af->mul.d = af->data->nch;
+	af->mul = 2.0 / af->data->nch;
 	// after testing input set the real output format
 	af->data->nch = 2;
 	s->print_flag = 1;
@@ -315,14 +338,14 @@ static int control(struct af_instance_s *af, int cmd, void* arg)
 	    s->matrix_mode = 0;
 	    break;
 	default:
-	    af_msg(AF_MSG_ERROR,
+	    mp_msg(MSGT_AFILTER, MSGL_ERR,
 		   "[hrtf] Mode is neither 'm', 's', nor '0' (%c).\n",
 		   mode);
 	    return AF_ERROR;
 	}
 	s->print_flag = 1;
 	return AF_OK;
-    }    
+    }
 
     return AF_UNKNOWN;
 }
@@ -333,32 +356,19 @@ static void uninit(struct af_instance_s *af)
     if(af->setup) {
 	af_hrtf_t *s = af->setup;
 
-	if(s->lf)
-	    free(s->lf);
-	if(s->rf)
-	    free(s->rf);
-	if(s->lr)
-	    free(s->lr);
-	if(s->rr)
-	    free(s->rr);
-	if(s->cf)
-	    free(s->cf);
-	if(s->cr)
-	    free(s->cr);
-	if(s->ba_l)
-	    free(s->ba_l);
-	if(s->ba_r)
-	    free(s->ba_r);
-	if(s->ba_ir)
-	    free(s->ba_ir);
-	if(s->fwrbuf_l)
-	   free(s->fwrbuf_l);
-	if(s->fwrbuf_r)
-	   free(s->fwrbuf_r);
-	if(s->fwrbuf_lr)
-	   free(s->fwrbuf_lr);
-	if(s->fwrbuf_rr)
-	   free(s->fwrbuf_rr);
+	free(s->lf);
+	free(s->rf);
+	free(s->lr);
+	free(s->rr);
+	free(s->cf);
+	free(s->cr);
+	free(s->ba_l);
+	free(s->ba_r);
+	free(s->ba_ir);
+	free(s->fwrbuf_l);
+	free(s->fwrbuf_r);
+	free(s->fwrbuf_lr);
+	free(s->fwrbuf_rr);
 	free(af->setup);
     }
     if(af->data)
@@ -393,29 +403,29 @@ static af_data_t* play(struct af_instance_s *af, af_data_t *data)
 	s->print_flag = 0;
 	switch (s->decode_mode) {
 	case HRTF_MIX_51:
-	  af_msg(AF_MSG_INFO,
+	  mp_msg(MSGT_AFILTER, MSGL_INFO,
 		 "[hrtf] Using HRTF to mix %s discrete surround into "
 		 "L, R channels\n", s->matrix_mode ? "5+1" : "5");
 	  break;
 	case HRTF_MIX_STEREO:
-	  af_msg(AF_MSG_INFO,
+	  mp_msg(MSGT_AFILTER, MSGL_INFO,
 		 "[hrtf] Using HRTF to mix stereo into "
 		 "L, R channels\n");
 	  break;
 	case HRTF_MIX_MATRIX2CH:
-	  af_msg(AF_MSG_INFO,
+	  mp_msg(MSGT_AFILTER, MSGL_INFO,
 		 "[hrtf] Using active matrix to decode 2 channel "
 		 "input, HRTF to mix %s matrix surround into "
 		 "L, R channels\n", "3/2");
 	  break;
 	default:
-	  af_msg(AF_MSG_WARN,
+	  mp_msg(MSGT_AFILTER, MSGL_WARN,
 		 "[hrtf] bogus decode_mode: %d\n", s->decode_mode);
 	  break;
 	}
-	
+
        if(s->matrix_mode)
-	  af_msg(AF_MSG_INFO,
+	  mp_msg(MSGT_AFILTER, MSGL_INFO,
 		 "[hrtf] Using active matrix to decode rear center "
 		 "channel\n");
     }
@@ -423,20 +433,20 @@ static af_data_t* play(struct af_instance_s *af, af_data_t *data)
     out = af->data->audio;
 
     /* MPlayer's 5 channel layout (notation for the variable):
-     * 
+     *
      * 0: L (LF), 1: R (RF), 2: Ls (LR), 3: Rs (RR), 4: C (CF), matrix
      * encoded: Cs (CR)
-     * 
+     *
      * or: L = left, C = center, R = right, F = front, R = rear
-     * 
+     *
      * Filter notation:
-     * 
+     *
      *      CF
      * OF        AF
      *      Ear->
      * OR        AR
      *      CR
-     * 
+     *
      * or: C = center, A = same side, O = opposite, F = front, R = rear
      */
 
@@ -538,16 +548,16 @@ static af_data_t* play(struct af_instance_s *af, af_data_t *data)
 	      perception.  Note: Too much will destroy the acoustic space
 	      and may even result in headaches. */
 	   diff = STEXPAND2 * (left - right);
-	   out[0] = (int16_t)(left  + diff);
-	   out[1] = (int16_t)(right - diff);
+	   out[0] = av_clip_int16(left  + diff);
+	   out[1] = av_clip_int16(right - diff);
 	   break;
 	case HRTF_MIX_MATRIX2CH:
 	   /* Do attempt any stereo expansion with matrix encoded
 	      sources.  The L, R channels are already stereo expanded
 	      by the steering, any further stereo expansion will sound
 	      very unnatural. */
-	   out[0] = (int16_t)left;
-	   out[1] = (int16_t)right;
+	   out[0] = av_clip_int16(left);
+	   out[1] = av_clip_int16(right);
 	   break;
 	}
 
@@ -561,7 +571,7 @@ static af_data_t* play(struct af_instance_s *af, af_data_t *data)
 
     /* Set output data */
     data->audio = af->data->audio;
-    data->len   = (data->len * af->mul.n) / af->mul.d;
+    data->len   = data->len / data->nch * 2;
     data->nch   = 2;
 
     return data;
@@ -598,8 +608,7 @@ static int af_open(af_instance_t* af)
     af->control = control;
     af->uninit = uninit;
     af->play = play;
-    af->mul.n = 1;
-    af->mul.d = 1;
+    af->mul = 1;
     af->data = calloc(1, sizeof(af_data_t));
     af->setup = calloc(1, sizeof(af_hrtf_t));
     if((af->data == NULL) || (af->setup == NULL))
@@ -621,7 +630,7 @@ static int af_open(af_instance_t* af)
     s->print_flag = 1;
 
     if (allocate(s) != 0) {
- 	af_msg(AF_MSG_ERROR, "[hrtf] Memory allocation error.\n");
+ 	mp_msg(MSGT_AFILTER, MSGL_ERR, "[hrtf] Memory allocation error.\n");
 	return AF_ERROR;
     }
 
@@ -640,19 +649,19 @@ static int af_open(af_instance_t* af)
     s->cr_ir = cr_filt + (s->cr_o = pulse_detect(cr_filt));
 
     if((s->ba_ir = malloc(s->basslen * sizeof(float))) == NULL) {
- 	af_msg(AF_MSG_ERROR, "[hrtf] Memory allocation error.\n");
+ 	mp_msg(MSGT_AFILTER, MSGL_ERR, "[hrtf] Memory allocation error.\n");
 	return AF_ERROR;
     }
     fc = 2.0 * BASSFILTFREQ / (float)af->data->rate;
     if(af_filter_design_fir(s->basslen, s->ba_ir, &fc, LP | KAISER, 4 * M_PI) ==
        -1) {
-	af_msg(AF_MSG_ERROR, "[hrtf] Unable to design low-pass "
+	mp_msg(MSGT_AFILTER, MSGL_ERR, "[hrtf] Unable to design low-pass "
 	       "filter.\n");
 	return AF_ERROR;
     }
     for(i = 0; i < s->basslen; i++)
 	s->ba_ir[i] *= BASSGAIN;
-    
+
     return AF_OK;
 }
 

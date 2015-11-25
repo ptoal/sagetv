@@ -1,22 +1,23 @@
-/**
-    Driver for 3DLabs GLINT R3 and Permedia3 chips.
-
-    Copyright (C) 2002  Måns Rullgård
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
-**/
+/*
+ * VIDIX driver for 3DLabs Glint R3 and Permedia 3 chipsets.
+ * Copyright (C) 2002 MÃ¥ns RullgÃ¥rd
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <errno.h>
 #include <stdio.h>
@@ -25,33 +26,33 @@
 #include <inttypes.h>
 #include <unistd.h>
 
+#include "config.h"
 #include "vidix.h"
-#include "vidixlib.h"
 #include "fourcc.h"
-#include "../libdha/libdha.h"
-#include "../libdha/pci_ids.h"
-#include "../libdha/pci_names.h"
-#include "../config.h"
+#include "dha.h"
+#include "pci_ids.h"
+#include "pci_names.h"
+#include "mp_msg.h"
 
 #include "pm3_regs.h"
 
 #if 0
-#define TRACE_ENTER() fprintf(stderr, "%s: enter\n", __FUNCTION__)
-#define TRACE_EXIT() fprintf(stderr, "%s: exit\n", __FUNCTION__)
+#define TRACE_ENTER() mp_msg(MSGT_VO, MSGL_DBG2, "[pm3] %s: enter\n", __FUNCTION__)
+#define TRACE_EXIT() mp_msg(MSGT_VO, MSGL_DBG2, "[pm3] %s: exit\n", __FUNCTION__)
 #else
 #define TRACE_ENTER()
 #define TRACE_EXIT()
 #endif
 
-pciinfo_t pci_info;
+static pciinfo_t pci_info;
 
 void *pm3_reg_base;
-void *pm3_mem;
+static void *pm3_mem;
 
 static vidix_capability_t pm3_cap =
 {
     "3DLabs GLINT R3/Permedia3 driver",
-    "Måns Rullgård <mru@users.sf.net>",
+    "MÃ¥ns RullgÃ¥rd <mru@users.sf.net>",
     TYPE_OUTPUT,
     { 0, 0, 0, 0 },
     2048,
@@ -65,7 +66,7 @@ static vidix_capability_t pm3_cap =
     { 0, 0, 0, 0 }
 };
 
-static unsigned short pm3_card_ids[] = 
+static unsigned short pm3_card_ids[] =
 {
     DEVICE_3DLABS_GLINT_R3
 };
@@ -89,7 +90,7 @@ static int pm3_probe(int verbose, int force)
     err = pci_scan(lst,&num_pci);
     if(err)
     {
-	printf("[pm3] Error occurred during pci scan: %s\n",strerror(err));
+	mp_msg(MSGT_VO, MSGL_STATUS, "[pm3] Error occurred during pci scan: %s\n",strerror(err));
 	return err;
     }
     else
@@ -106,12 +107,14 @@ static int pm3_probe(int verbose, int force)
 		    continue;
 		dname = pci_device_name(VENDOR_3DLABS, lst[i].device);
 		dname = dname ? dname : "Unknown chip";
-		printf("[pm3] Found chip: %s\n", dname);
+		mp_msg(MSGT_VO, MSGL_STATUS, "[pm3] Found chip: %s\n", dname);
+#if 0
 		if ((lst[i].command & PCI_COMMAND_IO) == 0)
 		{
-			printf("[pm3] Device is disabled, ignoring\n");
+			mp_msg(MSGT_VO, MSGL_STATUS, "[pm3] Device is disabled, ignoring\n");
 			continue;
 		}
+#endif
 		pm3_cap.device_id = lst[i].device;
 		err = 0;
 		memcpy(&pci_info, &lst[i], sizeof(pciinfo_t));
@@ -119,14 +122,14 @@ static int pm3_probe(int verbose, int force)
 	    }
 	}
     }
-    if(err && verbose) printf("[pm3] Can't find chip\n");
+    if(err && verbose) mp_msg(MSGT_VO, MSGL_STATUS, "[pm3] Can't find chip\n");
     return err;
 }
 
 #define PRINT_REG(reg)							\
 {									\
     long _foo = READ_REG(reg);						\
-    printf("[pm3] " #reg " (%x) = %#lx (%li)\n", reg, _foo, _foo);	\
+    mp_msg(MSGT_VO, MSGL_STATUS, "[pm3] " #reg " (%x) = %#lx (%li)\n", reg, _foo, _foo);	\
 }
 
 static int pm3_init(void)
@@ -163,19 +166,14 @@ static int pm3_query_fourcc(vidix_fourcc_t *to)
 {
     if(is_supported_fourcc(to->fourcc))
     {
-	to->depth = VID_DEPTH_1BPP | VID_DEPTH_2BPP |
-		    VID_DEPTH_4BPP | VID_DEPTH_8BPP |
-		    VID_DEPTH_12BPP| VID_DEPTH_15BPP|
-		    VID_DEPTH_16BPP| VID_DEPTH_24BPP|
-		    VID_DEPTH_32BPP;
+	to->depth = VID_DEPTH_ALL;
 	to->flags = VID_CAP_EXPAND | VID_CAP_SHRINK | VID_CAP_COLORKEY;
 	return 0;
     }
-    else  to->depth = to->flags = 0;
     return ENOSYS;
 }
 
-#define FORMAT_RGB8888	PM3VideoOverlayMode_COLORFORMAT_RGB8888 
+#define FORMAT_RGB8888	PM3VideoOverlayMode_COLORFORMAT_RGB8888
 #define FORMAT_RGB4444	PM3VideoOverlayMode_COLORFORMAT_RGB4444
 #define FORMAT_RGB5551	PM3VideoOverlayMode_COLORFORMAT_RGB5551
 #define FORMAT_RGB565	PM3VideoOverlayMode_COLORFORMAT_RGB565
@@ -308,9 +306,9 @@ static int pm3_config_playback(vidix_playback_t *info)
     RAMDAC_SET_REG(PM3RD_VideoOverlayXEndLow, (info->dest.x+drw_w) & 0xff);
     RAMDAC_SET_REG(PM3RD_VideoOverlayXEndHigh,
 		   ((info->dest.x+drw_w) & 0xf00)>>8);
-    RAMDAC_SET_REG(PM3RD_VideoOverlayYStartLow, (info->dest.y & 0xff)); 
+    RAMDAC_SET_REG(PM3RD_VideoOverlayYStartLow, (info->dest.y & 0xff));
     RAMDAC_SET_REG(PM3RD_VideoOverlayYStartHigh, (info->dest.y & 0xf00)>>8);
-    RAMDAC_SET_REG(PM3RD_VideoOverlayYEndLow, (info->dest.y+drw_h) & 0xff); 
+    RAMDAC_SET_REG(PM3RD_VideoOverlayYEndLow, (info->dest.y+drw_h) & 0xff);
     RAMDAC_SET_REG(PM3RD_VideoOverlayYEndHigh,
 		   ((info->dest.y+drw_h) & 0xf00)>>8);
 
@@ -325,7 +323,7 @@ static int pm3_config_playback(vidix_playback_t *info)
 	PM3VideoOverlayMode_BUFFERSYNC_MANUAL |
 	PM3VideoOverlayMode_FLIP_VIDEO;
 
-    overlay_control = 
+    overlay_control =
 	PM3RD_VideoOverlayControl_KEY_COLOR |
 	PM3RD_VideoOverlayControl_MODE_MAINKEY |
 	PM3RD_VideoOverlayControl_DIRECTCOLOR_ENABLED;

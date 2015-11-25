@@ -1,40 +1,35 @@
 /*
-    Driver for CyberBlade/i1 - Version 0.1.4
+ * VIDIX driver for VIA Cyberblade/i1 chipsets.
+ * Brightness/Contrast controls disabled for the time being - they were
+ * seriously degrading picture quality, especially with TV-Out.
+ *
+ * Copyright (C) 2002 Alastair M. Robinson
+ * http://www.blackfiveservices.co.uk/EPIAVidix.shtml
+ * based on Permedia 3 driver by MÃ¥ns RullgÃ¥rd
+ * thanks to Gilles Frattini for bugfixes
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-    Copyright (C) 2002 by Alastair M. Robinson.
-    Official homepage: http://www.blackfiveservices.co.uk/EPIAVidix.shtml
-
-    Based on Permedia 3 driver by Måns Rullgård
-
-    Thanks to Gilles Frattini for bugfixes
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
-
-    Changes:
-    18/01/03
-      MMIO is no longer used, sidestepping cache issues on EPIA-800
-      TV-Out modes are now better supported - this should be the end
-        of the magenta stripes :)
-      Brightness/Contrast controls disabled for the time being - they were
-        seriously degrading picture quality, especially with TV-Out.
-
-    To Do:
-    Implement Hue/Saturation controls
-    Support / Test multiple frames
-    Test colour-key code more extensively
-*/
+/* To Do:
+ *   Implement Hue/Saturation controls
+ *   Support / Test multiple frames
+ *   Test colour-key code more extensively
+ */
 
 #include <errno.h>
 #include <stdio.h>
@@ -43,29 +38,29 @@
 #include <inttypes.h>
 #include <unistd.h>
 
+#include "config.h"
 #include "vidix.h"
-#include "vidixlib.h"
 #include "fourcc.h"
-#include "../libdha/libdha.h"
-#include "../libdha/pci_ids.h"
-#include "../libdha/pci_names.h"
-#include "../config.h"
+#include "dha.h"
+#include "pci_ids.h"
+#include "pci_names.h"
+#include "mp_msg.h"
 
 #include "cyberblade_regs.h"
 
-pciinfo_t pci_info;
+static pciinfo_t pci_info;
 
-char save_colourkey[6];
-char *cyberblade_mem;
+static char save_colourkey[6];
+static char *cyberblade_mem;
 
 #ifdef DEBUG_LOGFILE
-FILE *logfile=0;
+static FILE *logfile=0;
 #define LOGWRITE(x) {if(logfile) fprintf(logfile,x);}
 #else
 #define LOGWRITE(x)
 #endif
 
-/* Helper functions for reading registers. */    
+/* Helper functions for reading registers. */
 
 static void CROUTW(int reg,int val)
 {
@@ -78,29 +73,6 @@ static void SROUTW(int reg,int val)
 	SROUTB(reg,val&255);
 	SROUTB(reg+1,(val>>8)&255);
 }
-
-void DumpRegisters(void)
-{
-#ifdef DEBUG_LOGFILE
-        int reg,val;
-        if(logfile)
-        {
-                LOGWRITE("CRTC Register Dump:\n")
-                for(reg=0;reg<256;++reg)
-                {
-                        val=CRINB(reg);
-                        fprintf(logfile,"CR0x%2x: 0x%2x\n",reg,val);
-                }
-                LOGWRITE("SR Register Dump:\n")
-                for(reg=0;reg<256;++reg)
-                {
-                        val=SRINB(reg);
-                        fprintf(logfile,"SR0x%2x: 0x%2x\n",reg,val);
-                }
-        }
-#endif
-}
-/* --- */
 
 static vidix_capability_t cyberblade_cap =
 {
@@ -148,7 +120,7 @@ static int cyberblade_probe(int verbose, int force)
 	err = pci_scan(lst,&num_pci);
 	if(err)
 	{
-		printf("[cyberblade] Error occurred during pci scan: %s\n",strerror(err));
+		mp_msg(MSGT_VO, MSGL_STATUS, "[cyberblade] Error occurred during pci scan: %s\n",strerror(err));
 		return err;
 	}
 	else
@@ -165,12 +137,14 @@ static int cyberblade_probe(int verbose, int force)
 					continue;
 				dname = pci_device_name(VENDOR_TRIDENT, lst[i].device);
 				dname = dname ? dname : "Unknown chip";
-				printf("[cyberblade] Found chip: %s\n", dname);
-				if ((lst[i].command & PCI_COMMAND_IO) == 0)
+				mp_msg(MSGT_VO, MSGL_STATUS, "[cyberblade] Found chip: %s\n", dname);
+#if 0
+                                if ((lst[i].command & PCI_COMMAND_IO) == 0)
 				{
-					printf("[cyberblade] Device is disabled, ignoring\n");
+					mp_msg(MSGT_VO, MSGL_STATUS, "[cyberblade] Device is disabled, ignoring\n");
 					continue;
 				}
+#endif
 				cyberblade_cap.device_id = lst[i].device;
 				err = 0;
 				memcpy(&pci_info, &lst[i], sizeof(pciinfo_t));
@@ -179,14 +153,14 @@ static int cyberblade_probe(int verbose, int force)
 		}
 	}
 
-	if(err && verbose) printf("[cyberblade] Can't find chip\n");
+	if(err && verbose) mp_msg(MSGT_VO, MSGL_STATUS, "[cyberblade] Can't find chip\n");
 		return err;
 }
 
 
 static int cyberblade_init(void)
 {
-	cyberblade_mem = map_phys_mem(pci_info.base0, 0x800000); 
+	cyberblade_mem = map_phys_mem(pci_info.base0, 0x800000);
 	enable_app_io();
 	save_colourkey[0]=SRINB(0x50);
 	save_colourkey[1]=SRINB(0x51);
@@ -218,7 +192,7 @@ static void cyberblade_destroy(void)
 	SROUTB(0x56,save_colourkey[5]);
 	SROUTB(0x11, protect);
 	disable_app_io();
-	unmap_phys_mem(cyberblade_mem, 0x800000); 
+	unmap_phys_mem(cyberblade_mem, 0x800000);
 }
 
 
@@ -248,16 +222,10 @@ static int cyberblade_query_fourcc(vidix_fourcc_t *to)
 {
 	if(is_supported_fourcc(to->fourcc))
 	{
-		to->depth = VID_DEPTH_1BPP | VID_DEPTH_2BPP |
-			VID_DEPTH_4BPP | VID_DEPTH_8BPP |
-			VID_DEPTH_12BPP| VID_DEPTH_15BPP|
-			VID_DEPTH_16BPP| VID_DEPTH_24BPP|
-			VID_DEPTH_32BPP;
+		to->depth = VID_DEPTH_ALL;
 		to->flags = VID_CAP_EXPAND | VID_CAP_SHRINK | VID_CAP_COLORKEY;
 		return 0;
 	}
-	else
-		to->depth = to->flags = 0;
 	return ENOSYS;
 }
 
@@ -269,7 +237,7 @@ static vidix_grkey_t cyberblade_grkey;
 static int cyberblade_get_gkeys(vidix_grkey_t *grkey)
 {
 	memcpy(grkey, &cyberblade_grkey, sizeof(vidix_grkey_t));
-	return(0);
+	return 0;
 }
 
 static int cyberblade_set_gkeys(const vidix_grkey_t *grkey)
@@ -303,7 +271,7 @@ static int cyberblade_set_gkeys(const vidix_grkey_t *grkey)
 		SROUTB(0x56, 0x00); /* Colour Key Mask */
 	}
 	SROUTB(0x11,protect);
-	return(0);
+	return 0;
 }
 
 
@@ -473,19 +441,19 @@ static int cyberblade_config_playback(vidix_playback_t *info)
     			Overflow=CRINB(0x07);
     			VDisp |= (Overflow & 2) <<7;
     			VDisp |= (Overflow & 0x40) << 3;
- 
+
     			TVHTotal=CRINB(0xe0)*8;
     			TVVTotal=CRINB(0xe6);
     			TVOverflow=CRINB(0xe7);
     			if(TVOverflow&0x20) TVVTotal|=512;
     			if(TVOverflow&0x01) TVVTotal|=256;
     			TVHTotal+=40; TVVTotal+=2;
- 
+
     			TVHSyncStart=CRINB(0xe4)*8;
     			TVVSyncStart=CRINB(0xf0);
     			if(TVOverflow&0x80) TVVSyncStart|=512;
 			if(TVOverflow&0x04) TVVSyncStart|=256;
- 
+
 			HWinStart=(TVHTotal-HDisp)&15;
 			HWinStart|=(HTotal-HDisp)&15;
 			HWinStart+=(TVHTotal-TVHSyncStart)-49;
@@ -497,8 +465,8 @@ static int cyberblade_config_playback(vidix_playback_t *info)
 		}
                 VWinStart=(VTotal-VSync)-8;
 
-		printf("[cyberblade] HTotal: 0x%x, HSStart: 0x%x\n",HTotal,HSync); 
-		printf("  VTotal: 0x%x, VStart: 0x%x\n",VTotal,VSync);
+		mp_msg(MSGT_VO, MSGL_STATUS, "[cyberblade] HTotal: 0x%x, HSStart: 0x%x\n",HTotal,HSync);
+		mp_msg(MSGT_VO, MSGL_STATUS, "[cyberblade] VTotal: 0x%x, VStart: 0x%x\n",VTotal,VSync);
 		tx1=HWinStart+info->dest.x;
 		ty1=VWinStart+info->dest.y;
 		tx2=tx1+info->dest.w;
@@ -594,7 +562,7 @@ static int cyberblade_playback_on(void)
 
 static int cyberblade_playback_off(void)
 {
-        LOGWRITE("Disable overlay\n"); 
+        LOGWRITE("Disable overlay\n");
 	CROUTB(0x8E, 0xc4); /* VDE Flags*/
 
 	return 0;
@@ -604,7 +572,7 @@ static int cyberblade_playback_off(void)
 static int cyberblade_frame_sel(unsigned int frame)
 {
 	int protect;
-        LOGWRITE("Frame select\n"); 
+        LOGWRITE("Frame select\n");
 	protect=SRINB(0x11);
 	SROUTB(0x11, 0x92);
 	/* Set overlay address to that of selected frame */

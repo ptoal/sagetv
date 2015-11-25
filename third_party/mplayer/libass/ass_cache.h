@@ -1,62 +1,104 @@
-// -*- c-basic-offset: 8; indent-tabs-mode: t -*-
-// vim:ts=8:sw=8:noet:ai:
 /*
-  Copyright (C) 2006 Evgeniy Stepanov <eugeni.stepanov@gmail.com>
+ * Copyright (C) 2006 Evgeniy Stepanov <eugeni.stepanov@gmail.com>
+ * Copyright (C) 2011 Grigori Goronzy <greg@chown.ath.cx>
+ *
+ * This file is part of libass.
+ *
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
 
-  This program is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 2 of the License, or
-  (at your option) any later version.
+#ifndef LIBASS_CACHE_H
+#define LIBASS_CACHE_H
 
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
+#include "ass.h"
+#include "ass_font.h"
+#include "ass_bitmap.h"
 
-  You should have received a copy of the GNU General Public License
-  along with this program; if not, write to the Free Software
-  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
-*/
+typedef struct cache Cache;
 
-#ifndef __ASS_CACHE_H__
-#define __ASS_CACHE_H__
+// cache values
 
-void ass_font_cache_init(void);
-ass_font_t* ass_font_cache_find(ass_font_desc_t* desc);
-void ass_font_cache_add(ass_font_t* font);
-void ass_font_cache_done(void);
+typedef struct {
+    Bitmap *bm;               // the actual bitmaps
+    Bitmap *bm_o;
+    Bitmap *bm_s;
+} BitmapHashValue;
 
+typedef struct {
+    unsigned char *a;
+    unsigned char *b;
+} CompositeHashValue;
 
-// describes a glyph; glyphs with equivalents structs are considered identical
-typedef struct glyph_hash_key_s {
-	char bitmap; // bool : true = bitmap, false = outline
-	ass_font_t* font;
-	int size; // font size
-	uint32_t ch; // character code
-	unsigned outline; // border width, 16.16 fixed point value
-	int bold, italic;
-	char be; // blur edges
+typedef struct {
+    FT_Library lib;
+    FT_Outline *outline;
+    FT_Outline *border;
+    FT_BBox bbox_scaled;        // bbox after scaling, but before rotation
+    FT_Vector advance;          // 26.6, advance distance to the next outline in line
+    int asc, desc;              // ascender/descender
+} OutlineHashValue;
 
-	// the following affects bitmap glyphs only
-	unsigned scale_x, scale_y; // 16.16
-	int frx, fry, frz; // signed 16.16
-	
-	FT_Vector advance; // subpixel shift vector
-} glyph_hash_key_t;
+typedef struct {
+    FT_Glyph_Metrics metrics;
+} GlyphMetricsHashValue;
 
-typedef struct glyph_hash_val_s {
-	bitmap_t* bm; // the actual glyph bitmaps
-	bitmap_t* bm_o;
-	bitmap_t* bm_s;
-	FT_BBox bbox_scaled; // bbox after scaling, but before rotation
-	FT_Vector advance; // 26.6, advance distance to the next glyph in line
-} glyph_hash_val_t;
+// Create definitions for bitmap, outline and composite hash keys
+#define CREATE_STRUCT_DEFINITIONS
+#include "ass_cache_template.h"
 
-void ass_glyph_cache_init(void);
-void cache_add_glyph(glyph_hash_key_t* key, glyph_hash_val_t* val);
-glyph_hash_val_t* cache_find_glyph(glyph_hash_key_t* key);
-void ass_glyph_cache_reset(void);
-void ass_glyph_cache_done(void);
+// Type-specific function pointers
+typedef unsigned(*HashFunction)(void *key, size_t key_size);
+typedef size_t(*ItemSize)(void *value, size_t value_size);
+typedef unsigned(*HashCompare)(void *a, void *b, size_t key_size);
+typedef void(*CacheItemDestructor)(void *key, void *value);
 
-#endif
+// cache hash keys
 
+typedef struct outline_hash_key {
+    enum {
+        OUTLINE_GLYPH,
+        OUTLINE_DRAWING,
+    } type;
+    union {
+        GlyphHashKey glyph;
+        DrawingHashKey drawing;
+    } u;
+} OutlineHashKey;
+
+typedef struct bitmap_hash_key {
+    enum {
+        BITMAP_OUTLINE,
+        BITMAP_CLIP,
+    } type;
+    union {
+        OutlineBitmapHashKey outline;
+        ClipMaskHashKey clip;
+    } u;
+} BitmapHashKey;
+
+Cache *ass_cache_create(HashFunction hash_func, HashCompare compare_func,
+                        CacheItemDestructor destruct_func, ItemSize size_func,
+                        size_t key_size, size_t value_size);
+void *ass_cache_put(Cache *cache, void *key, void *value);
+void *ass_cache_get(Cache *cache, void *key);
+int ass_cache_empty(Cache *cache, size_t max_size);
+void ass_cache_stats(Cache *cache, size_t *size, unsigned *hits,
+                     unsigned *misses, unsigned *count);
+void ass_cache_done(Cache *cache);
+Cache *ass_font_cache_create(void);
+Cache *ass_outline_cache_create(void);
+Cache *ass_glyph_metrics_cache_create(void);
+Cache *ass_bitmap_cache_create(void);
+Cache *ass_composite_cache_create(void);
+
+#endif                          /* LIBASS_CACHE_H */

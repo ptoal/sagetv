@@ -1,5 +1,23 @@
-#ifndef _M_CONFIG_H
-#define _M_CONFIG_H
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
+#ifndef MPLAYER_M_CONFIG_H
+#define MPLAYER_M_CONFIG_H
 
 /// \defgroup Config Config manager
 ///
@@ -34,7 +52,7 @@ struct m_config_option {
   /// Full name (ie option:subopt).
   char* name;
   /// Option description.
-  struct m_option* opt;
+  const struct m_option* opt;
   /// Save slot stack.
   m_config_save_slot_t* slots;
   /// See \ref ConfigOptionFlags.
@@ -66,7 +84,7 @@ struct m_profile {
 typedef struct m_config {
   /// Registered options.
   /** This contains all options and suboptions.
-   */ 
+   */
   m_config_option_t* opts;
   /// Current stack level.
   int lvl;
@@ -120,7 +138,7 @@ m_config_pop(m_config_t* config);
  *  \return 1 on success, 0 on failure.
  */
 int
-m_config_register_options(m_config_t *config, struct m_option *args);
+m_config_register_options(m_config_t *config, const struct m_option *args);
 
 /// Set an option.
 /** \param config The config object.
@@ -138,20 +156,20 @@ m_config_set_option(m_config_t *config, char* arg, char* param);
  *  \return See \ref OptionParserReturn.
  */
 int
-m_config_check_option(m_config_t *config, char* arg, char* param);
+m_config_check_option(const m_config_t *config, char *arg, char *param);
 
 /// Get the option matching the given name.
 /** \param config The config object.
  *  \param arg The option's name.
  */
-struct m_option*
-m_config_get_option(m_config_t *config, char* arg);
+const struct m_option*
+m_config_get_option(const m_config_t *config, char *arg);
 
 /// Print a list of all registered options.
 /** \param config The config object.
  */
 void
-m_config_print_option_list(m_config_t *config);
+m_config_print_option_list(const m_config_t *config);
 
 /// \addtogroup ConfigProfiles
 ///@{
@@ -162,7 +180,7 @@ m_config_print_option_list(m_config_t *config);
  *  \return The profile object or NULL.
  */
 m_profile_t*
-m_config_get_profile(m_config_t* config, char* name);
+m_config_get_profile(const m_config_t *config, char *name);
 
 /// Get the profile with the given name, creating it if necessary.
 /** \param config The config object.
@@ -174,7 +192,7 @@ m_config_add_profile(m_config_t* config, char* name);
 
 /// Set the description of a profile.
 /** Used by the config file parser when defining a profile.
- * 
+ *
  *  \param p The profile object.
  *  \param arg The profile's name.
  */
@@ -183,7 +201,7 @@ m_profile_set_desc(m_profile_t* p, char* desc);
 
 /// Add an option to a profile.
 /** Used by the config file parser when defining a profile.
- * 
+ *
  *  \param config The config object.
  *  \param p The profile object.
  *  \param name The option's name.
@@ -193,8 +211,17 @@ int
 m_config_set_profile_option(m_config_t* config, m_profile_t* p,
 			    char* name, char* val);
 
-///@}
+/// Enables profile usage
+/** Used by the config file parser when loading a profile.
+ *
+ *  \param config The config object.
+ *  \param p The profile object.
+ */
+void
+m_config_set_profile(m_config_t* config, m_profile_t* p);
 
 ///@}
 
-#endif /* _M_CONFIG_H */
+///@}
+
+#endif /* MPLAYER_M_CONFIG_H */

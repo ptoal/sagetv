@@ -1,23 +1,21 @@
 /*
- *  stream_netstream.c
+ * Copyright (C) Alban Bedel - 04/2003
  *
- *	Copyright (C) Alban Bedel - 04/2003
+ * This file is part of MPlayer.
  *
- *  This file is part of MPlayer, a free movie player.
- *	
- *  MPlayer is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2, or (at your option)
- *  any later version.
- *   
- *  MPlayer is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *   
- *  You should have received a copy of the GNU General Public License
- *  along with MPlayer; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 /*
@@ -44,8 +42,7 @@
 #include <inttypes.h>
 #include <errno.h>
 
-#ifndef HAVE_WINSOCK2
-#define closesocket close
+#if !HAVE_WINSOCK2_H
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -61,7 +58,8 @@
 #include "libavutil/common.h"
 #include "mpbswap.h"
 
-#include "netstream.h"
+#include "network.h"
+#include "stream_netstream.h"
 #include "tcp.h"
 
 static struct stream_priv_s {
@@ -76,13 +74,13 @@ static struct stream_priv_s {
 
 #define ST_OFF(f) M_ST_OFF(struct stream_priv_s,f)
 /// URL definition
-static m_option_t stream_opts_fields[] = {
+static const m_option_t stream_opts_fields[] = {
   {"hostname", ST_OFF(host), CONF_TYPE_STRING, 0, 0 ,0, NULL},
   {"port", ST_OFF(port), CONF_TYPE_INT, M_OPT_MIN, 1 ,0, NULL},
   {"filename", ST_OFF(url), CONF_TYPE_STRING, 0, 0 ,0, NULL},
   { NULL, NULL, 0, 0, 0, 0,  NULL }
 };
-static struct m_struct_st stream_opts = {
+static const struct m_struct_st stream_opts = {
   "netstream",
   sizeof(struct stream_priv_s),
   &stream_priv_dflts,
@@ -92,14 +90,14 @@ static struct m_struct_st stream_opts = {
 //// When the cache is running we need a lock as
 //// fill_buffer is called from another proccess
 static int lock_fd(int fd) {
-#ifndef HAVE_WINSOCK2
+#if !HAVE_WINSOCK2_H
   struct flock lock;
 
   memset(&lock,0,sizeof(struct flock));
   lock.l_type = F_WRLCK;
 
   mp_msg(MSGT_STREAM,MSGL_DBG2, "Lock (%d)\n",getpid());
-  do {    
+  do {
     if(fcntl(fd,F_SETLKW,&lock)) {
       if(errno == EAGAIN) continue;
       mp_msg(MSGT_STREAM,MSGL_ERR, "Failed to get the lock: %s\n",
@@ -115,7 +113,7 @@ printf("FIXME? should lock here\n");
 }
 
 static int unlock_fd(int fd) {
-#ifndef HAVE_WINSOCK2
+#if !HAVE_WINSOCK2_H
   struct flock lock;
 
   memset(&lock,0,sizeof(struct flock));
@@ -156,14 +154,14 @@ static mp_net_stream_packet_t* send_net_stream_cmd(stream_t *s,uint16_t cmd,char
   case NET_STREAM_OK:
     return pack;
   case NET_STREAM_ERROR:
-    if(pack->len > sizeof(mp_net_stream_packet_t))
+    if(pack->len > 0)
       mp_msg(MSGT_STREAM,MSGL_ERR, "Fill buffer failed: %s\n",pack->data);
     else
       mp_msg(MSGT_STREAM,MSGL_ERR, "Fill buffer failed\n");
     free(pack);
     return NULL;
   }
-  
+
   mp_msg(MSGT_STREAM,MSGL_ERR, "Unknown response to %d: %d\n",cmd,pack->cmd);
   free(pack);
   return NULL;
@@ -171,31 +169,29 @@ static mp_net_stream_packet_t* send_net_stream_cmd(stream_t *s,uint16_t cmd,char
 
 static int fill_buffer(stream_t *s, char* buffer, int max_len){
   uint16_t len = le2me_16(max_len);
-  mp_net_stream_packet_t* pack;
-
-  pack = send_net_stream_cmd(s,NET_STREAM_FILL_BUFFER,(char*)&len,2);
+  mp_net_stream_packet_t *pack = send_net_stream_cmd(s,NET_STREAM_FILL_BUFFER,(char*)&len,2);
   if(!pack) {
     return -1;
   }
-  len = pack->len - sizeof(mp_net_stream_packet_t);
+  len = pack->len;
   if(len > max_len) {
     mp_msg(MSGT_STREAM,MSGL_ERR, "Got a too big a packet %d / %d\n",len,max_len);
-    free(pack);
-    return 0;
+    goto err_out;
   }
   if(len > 0)
     memcpy(buffer,pack->data,len);
   free(pack);
   return len;
+err_out:
+  free(pack);
+  return 0;
 }
 
 
-static int seek(stream_t *s,off_t newpos) {
-  uint64_t pos = le2me_64((uint64_t)newpos);
-  mp_net_stream_packet_t* pack;
-  
-  pack = send_net_stream_cmd(s,NET_STREAM_SEEK,(char*)&pos,8);
-  if(!pack) {    
+static int seek(stream_t *s, int64_t newpos) {
+  uint64_t pos = le2me_64(newpos);
+  mp_net_stream_packet_t *pack = send_net_stream_cmd(s,NET_STREAM_SEEK,(char*)&pos,8);
+  if(!pack) {
     return 0;
   }
   s->pos = newpos;
@@ -203,31 +199,26 @@ static int seek(stream_t *s,off_t newpos) {
   return 1;
 }
 
-static int net_stream_reset(struct stream_st *s) {
-  mp_net_stream_packet_t* pack;
-  
-  pack = send_net_stream_cmd(s,NET_STREAM_RESET,NULL,0);  
+static int net_stream_reset(struct stream *s) {
+  mp_net_stream_packet_t *pack = send_net_stream_cmd(s,NET_STREAM_RESET,NULL,0);
   if(!pack) {
     return 0;
   }
   free(pack);
   return 1;
 }
- 
-static int control(struct stream_st *s,int cmd,void* arg) {
+
+static int control(struct stream *s,int cmd,void* arg) {
   switch(cmd) {
   case STREAM_CTRL_RESET:
     return net_stream_reset(s);
   }
-  return STREAM_UNSUPORTED;
+  return STREAM_UNSUPPORTED;
 }
 
-static void close_s(struct stream_st *s) {
-  mp_net_stream_packet_t* pack;
-  
-  pack = send_net_stream_cmd(s,NET_STREAM_CLOSE,NULL,0);
-  if(pack)
-    free(pack);
+static void close_s(struct stream *s) {
+  mp_net_stream_packet_t *pack = send_net_stream_cmd(s,NET_STREAM_CLOSE,NULL,0);
+  free(pack);
 }
 
 static int open_s(stream_t *stream,int mode, void* opts, int* file_format) {
@@ -237,7 +228,7 @@ static int open_s(stream_t *stream,int mode, void* opts, int* file_format) {
   mp_net_stream_opened_t* opened;
 
   if(mode != STREAM_READ)
-    return STREAM_UNSUPORTED;
+    return STREAM_UNSUPPORTED;
 
   if(!p->host) {
     mp_msg(MSGT_OPEN,MSGL_ERR, "We need an host name (ex: mpst://server.net/cdda://5)\n");
@@ -262,14 +253,13 @@ static int open_s(stream_t *stream,int mode, void* opts, int* file_format) {
   if(!pack) {
     goto error;
   }
-  
-  if(pack->len != sizeof(mp_net_stream_packet_t) + 
-     sizeof(mp_net_stream_opened_t)) {
+
+  if(pack->len != sizeof(mp_net_stream_opened_t)) {
     mp_msg(MSGT_OPEN,MSGL_ERR, "Invalid open response packet len (%d bytes)\n",pack->len);
     free(pack);
     goto error;
   }
-  
+
   opened = (mp_net_stream_opened_t*)pack->data;
   net_stream_opened_2_me(opened);
 
@@ -281,7 +271,7 @@ static int open_s(stream_t *stream,int mode, void* opts, int* file_format) {
 
   stream->fill_buffer = fill_buffer;
   stream->control = control;
-  if(stream->flags & STREAM_SEEK)
+  if(stream->flags & MP_STREAM_SEEK)
     stream->seek = seek;
   stream->close = close_s;
 
@@ -296,7 +286,7 @@ static int open_s(stream_t *stream,int mode, void* opts, int* file_format) {
   return STREAM_ERROR;
 }
 
-stream_info_t stream_info_netstream = {
+const stream_info_t stream_info_netstream = {
   "Net stream",
   "netstream",
   "Albeu",

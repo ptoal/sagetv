@@ -1,7 +1,7 @@
 /******************************************************************************
  *
  *   XviD VBR Library
- *   
+ *
  *   Copyright (C) 2002 Edouard Gomez <ed.gomez@wanadoo.fr>
  *
  *   The curve treatment algorithm is based on work done by Foxer <email?> and
@@ -23,8 +23,8 @@
  *
  *****************************************************************************/
 
-#ifndef __XVID_VBR_H__
-#define __XVID_VBR_H__
+#ifndef MPLAYER_XVID_VBR_H
+#define MPLAYER_XVID_VBR_H
 
 #define VBR_VERSION 0
 
@@ -58,7 +58,7 @@ typedef vbr_finish_function *vbr_finish_function_ptr;
  * The VBR CONTROLER structure - the spin of the library
  *****************************************************************************/
 
-typedef struct _vbr_control_t
+typedef struct vbr_control_t
 {
 
 	/* All modes - specifies what VBR algorithm has to be used */
@@ -180,7 +180,7 @@ typedef struct _vbr_control_t
 	/* ----------- Internal data - do not modify ----------- */
 	vbr_init_function_ptr      init;
 	vbr_get_quant_function_ptr getquant;
-	vbr_get_intra_function_ptr getintra;	
+	vbr_get_intra_function_ptr getintra;
 	vbr_update_function_ptr    update;
 	vbr_finish_function_ptr    finish;
 
@@ -228,4 +228,4 @@ extern int vbrUpdate(vbr_control_t *state,
 		     int ublocks);
 extern int vbrFinish(vbr_control_t *state);
 
-#endif
+#endif /* MPLAYER_XVID_VBR_H */

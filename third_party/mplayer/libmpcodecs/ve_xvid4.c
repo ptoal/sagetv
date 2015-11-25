@@ -1,25 +1,25 @@
-/*****************************************************************************
+/*
+ * - XviD 1.x decoder module for mplayer/mencoder -
  *
- *  - XviD 1.x export module for mplayer/mencoder -
+ * Copyright(C) 2003      Marco Belli <elcabesa@inwind.it>
+ *              2003-2004 Edouard Gomez <ed.gomez@free.fr>
  *
- *  Copyright(C) 2003      Marco Belli <elcabesa@inwind.it>
- *               2003-2004 Edouard Gomez <ed.gomez@free.fr>
+ * This file is part of MPlayer.
  *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
- *
- ****************************************************************************/
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 /*****************************************************************************
  * Includes
@@ -28,6 +28,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <errno.h>
 #include <math.h>
 #include <limits.h>
@@ -35,7 +36,7 @@
 
 #include "config.h"
 #include "mp_msg.h"
-
+#include "mencoder.h"
 #include "codec-cfg.h"
 #include "stream/stream.h"
 #include "libmpdemux/demuxer.h"
@@ -46,6 +47,7 @@
 
 #include "img_format.h"
 #include "mp_image.h"
+#include "ve.h"
 #include "vf.h"
 
 #include <xvid.h>
@@ -55,6 +57,8 @@
 #include <assert.h>
 
 #include "m_option.h"
+#include "libavutil/rational.h"
+#include "libavutil/avutil.h"
 
 #define FINE (!0)
 #define BAD (!FINE)
@@ -75,9 +79,9 @@
 #define PROFILE_S   (PROFILE_4MV)
 #define PROFILE_AS  (PROFILE_4MV|PROFILE_ADAPTQUANT|PROFILE_BVOP|PROFILE_MPEGQUANT|PROFILE_INTERLACE|PROFILE_QPEL|PROFILE_GMC)
 
-typedef struct
+typedef const struct
 {
-	char *name;                  ///< profile name
+	const char *name;            ///< profile name
 	int id;                      ///< mpeg-4 profile id; iso/iec 14496-2:2001 table G-1
 	int width;                   ///< profile width restriction
 	int height;                  ///< profile height restriction
@@ -95,89 +99,11 @@ typedef struct
 	unsigned int flags;          ///< flags for allowed options/dxn note the definitions for PROFILE_S and PROFILE_AS
 } profile_t;
 
-// Code taken from Libavcodec and ve_lavc.c to handle Aspect Ratio calculation
-
-typedef struct xvid_rational_s{
-    int num; 
-    int den;
-} XVIDRational;
-
-#define MAX(a,b) ((a) > (b) ? (a) : (b))
-#define ABS(a) ((a) >= 0 ? (a) : (-(a)))
-
-
-static int64_t xvid_gcd(int64_t a, int64_t b){
-    if(b) return xvid_gcd(b, a%b);
-    else  return a;
-}
-
-static int xvid_reduce(int *dst_nom, int *dst_den, int64_t nom, int64_t den, int64_t max){
-    int exact=1, sign=0;
-    int64_t gcd;
-
-    assert(den != 0);
-
-    if(den < 0){
-        den= -den;
-        nom= -nom;
-    }
-    
-    if(nom < 0){
-        nom= -nom;
-        sign= 1;
-    }
-    
-    gcd = xvid_gcd(nom, den);
-    nom /= gcd;
-    den /= gcd;
-    
-    if(nom > max || den > max){
-        XVIDRational a0={0,1}, a1={1,0};
-        exact=0;
-
-        for(;;){
-            int64_t x= nom / den;
-            int64_t a2n= x*a1.num + a0.num;
-            int64_t a2d= x*a1.den + a0.den;
-
-            if(a2n > max || a2d > max) break;
-
-            nom %= den;
-        
-            a0= a1;
-            a1= (XVIDRational){a2n, a2d};
-            if(nom==0) break;
-            x= nom; nom=den; den=x;
-        }
-        nom= a1.num;
-        den= a1.den;
-    }
-    
-    assert(xvid_gcd(nom, den) == 1);
-    
-    if(sign) nom= -nom;
-    
-    *dst_nom = nom;
-    *dst_den = den;
-    
-    return exact;
-}
-
-
-static XVIDRational xvid_d2q(double d, int max){
-    XVIDRational a;
-    int exponent= MAX( (int)(log(ABS(d) + 1e-20)/log(2)), 0);
-    int64_t den= 1LL << (61 - exponent);
-    xvid_reduce(&a.num, &a.den, (int64_t)(d * den + 0.5), den, max);
-
-    return a;
-}
-
 // Code taken from XviD VfW source for profile support
 
 /* default vbv_occupancy is (64/170)*vbv_buffer_size */
 
-const profile_t profiles[] =
+static const profile_t profiles[] =
 {
 	/*   name               p@l    w    h    fps  obj Tvmv  vmv     vcv  ac%   vbv        pkt     bps    vbv_peak dbf  flags */
 	/* unrestricted profile (default) */
@@ -190,6 +116,11 @@ const profile_t profiles[] =
 	{ "sp1",           0x01,  176, 144, 15,  4,  198,   99,   1485, 100,  10*16368,  2048,   64000,        0, -1, PROFILE_S|PROFILE_ADAPTQUANT },
 	{ "sp2",           0x02,  352, 288, 15,  4,  792,  396,   5940, 100,  40*16368,  4096,  128000,        0, -1, PROFILE_S|PROFILE_ADAPTQUANT },
 	{ "sp3",           0x03,  352, 288, 15,  4,  792,  396,  11880, 100,  40*16368,  8192,  384000,        0, -1, PROFILE_S|PROFILE_ADAPTQUANT },
+	/* From ISO/IEC 14496-2:2004/FPDAM 2: New Levels for Simple Profile */
+	{ "sp4a",          0x04,  640, 480, 30,  4, 2400, 1200,  36000, 100,  80*16368, 16384, 4000000,        0, -1, PROFILE_S|PROFILE_ADAPTQUANT },
+	{ "sp5",           0x05,  720, 576, 30,  4, 3240, 1620,  40500, 100, 112*16368, 16384, 8000000,        0, -1, PROFILE_S|PROFILE_ADAPTQUANT },
+	/* From ISO/IEC 14496-2:2004/FPDAM 4: Simple profile level 6 */
+	{ "sp6",           0x06, 1280, 720, 30,  4, 7200, 3600, 108000, 100, 248*16368, 16384,12000000,        0, -1, PROFILE_S|PROFILE_ADAPTQUANT },
 
 	{ "asp0",          0xf0,  176, 144, 30,  1,  297,   99,   2970, 100,  10*16368,  2048,  128000,        0, -1, PROFILE_AS },
 	{ "asp1",          0xf1,  176, 144, 30,  4,  297,   99,   2970, 100,  10*16368,  2048,  128000,        0, -1, PROFILE_AS },
@@ -216,7 +147,7 @@ const profile_t profiles[] =
  * \param str the profile name
  * \return pointer of the appropriate profiles array entry or NULL for a mistyped profile name
  */
-static profile_t *profileFromName(char *str)
+static const profile_t *profileFromName(const char *str)
 {
 	profile_t *cur = profiles;
 	while (cur->name && strcasecmp(cur->name, str)) cur++;
@@ -227,8 +158,6 @@ static profile_t *profileFromName(char *str)
 /*****************************************************************************
  * Configuration options
  ****************************************************************************/
-
-extern char* passtmpfile;
 
 static int xvidenc_bitrate = 0;
 static int xvidenc_pass = 0;
@@ -282,6 +211,10 @@ static int xvidenc_vbr_kfreduction = 0;
 static int xvidenc_vbr_kfthreshold = 0;
 static int xvidenc_vbr_container_frame_overhead = 24; /* mencoder uses AVI container */
 
+static int xvidenc_vbv_size = 0;
+static int xvidenc_vbv_initial = 0;
+static int xvidenc_vbv_maxrate = 0;
+
 // commandline profile option string - default to unrestricted
 static char *xvidenc_profile = "unrestricted";
 
@@ -293,7 +226,7 @@ static int xvidenc_autoaspect = 0;
 
 static char *xvidenc_zones = NULL; // zones string
 
-m_option_t xvidencopts_conf[] =
+const m_option_t xvidencopts_conf[] =
 {
 	/* Standard things mencoder should be able to treat directly */
 	{"bitrate", &xvidenc_bitrate, CONF_TYPE_INT, 0, 0, 0, NULL},
@@ -333,7 +266,7 @@ m_option_t xvidencopts_conf[] =
 	{"frame_drop_ratio", &xvidenc_frame_drop_ratio, CONF_TYPE_INT, CONF_RANGE, 0, 100, NULL},
 	{"max_key_interval", &xvidenc_max_key_interval, CONF_TYPE_INT, CONF_MIN, 0, 0, NULL},
 	{"greyscale", &xvidenc_greyscale, CONF_TYPE_FLAG, 0, 0, 1, NULL}, /* kept for backward compatibility */
-	{"grayscale", &xvidenc_greyscale, CONF_TYPE_FLAG, 0, 0, 1, NULL},		
+	{"grayscale", &xvidenc_greyscale, CONF_TYPE_FLAG, 0, 0, 1, NULL},
 	{"nogreyscale", &xvidenc_greyscale, CONF_TYPE_FLAG, 0, 1, 0, NULL},
 	{"lumi_mask", &xvidenc_luminance_masking, CONF_TYPE_FLAG, 0, 0, 1, NULL},
 	{"nolumi_mask", &xvidenc_luminance_masking, CONF_TYPE_FLAG, 0, 1, 0, NULL},
@@ -369,6 +302,11 @@ m_option_t xvidencopts_conf[] =
 	{"kfthreshold", &xvidenc_vbr_kfthreshold, CONF_TYPE_INT, CONF_MIN, 0, 0, NULL},
 	{"container_frame_overhead", &xvidenc_vbr_container_frame_overhead, CONF_TYPE_INT, CONF_MIN, 0, 0, NULL},
 
+	/* section [vbv] */
+	{"vbv_bufsize", &xvidenc_vbv_size, CONF_TYPE_INT, CONF_MIN, 0, 0, NULL},
+	{"vbv_initial", &xvidenc_vbv_initial, CONF_TYPE_INT, CONF_MIN, 0, 0, NULL},
+	{"vbv_maxrate", &xvidenc_vbv_maxrate, CONF_TYPE_INT, CONF_MIN, 0, 0, NULL},
+
 	/* Section Aspect Ratio */
 	{"par", &xvidenc_par, CONF_TYPE_STRING, 0, 0, 0, NULL},
 	{"par_width", &xvidenc_par_width, CONF_TYPE_INT, CONF_RANGE, 0, 255, NULL},
@@ -391,7 +329,7 @@ m_option_t xvidencopts_conf[] =
  * Module private data
  ****************************************************************************/
 
-typedef struct _xvid_mplayer_module_t
+typedef struct xvid_mplayer_module_t
 {
 	/* Instance related global vars */
 	void *instance;
@@ -424,9 +362,9 @@ typedef struct _xvid_mplayer_module_t
 	int max_sse_u;
 	int max_sse_v;
 	int max_framenum;
-	
+
 	int pixels;
-	
+
 	/* DAR/PAR and all that thingies */
 	int d_width;
 	int d_height;
@@ -451,17 +389,17 @@ static const char *errorstring(int err);
  *==========================================================================*/
 
 static int
-config(struct vf_instance_s* vf,
+config(struct vf_instance *vf,
        int width, int height, int d_width, int d_height,
        unsigned int flags, unsigned int outfmt)
 {
 	int err;
 	xvid_mplayer_module_t *mod = (xvid_mplayer_module_t *)vf->priv;
-	
+
 	/* Complete the muxer initialization */
 	mod->mux->bih->biWidth = width;
 	mod->mux->bih->biHeight = height;
-	mod->mux->bih->biSizeImage = 
+	mod->mux->bih->biSizeImage =
 		mod->mux->bih->biWidth * mod->mux->bih->biHeight * 3 / 2;
 	mod->mux->aspect = (float)d_width/d_height;
 
@@ -482,14 +420,14 @@ config(struct vf_instance_s* vf,
 	mod->d_height = d_height;
 
 	if(dispatch_settings(mod) == BAD)
-		return(BAD);
+		return BAD;
 
 	/*--------------------------------------------------------------------
 	 * Set remaining information in the xvid_enc_create_t structure
 	 *------------------------------------------------------------------*/
 
 	if(set_create_struct(mod) == BAD)
-		return(BAD);
+		return BAD;
 
 	/*--------------------------------------------------------------------
 	 * Encoder instance creation
@@ -500,15 +438,15 @@ config(struct vf_instance_s* vf,
 	if(err<0) {
 		mp_msg(MSGT_MENCODER, MSGL_ERR,
 		       "xvid: xvidcore returned a '%s' error\n", errorstring(err));
-		return(BAD);
+		return BAD;
 	}
-	
+
 	/* Store the encoder instance into the private data */
 	mod->instance = mod->create.handle;
 
 	mod->mux->decoder_delay = mod->create.max_bframes ? 1 : 0;
 
-	return(FINE);
+	return FINE;
 }
 
 /*============================================================================
@@ -516,7 +454,7 @@ config(struct vf_instance_s* vf,
  *==========================================================================*/
 
 static void
-uninit(struct vf_instance_s* vf)
+uninit(struct vf_instance *vf)
 {
 
 	xvid_mplayer_module_t *mod = (xvid_mplayer_module_t *)vf->priv;
@@ -534,15 +472,9 @@ uninit(struct vf_instance_s* vf)
 	}
 
         /* Free allocated memory */
-	if(mod->frame.quant_intra_matrix)
-	    free(mod->frame.quant_intra_matrix);
-
-	if(mod->frame.quant_inter_matrix)
-	    free(mod->frame.quant_inter_matrix);
-
-	if(mod->mux->bih)
-	    free(mod->mux->bih);
-
+	free(mod->frame.quant_intra_matrix);
+	free(mod->frame.quant_inter_matrix);
+	free(mod->mux->bih);
 	free(vf->priv);
 	vf->priv=NULL;
 
@@ -554,7 +486,7 @@ uninit(struct vf_instance_s* vf)
  *==========================================================================*/
 
 static int
-control(struct vf_instance_s* vf, int request, void* data)
+control(struct vf_instance *vf, int request, void* data)
 {
 xvid_mplayer_module_t *mod = (xvid_mplayer_module_t *)vf->priv;
 
@@ -564,7 +496,7 @@ xvid_mplayer_module_t *mod = (xvid_mplayer_module_t *)vf->priv;
                 flush_internal_buffers(mod);
 	    break;
 	}
-	return(CONTROL_UNKNOWN);
+	return CONTROL_UNKNOWN;
 }
 
 /*============================================================================
@@ -572,18 +504,18 @@ xvid_mplayer_module_t *mod = (xvid_mplayer_module_t *)vf->priv;
  *==========================================================================*/
 
 static int
-query_format(struct vf_instance_s* vf, unsigned int fmt)
+query_format(struct vf_instance *vf, unsigned int fmt)
 {
 	switch(fmt){
 	case IMGFMT_YV12:
 	case IMGFMT_IYUV:
 	case IMGFMT_I420:
-		return(VFCAP_CSP_SUPPORTED | VFCAP_CSP_SUPPORTED_BY_HW);
+		return VFCAP_CSP_SUPPORTED | VFCAP_CSP_SUPPORTED_BY_HW;
 	case IMGFMT_YUY2:
 	case IMGFMT_UYVY:
-		return(VFCAP_CSP_SUPPORTED);
+		return VFCAP_CSP_SUPPORTED;
 	}
-	return(BAD);
+	return BAD;
 }
 
 /*============================================================================
@@ -591,10 +523,10 @@ query_format(struct vf_instance_s* vf, unsigned int fmt)
  *==========================================================================*/
 
 static int
-put_image(struct vf_instance_s* vf, mp_image_t *mpi, double pts)
+put_image(struct vf_instance *vf, mp_image_t *mpi, double pts)
 {
 	int size;
-	xvid_enc_stats_t stats; 
+	xvid_enc_stats_t stats;
 	xvid_mplayer_module_t *mod = (xvid_mplayer_module_t *)vf->priv;
 
 	/* Prepare the stats */
@@ -608,7 +540,10 @@ put_image(struct vf_instance_s* vf, mp_image_t *mpi, double pts)
 	 * -----------------------------------------------------------------*/
 
 	if(set_frame_struct(mod, mpi) == BAD)
-		return(BAD);
+		return BAD;
+
+	mod->frame.type = is_forced_key_frame(pts) || xvidenc_motion == 0 ?
+		XVID_TYPE_IVOP : XVID_TYPE_AUTO;
 
 	/* -------------------------------------------------------------------
 	 * Encode the frame
@@ -620,13 +555,13 @@ put_image(struct vf_instance_s* vf, mp_image_t *mpi, double pts)
 	if(size<0) {
 		mp_msg(MSGT_MENCODER, MSGL_ERR,
 		       "xvid: xvidcore returned a '%s' error\n", errorstring(size));
-		return(BAD);
+		return BAD;
 	}
 
 	/* If size is == 0, we're done with that frame */
 	if(size == 0) {
 		++mod->mux->encoder_delay;
-		return(FINE);
+		return FINE;
 	}
 
 	/* xvidcore returns stats about encoded frame in an asynchronous way
@@ -638,7 +573,7 @@ put_image(struct vf_instance_s* vf, mp_image_t *mpi, double pts)
 			  size,
 			  (mod->frame.out_flags & XVID_KEYFRAME)?0x10:0, MP_NOPTS_VALUE, MP_NOPTS_VALUE);
 
-	return(FINE);
+	return FINE;
 }
 
 /*============================================================================
@@ -667,7 +602,7 @@ vf_open(vf_instance_t *vf, char* args)
 	if(mod == NULL) {
 		mp_msg(MSGT_MENCODER,MSGL_ERR,
 		       "xvid: memory allocation failure (private data)\n");
-		return(BAD);
+		return BAD;
 	}
 
 	/* Initialize the module to zeros */
@@ -679,15 +614,15 @@ vf_open(vf_instance_t *vf, char* args)
 	mod->mux = (muxer_stream_t*)args;
 
 	/* Initialize muxer BITMAP header */
-	mod->mux->bih = calloc(1, sizeof(BITMAPINFOHEADER));
+	mod->mux->bih = calloc(1, sizeof(*mod->mux->bih));
 
 	if(mod->mux->bih  == NULL) {
 		mp_msg(MSGT_MENCODER,MSGL_ERR,
 		       "xvid: memory allocation failure (BITMAP header)\n");
-		return(BAD);
+		return BAD;
 	}
 
-	mod->mux->bih->biSize = sizeof(BITMAPINFOHEADER);
+	mod->mux->bih->biSize = sizeof(*mod->mux->bih);
 	mod->mux->bih->biWidth = 0;
 	mod->mux->bih->biHeight = 0;
 	mod->mux->bih->biPlanes = 1;
@@ -707,7 +642,7 @@ vf_open(vf_instance_t *vf, char* args)
 		       XVID_VERSION_PATCH(xvid_gbl_info.actual_version),
 		       xvid_gbl_info.build);
 	}
-		
+
 	/* Initialize the xvid_gbl_init structure */
 	memset(&xvid_gbl_init, 0, sizeof(xvid_gbl_init_t));
 	xvid_gbl_init.version = XVID_VERSION;
@@ -716,10 +651,10 @@ vf_open(vf_instance_t *vf, char* args)
 	/* Initialize the xvidcore library */
 	if (xvid_global(NULL, XVID_GBL_INIT, &xvid_gbl_init, NULL) < 0) {
 		mp_msg(MSGT_MENCODER,MSGL_ERR, "xvid: initialisation failure\n");
-		return(BAD);
+		return BAD;
 	}
 
-	return(FINE);
+	return FINE;
 }
 
 /*****************************************************************************
@@ -734,7 +669,7 @@ static int dispatch_settings(xvid_mplayer_module_t *mod)
 	xvid_enc_frame_t  *frame      = &mod->frame;
 	xvid_plugin_single_t *onepass = &mod->onepass;
 	xvid_plugin_2pass2_t *pass2   = &mod->pass2;
-	XVIDRational ar;
+	AVRational ar;
 
 	const int motion_presets[7] =
 		{
@@ -749,16 +684,16 @@ static int dispatch_settings(xvid_mplayer_module_t *mod)
 		};
 
 	//profile is unrestricted as default
-	profile_t *selected_profile =  profileFromName("unrestricted");
+	const profile_t *selected_profile =  profileFromName("unrestricted");
 	if(xvidenc_profile)
 		selected_profile = profileFromName(xvidenc_profile);
 	if(!selected_profile)
 	{
 		mp_msg(MSGT_MENCODER,MSGL_ERR,
 			"xvid:[ERROR] \"%s\" is an invalid profile name\n", xvidenc_profile);
-		return(BAD);
+		return BAD;
 	}
-	
+
 	/* -------------------------------------------------------------------
 	 * Dispatch all settings having an impact on the "create" structure
 	 * This includes plugins as they are passed to encore through the
@@ -813,7 +748,7 @@ static int dispatch_settings(xvid_mplayer_module_t *mod)
 	if(selected_profile->flags & PROFILE_DXN)
 		create->global |= XVID_GLOBAL_DIVX5_USERDATA;
 #endif
-	
+
 	create->max_key_interval = xvidenc_max_key_interval;
 	create->frame_drop_ratio = xvidenc_frame_drop_ratio;
 	create->min_quant[0] = xvidenc_min_quant[0];
@@ -851,13 +786,44 @@ static int dispatch_settings(xvid_mplayer_module_t *mod)
 	/* VBV */
 
 #if XVID_API >= XVID_MAKE_API(4,1)
-	pass2->vbv_size = selected_profile->max_vbv_size;
-	pass2->vbv_initial = (selected_profile->max_vbv_size*3)>>2; /* 75% */
-	pass2->vbv_maxrate = selected_profile->max_bitrate;
-	pass2->vbv_peakrate = selected_profile->vbv_peakrate*3;
+	if(xvidenc_vbv_size > 0) {
+		if(selected_profile->max_vbv_size > 0 && xvidenc_vbv_size > selected_profile->max_vbv_size) {
+			mp_msg(MSGT_MENCODER,MSGL_ERR,
+				"xvid:[ERROR] Selected profile limits vbv_bufsize <= %d\n", selected_profile->max_vbv_size);
+			return BAD;
+		}
+
+		pass2->vbv_size = xvidenc_vbv_size;
+	} else {
+		pass2->vbv_size = selected_profile->max_vbv_size;
+	}
+
+	if(xvidenc_vbv_initial > 0) {
+		if(xvidenc_vbv_initial > pass2->vbv_size) {
+			mp_msg(MSGT_MENCODER,MSGL_ERR,
+				"xvid:[ERROR] vbv_initial must be <= vbv_bufsize\n");
+			return BAD;
+		}
+
+		pass2->vbv_initial = xvidenc_vbv_initial;
+	} else {
+		pass2->vbv_initial = (pass2->vbv_size*3)>>2; /* 75% */
+	}
+
+	if(xvidenc_vbv_maxrate > 0) {
+		if(selected_profile->max_bitrate > 0 && xvidenc_vbv_maxrate > selected_profile->max_bitrate) {
+			mp_msg(MSGT_MENCODER,MSGL_ERR,
+				"xvid:[ERROR] Selected profile limits vbv_maxrate <= %d\n", selected_profile->max_bitrate);
+			return BAD;
+		}
+
+		pass2->vbv_maxrate = xvidenc_vbv_maxrate;
+	} else {
+		pass2->vbv_maxrate = selected_profile->max_bitrate;
+	}
+
+	pass2->vbv_peakrate = selected_profile->vbv_peakrate; /* Useless */
 #endif
-// XXX: xvidcore currently provides a "peak bits over 3 seconds" constraint.
-// according to the latest dxn literature, a 1 second constraint is now used
 
 	create->profile = selected_profile->id;
 
@@ -892,7 +858,7 @@ static int dispatch_settings(xvid_mplayer_module_t *mod)
 		frame->quant_intra_matrix = (unsigned char*)read_matrix(xvidenc_intra_matrix_file);
 		if(frame->quant_intra_matrix != NULL) {
 			mp_msg(MSGT_MENCODER, MSGL_INFO, "xvid: Loaded Intra matrix (switching to mpeg quantization type)\n");
-			if(xvidenc_quant_method) free(xvidenc_quant_method);
+			free(xvidenc_quant_method);
 			xvidenc_quant_method = strdup("mpeg");
 		}
 	}
@@ -900,7 +866,7 @@ static int dispatch_settings(xvid_mplayer_module_t *mod)
 		frame->quant_inter_matrix = read_matrix(xvidenc_inter_matrix_file);
 		if(frame->quant_inter_matrix) {
 			mp_msg(MSGT_MENCODER, MSGL_INFO, "\nxvid: Loaded Inter matrix (switching to mpeg quantization type)\n");
-			if(xvidenc_quant_method) free(xvidenc_quant_method);
+			free(xvidenc_quant_method);
 			xvidenc_quant_method = strdup("mpeg");
 		}
 	}
@@ -976,12 +942,12 @@ static int dispatch_settings(xvid_mplayer_module_t *mod)
 
 	if( !(selected_profile->flags & PROFILE_DXN) )
 	{
-	if(xvidenc_dar_aspect > 0) 
-	    ar = xvid_d2q(xvidenc_dar_aspect * mod->mux->bih->biHeight / mod->mux->bih->biWidth, 255);
+	if(xvidenc_dar_aspect > 0)
+	    ar = av_d2q(xvidenc_dar_aspect * mod->mux->bih->biHeight / mod->mux->bih->biWidth, 255);
 	else if(xvidenc_autoaspect)
-	    ar = xvid_d2q((float)mod->d_width / mod->d_height * mod->mux->bih->biHeight / mod->mux->bih->biWidth, 255);
+	    ar = av_d2q((float)mod->d_width / mod->d_height * mod->mux->bih->biHeight / mod->mux->bih->biWidth, 255);
 	else ar.num = ar.den = 0;
-	
+
 	if(ar.den != 0) {
 		if(ar.num == 12 && ar.den == 11)
 		    frame->par = XVID_PAR_43_PAL;
@@ -992,12 +958,12 @@ static int dispatch_settings(xvid_mplayer_module_t *mod)
 		else if(ar.num == 40 && ar.den == 33)
 		    frame->par = XVID_PAR_169_NTSC;
 		else
-		{    
+		{
 		    frame->par = XVID_PAR_EXT;
 		    frame->par_width = ar.num;
 		    frame->par_height= ar.den;
 		}
-			
+
 	} else if(xvidenc_par != NULL) {
 		if(strcasecmp(xvidenc_par, "pal43") == 0)
 			frame->par = XVID_PAR_43_PAL;
@@ -1024,14 +990,14 @@ static int dispatch_settings(xvid_mplayer_module_t *mod)
 	}
 
 	/* Display par information */
-	mp_msg(MSGT_MENCODER, MSGL_INFO, "xvid: par=%d/%d (%s), displayed=%dx%d, sampled=%dx%d\n", 
+	mp_msg(MSGT_MENCODER, MSGL_INFO, "xvid: par=%d/%d (%s), displayed=%dx%d, sampled=%dx%d\n",
 			ar.num, ar.den, par_string(frame->par),
 			mod->d_width, mod->d_height, mod->mux->bih->biWidth, mod->mux->bih->biHeight);
 	}
 	else
 		mp_msg(MSGT_MENCODER, MSGL_INFO,
 			"xvid: par=0/0 (vga11) forced by choosing a DXN profile\n");
-	return(FINE);
+	return FINE;
 }
 
 static int set_create_struct(xvid_mplayer_module_t *mod)
@@ -1045,7 +1011,7 @@ static int set_create_struct(xvid_mplayer_module_t *mod)
 	if(xvidenc_profile)
 		selected_profile = profileFromName(xvidenc_profile);
 	if(!selected_profile)
-		return(BAD);
+		return BAD;
 
 	/* Most of the structure is initialized by dispatch settings, only a
 	 * few things are missing  */
@@ -1065,7 +1031,7 @@ static int set_create_struct(xvid_mplayer_module_t *mod)
 		mp_msg(MSGT_MENCODER,MSGL_ERR,
 			"xvid:[ERROR] resolution must be <= %dx%d for the chosen profile\n",
 			selected_profile->width, selected_profile->height);
-		return(BAD);
+		return BAD;
 	}
 
 	/* FPS */
@@ -1076,10 +1042,9 @@ static int set_create_struct(xvid_mplayer_module_t *mod)
 	if( ((float)mod->mux->h.dwRate/(float)mod->mux->h.dwScale > (float)selected_profile->fps) &&
 		(selected_profile->fps != 0))
 	{
-		mp_msg(MSGT_MENCODER,MSGL_ERR,
-			"xvid:[ERROR] frame rate must be <= %d for the chosen profile\n",
+		mp_msg(MSGT_MENCODER,MSGL_WARN,
+			"xvid:[WARNING] frame rate should be <= %d for the chosen profile\n",
 			selected_profile->fps);
-		return(BAD);
 	}
 
 	/* Encodings zones */
@@ -1101,7 +1066,7 @@ static int set_create_struct(xvid_mplayer_module_t *mod)
 		mp_msg(MSGT_MENCODER, MSGL_ERR,
 		       "xvid: you can't mix Fixed Quantizer Rate Control"
 		       " with other Rate Control mechanisms\n");
-		return(BAD);
+		return BAD;
 	}
 
 	if(xvidenc_bitrate != 0 && xvidenc_pass == 1) {
@@ -1138,8 +1103,8 @@ static int set_create_struct(xvid_mplayer_module_t *mod)
 	if(pass == 0) {
 		mp_msg(MSGT_MENCODER, MSGL_ERR,
 		       "xvid: you must specify one or a valid combination of "
-		       "'bitrate', 'pass', 'quantizer' settings\n");
-		return(BAD);
+		       "'bitrate', 'pass', 'fixed_quant' settings\n");
+		return BAD;
 	}
 
 	/* Sanity checking */
@@ -1148,7 +1113,7 @@ static int set_create_struct(xvid_mplayer_module_t *mod)
 		mp_msg(MSGT_MENCODER, MSGL_ERR,
 		       "xvid: this code should not be reached - fill a bug "
 		       "report\n");
-		return(BAD);
+		return BAD;
 	}
 
 	/* This is a single pass encoding: either a CBR pass or a constant
@@ -1164,8 +1129,8 @@ static int set_create_struct(xvid_mplayer_module_t *mod)
 		/* Quantizer mode uses the same plugin, we have only to define
 		 * a constant quantizer zone beginning at frame 0 */
 		if(pass == MODE_QUANT) {
-                        XVIDRational squant;
-			squant = xvid_d2q(xvidenc_quantizer,128);
+                        AVRational squant;
+			squant = av_d2q(xvidenc_quantizer,128);
 
 			create->zones[create->num_zones].mode      = XVID_ZONE_QUANT;
 			create->zones[create->num_zones].frame     = 0;
@@ -1178,7 +1143,7 @@ static int set_create_struct(xvid_mplayer_module_t *mod)
 			       squant.num,
 			       squant.den,
 			       (float)(squant.num)/(float)(squant.den));
-			
+
 		} else {
 			mp_msg(MSGT_MENCODER, MSGL_INFO,
 			       "xvid: CBR Rate Control -- bitrate=%dkbit/s\n",
@@ -1246,7 +1211,7 @@ static int set_create_struct(xvid_mplayer_module_t *mod)
 	// parse zones
 	if (xvidenc_zones != NULL && doZones > 0) // do not apply zones in CQ, and first pass mode (xvid vfw doesn't allow them in those modes either)
 	{
-		void *p;
+		char *p;
 		int i;
 		p = xvidenc_zones;
 		create->num_zones = 0; // set the number of zones back to zero, this overwrites the zone defined for CQ - desired because each zone has to be specified on the commandline even in cq mode
@@ -1260,7 +1225,7 @@ static int set_create_struct(xvid_mplayer_module_t *mod)
         		if(e != 3)
 			{
 	    			mp_msg(MSGT_MENCODER,MSGL_ERR, "error parsing zones\n");
-            		return(BAD);
+            		return BAD;
         		}
 			q = (int)(value * 100);
 			if (mode == 'q')
@@ -1268,7 +1233,7 @@ static int set_create_struct(xvid_mplayer_module_t *mod)
 				if (q < 200 || q > 3100) // make sure that quantizer is in allowable range
 				{
 					mp_msg(MSGT_MENCODER, MSGL_ERR, "zone quantizer must be between 2 and 31\n");
-					return(BAD);
+					return BAD;
 				}
 				else
 				{
@@ -1280,7 +1245,7 @@ static int set_create_struct(xvid_mplayer_module_t *mod)
 				if (q < 1 || q > 200)
 				{
 					mp_msg(MSGT_MENCODER, MSGL_ERR, "zone weight must be between 1 and 200\n");
-					return(BAD);
+					return BAD;
 				}
 				else
 				{
@@ -1299,7 +1264,7 @@ static int set_create_struct(xvid_mplayer_module_t *mod)
         		if(p) p++;
     		}
 	}
-	return(FINE);
+	return FINE;
 }
 
 static int set_frame_struct(xvid_mplayer_module_t *mod, mp_image_t *mpi)
@@ -1330,7 +1295,7 @@ static int set_frame_struct(xvid_mplayer_module_t *mod, mp_image_t *mpi)
 		mp_msg(MSGT_MENCODER, MSGL_ERR,
 		       "xvid: unsupported picture format (%s)!\n",
 		       vo_format_name(mpi->imgfmt));
-		return(BAD);
+		return BAD;
 	}
 
 	/* Bind source frame */
@@ -1345,17 +1310,17 @@ static int set_frame_struct(xvid_mplayer_module_t *mod, mp_image_t *mpi)
 	 * plugins */
 	frame->quant = 0;
 
-	return(FINE);
+	return FINE;
 }
 
 static void
-flush_internal_buffers(xvid_mplayer_module_t *mod)		
+flush_internal_buffers(xvid_mplayer_module_t *mod)
 {
 	int size;
 	xvid_enc_frame_t *frame = &mod->frame;
 
 	if (mod->instance == NULL)
-	    return;/*encoder not inited*/
+	    return; /* encoder not initialized */
 
 	/* Init a fake frame to force flushing */
 	frame->version = XVID_VERSION;
@@ -1413,9 +1378,8 @@ update_stats(xvid_mplayer_module_t *mod, xvid_enc_stats_t *stats)
 			mod->max_sse_v = stats->sse_v;
 			mod->max_framenum = mod->frames;
 		}
-		
-		if (xvidenc_psnr) {
-			if (!mod->fvstats) {
+
+		if (xvidenc_psnr && !mod->fvstats) {
 				char filename[20];
 				time_t today2;
 				struct tm *today;
@@ -1428,7 +1392,8 @@ update_stats(xvid_mplayer_module_t *mod, xvid_enc_stats_t *stats)
 					/* Disable PSNR file output so we don't get here again */
 					xvidenc_psnr = 0;
 				}
-			}
+		}
+		if (xvidenc_psnr) {
 			fprintf (mod->fvstats, "%6d, %2d, %6d, %2.2f, %2.2f, %2.2f, %2.2f %c\n",
 					mod->frames,
 					stats->quant,
@@ -1485,10 +1450,10 @@ static void *read_matrix(unsigned char *filename)
 	int i;
 	unsigned char *matrix;
 	FILE *input;
-	
+
 	/* Allocate matrix space */
 	if((matrix = malloc(64*sizeof(unsigned char))) == NULL)
-	   return(NULL);
+	   return NULL;
 
 	/* Open the matrix file */
 	if((input = fopen(filename, "rb")) == NULL) {
@@ -1496,7 +1461,7 @@ static void *read_matrix(unsigned char *filename)
 			"xvid: Error opening the matrix file %s\n",
 			filename);
 		free(matrix);
-		return(NULL);
+		return NULL;
 	}
 
 	/* Read the matrix */
@@ -1511,7 +1476,7 @@ static void *read_matrix(unsigned char *filename)
 				filename);
 			free(matrix);
 			fclose(input);
-			return(NULL);
+			return NULL;
 		}
 
 		/* Clamp the value to safe range */
@@ -1520,14 +1485,11 @@ static void *read_matrix(unsigned char *filename)
 		matrix[i] = value;
 	}
 
-	/* Fills the rest with 1 */
-	while(i<64) matrix[i++] = 1;
-
 	/* We're done */
 	fclose(input);
 
-	return(matrix);
-	
+	return matrix;
+
 }
 
 
@@ -1558,7 +1520,7 @@ par_string(int parcode)
 		par_string = "unknown";
 		break;
 	}
-	return (par_string);
+	return par_string;
 }
 
 static const char *errorstring(int err)
@@ -1584,14 +1546,14 @@ static const char *errorstring(int err)
 		error = "Unknown";
 	}
 
-	return(error);
+	return error;
 }
 
 /*****************************************************************************
  * Module structure definition
  ****************************************************************************/
 
-vf_info_t ve_info_xvid = {
+const vf_info_t ve_info_xvid = {
 	"XviD 1.0 encoder",
 	"xvid",
 	"Marco Belli <elcabesa@inwind.it>, Edouard Gomez <ed.gomez@free.fr>",

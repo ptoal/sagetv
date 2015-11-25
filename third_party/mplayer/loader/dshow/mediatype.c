@@ -20,38 +20,32 @@
  *     Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
  *
  */
-#include "mediatype.h"
 #include "mp_msg.h"
-#include "wine/winerror.h"
-#include "com.h"
-
-
-#ifndef NOAVIFILE_HEADERS
-#include "audiodecoder.h"
-#include "except.h"
-#else
+#include "libmpcodecs/img_format.h"
+#include "loader/wine/winerror.h"
+#include "loader/com.h"
+#include "mediatype.h"
 #include "libwin32.h"
-#endif
 
 void DisplayMediaType(const char * label,const AM_MEDIA_TYPE* pmt){
     WAVEFORMATEX* pWF;
     VIDEOINFOHEADER* Vhdr;
     int i;
     GUID* iid;
-    
-   
+
+
     Debug mp_msg(MSGT_LOADER,MSGL_DBG4,"=======================\n");
-    if(label)
+    if(label){
         Debug mp_msg(MSGT_LOADER,MSGL_DBG4,"AM_MEDIA_TYPE: %s\n",label);
-    else
+    }else
         Debug mp_msg(MSGT_LOADER,MSGL_DBG4,"AM_MEDIA_TYPE:\n");
     Debug mp_msg(MSGT_LOADER,MSGL_DBG4,"-(Ptr:%p)--------\n",pmt);
     for(i=0;i<sizeof(AM_MEDIA_TYPE);i++){
         Debug mp_msg(MSGT_LOADER,MSGL_DBG4,"%02x ",(BYTE)((BYTE*)pmt)[i]);
         if((i+1)%8==0) Debug mp_msg(MSGT_LOADER,MSGL_DBG4,"\n");
     }
-    if((i)%8!=0) printf("\n");
-    Debug mp_msg(MSGT_LOADER,MSGL_DBG4,"-(Ptr:%p)--(%02d)--\n",pmt->pbFormat,pmt->cbFormat);
+    if((i)%8!=0) Debug mp_msg(MSGT_LOADER,MSGL_DBG4,"\n");
+    Debug mp_msg(MSGT_LOADER,MSGL_DBG4,"-(Ptr:%p)--(%lu)--\n",pmt->pbFormat,pmt->cbFormat);
     for(i=0;i<pmt->cbFormat;i++){
         Debug mp_msg(MSGT_LOADER,MSGL_DBG4,"%02x ",(BYTE)pmt->pbFormat[i]);
         if((i+1)%8==0) Debug mp_msg(MSGT_LOADER,MSGL_DBG4,"\n");
@@ -78,21 +72,21 @@ void DisplayMediaType(const char * label,const AM_MEDIA_TYPE* pmt){
     if(pmt && memcmp(&pmt->formattype,&FORMAT_WaveFormatEx,16)==0 && pmt->pbFormat){
     pWF=(WAVEFORMATEX*)pmt->pbFormat;
     Debug mp_msg(MSGT_LOADER,MSGL_DBG4,"PMT: nChannels %d\n",pWF->nChannels);
-    Debug mp_msg(MSGT_LOADER,MSGL_DBG4,"PMT: nSamplesPerSec %d\n",pWF->nSamplesPerSec);
+    Debug mp_msg(MSGT_LOADER,MSGL_DBG4,"PMT: nSamplesPerSec %ld\n",pWF->nSamplesPerSec);
     Debug mp_msg(MSGT_LOADER,MSGL_DBG4,"PMT: wBitsPerSample %d\n",pWF->wBitsPerSample);
     Debug mp_msg(MSGT_LOADER,MSGL_DBG4,"PMT: nBlockAlign %d\n",pWF->nBlockAlign);
-    Debug mp_msg(MSGT_LOADER,MSGL_DBG4,"PMT: nAvgBytesPerSec %d\n",pWF->nAvgBytesPerSec);
+    Debug mp_msg(MSGT_LOADER,MSGL_DBG4,"PMT: nAvgBytesPerSec %ld\n",pWF->nAvgBytesPerSec);
     Debug mp_msg(MSGT_LOADER,MSGL_DBG4,"PMT: SampleSize %ld\n",pmt->lSampleSize);
     }
     if(pmt && memcmp(&pmt->formattype,&FORMAT_VideoInfo,16)==0 && pmt->pbFormat){
     Vhdr=(VIDEOINFOHEADER*)pmt->pbFormat;
     Debug mp_msg(MSGT_LOADER,MSGL_DBG4,"Vhdr: dwBitRate %ld\n",Vhdr->dwBitRate);
     Debug mp_msg(MSGT_LOADER,MSGL_DBG4,"Vhdr: biWidth %ld\n",Vhdr->bmiHeader.biWidth);
-    Debug mp_msg(MSGT_LOADER,MSGL_DBG4,"Vhdr: biHeight %d\n",Vhdr->bmiHeader.biHeight);
-    Debug mp_msg(MSGT_LOADER,MSGL_DBG4,"Vhdr: biSizeImage %d\n",Vhdr->bmiHeader.biSizeImage);
+    Debug mp_msg(MSGT_LOADER,MSGL_DBG4,"Vhdr: biHeight %ld\n",Vhdr->bmiHeader.biHeight);
+    Debug mp_msg(MSGT_LOADER,MSGL_DBG4,"Vhdr: biSizeImage %ld\n",Vhdr->bmiHeader.biSizeImage);
     Debug mp_msg(MSGT_LOADER,MSGL_DBG4,"Vhdr: biBitCount %d\n",Vhdr->bmiHeader.biBitCount);
     if(Vhdr->bmiHeader.biCompression){
-        Debug mp_msg(MSGT_LOADER,MSGL_DBG4,"Vhdr: biComression 0x%08x (%s)\n",Vhdr->bmiHeader.biCompression,vo_format_name(Vhdr->bmiHeader.biCompression));
+        Debug mp_msg(MSGT_LOADER,MSGL_DBG4,"Vhdr: biComression 0x%08lx (%s)\n",Vhdr->bmiHeader.biCompression,vo_format_name(Vhdr->bmiHeader.biCompression));
     }else
         Debug mp_msg(MSGT_LOADER,MSGL_DBG4,"Vhdr: biComression 0x00000000\n");
 
@@ -109,7 +103,7 @@ HRESULT CopyMediaType(AM_MEDIA_TYPE * pDest, const AM_MEDIA_TYPE *pSrc)
     if(pSrc == pDest) return E_INVALIDARG;
 
     if(!pSrc->pbFormat && pSrc->cbFormat) return E_POINTER;
-    
+
     memcpy(pDest, pSrc, sizeof(AM_MEDIA_TYPE));
     if (!pSrc->pbFormat) return S_OK;
     if (!(pDest->pbFormat = CoTaskMemAlloc(pSrc->cbFormat)))
@@ -162,6 +156,6 @@ void DeleteMediaType(AM_MEDIA_TYPE * pMediaType)
 #define IsEqualGUID(a,b) (memcmp(a,b,16)==0)
 int CompareMediaTypes(const AM_MEDIA_TYPE * pmt1, const AM_MEDIA_TYPE * pmt2, int bWildcards)
 {
-    return (((bWildcards && (IsEqualGUID(&pmt1->majortype, &GUID_NULL) || IsEqualGUID(&pmt2->majortype, &GUID_NULL))) || IsEqualGUID(&pmt1->majortype, &pmt2->majortype)) &&
-            ((bWildcards && (IsEqualGUID(&pmt1->subtype, &GUID_NULL)   || IsEqualGUID(&pmt2->subtype, &GUID_NULL)))   || IsEqualGUID(&pmt1->subtype, &pmt2->subtype)));
+    return  ((bWildcards && (IsEqualGUID(&pmt1->majortype, &GUID_NULL) || IsEqualGUID(&pmt2->majortype, &GUID_NULL))) || IsEqualGUID(&pmt1->majortype, &pmt2->majortype)) &&
+            ((bWildcards && (IsEqualGUID(&pmt1->subtype, &GUID_NULL)   || IsEqualGUID(&pmt2->subtype, &GUID_NULL)))   || IsEqualGUID(&pmt1->subtype, &pmt2->subtype));
 }

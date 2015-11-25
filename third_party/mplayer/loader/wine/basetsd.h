@@ -6,19 +6,12 @@
 /*
  * Modified for use with MPlayer, detailed changelog at
  * http://svn.mplayerhq.hu/mplayer/trunk/
- * $Id: basetsd.h,v 1.3 2007-04-10 19:33:31 Narflex Exp $
  */
 
-#ifndef __WINE_BASETSD_H
-#define __WINE_BASETSD_H
+#ifndef MPLAYER_BASETSD_H
+#define MPLAYER_BASETSD_H
 
-#ifdef __WINE__
 #include "config.h"
-#endif /* defined(__WINE__) */
-
-#ifdef __cplusplus
-extern "C" {
-#endif /* defined(__cplusplus) */
 
 /*
  * Win32 was easy to implement under Unix since most (all?) 32-bit
@@ -72,18 +65,6 @@ typedef unsigned __int32 __uint32;
 typedef unsigned __int64 __uint64;
 
 #endif /* __INTEL_COMPILER */
-
-#if defined(_WIN64)
-
-typedef __uint32 __ptr32;
-typedef void    *__ptr64;
-
-#else /* FIXME: defined(_WIN32) */
-
-typedef void    *__ptr32;
-typedef __uint64 __ptr64;
-
-#endif
 
 /* Always signed and 32 bit wide */
 
@@ -168,11 +149,4 @@ typedef __uint32 DWORD_PTR, *PDWORD_PTR;
 typedef INT_PTR SSIZE_T, *PSSIZE_T;
 typedef UINT_PTR SIZE_T, *PSIZE_T;
 
-#ifdef __cplusplus
-} /* extern "C" */
-#endif /* defined(__cplusplus) */
-
-#endif /* !defined(__WINE_BASETSD_H) */
-
-
-
+#endif /* MPLAYER_BASETSD_H */

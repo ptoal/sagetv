@@ -1,34 +1,37 @@
-/**
-    Video bridge detection for SiS 300 and 310/325 series chips.
-
-    Copyright 2003 Jake Page, Sugar Media.
-
-    Based on SiS Xv driver:
-    Copyright 2002-2003 by Thomas Winischhofer, Vienna, Austria.
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
-
-**/
+/*
+ * VIDIX driver for SiS chipsets.
+ * Video bridge detection for SiS 300 and 310/325 series.
+ *
+ * Copyright (C) 2003 Jake Page, Sugar Media
+ * Based on SiS Xv driver
+ * Copyright 2002-2003 by Thomas Winischhofer, Vienna, Austria
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 
-#include "../libdha/libdha.h"
+#include "dha.h"
+#include "sis_bridge.h"
 #include "sis_regs.h"
 #include "sis_defs.h"
+#include "mp_msg.h"
 
 
 static void sis_ddc2_delay(unsigned short delaytime)
@@ -55,7 +58,7 @@ static int sis_do_sense(int tempbl, int tempbh, int tempcl, int tempch)
     inSISIDXREG(SISPART4, 0x03, temp);
     temp ^= 0x0e;
     temp &= tempch;
-    return (temp == tempch);
+    return temp == tempch;
 }
 
 
@@ -79,42 +82,7 @@ static void sis_sense_30x(void)
 
     sis_do_sense(0, 0, 0, 0);
 
-    if ((sis_vga_engine == SIS_315_VGA) ||
-	(sis_device_id == DEVICE_SIS_300)) {
-#if 0
-	if (0 /*pSiS->sishw_ext.UseROM */ ) {
-	    if (sis_vga_engine == SIS_300_VGA)
-		temp = 0xfe;
-	    else {
-		temp = 0xf3;
-		if (sis_device_id == DEVICE_SIS_330)
-		    temp = 0x11b;
-	    }
-	    if (pSiS->BIOS[temp] & 0x08) {
-		if (sis_verbose > 1) {
-		    printf
-			("[SiS] SiS30x: Video bridge has DVI-I TMDS/VGA combo connector\n");
-		}
-		orSISIDXREG(SISCR, 0x32, 0x80);
-	    } else {
-		andSISIDXREG(SISCR, 0x32, 0x7f);
-	    }
-	}
-#endif
-    }
-
     if (sis_vga_engine == SIS_300_VGA) {
-	if (0 /*pSiS->sishw_ext.UseROM */ ) {
-#if 0
-	    testvga2_tempbh = pSiS->BIOS[0xf9];
-	    testvga2_tempbl = pSiS->BIOS[0xf8];
-	    testsvhs_tempbh = pSiS->BIOS[0xfb];
-	    testsvhs_tempbl = pSiS->BIOS[0xfa];
-	    testcvbs_tempbh = pSiS->BIOS[0xfd];
-	    testcvbs_tempbl = pSiS->BIOS[0xfc];
-	    biosflag = pSiS->BIOS[0xfe];
-#endif
-	} else {
 	    testvga2_tempbh = 0x00;
 	    testvga2_tempbl = 0xd1;
 	    testsvhs_tempbh = 0x00;
@@ -122,7 +90,7 @@ static void sis_sense_30x(void)
 	    testcvbs_tempbh = 0x00;
 	    testcvbs_tempbl = 0xb3;
 	    biosflag = 0;
-	}
+
 	if (sis_vbflags & (VB_301B | VB_302B | VB_301LV | VB_302LV)) {
 	    testvga2_tempbh = 0x01;
 	    testvga2_tempbl = 0x90;
@@ -157,27 +125,6 @@ static void sis_sense_30x(void)
 	    }
 	}
     } else {
-	if (0 /*pSiS->sishw_ext.UseROM */ ) {
-#if 0
-	    if (sis_device_id == DEVICE_SIS_330) {
-		testvga2_tempbh = pSiS->BIOS[0xe6];
-		testvga2_tempbl = pSiS->BIOS[0xe5];
-		testsvhs_tempbh = pSiS->BIOS[0xe8];
-		testsvhs_tempbl = pSiS->BIOS[0xe7];
-		testcvbs_tempbh = pSiS->BIOS[0xea];
-		testcvbs_tempbl = pSiS->BIOS[0xe9];
-		biosflag = pSiS->BIOS[0x11b];
-	    } else {
-		testvga2_tempbh = pSiS->BIOS[0xbe];
-		testvga2_tempbl = pSiS->BIOS[0xbd];
-		testsvhs_tempbh = pSiS->BIOS[0xc0];
-		testsvhs_tempbl = pSiS->BIOS[0xbf];
-		testcvbs_tempbh = pSiS->BIOS[0xc2];
-		testcvbs_tempbl = pSiS->BIOS[0xc1];
-		biosflag = pSiS->BIOS[0xf3];
-	    }
-#endif
-	} else {
 	    testvga2_tempbh = 0x00;
 	    testvga2_tempbl = 0xd1;
 	    testsvhs_tempbh = 0x00;
@@ -185,28 +132,8 @@ static void sis_sense_30x(void)
 	    testcvbs_tempbh = 0x00;
 	    testcvbs_tempbl = 0xb3;
 	    biosflag = 0;
-	}
 
 	if (sis_vbflags & (VB_301B | VB_302B | VB_301LV | VB_302LV)) {
-	    if (0 /*pSiS->sishw_ext.UseROM */ ) {
-#if 0
-		if (sis_device_id == DEVICE_SIS_330) {
-		    testvga2_tempbh = pSiS->BIOS[0xec];
-		    testvga2_tempbl = pSiS->BIOS[0xeb];
-		    testsvhs_tempbh = pSiS->BIOS[0xee];
-		    testsvhs_tempbl = pSiS->BIOS[0xed];
-		    testcvbs_tempbh = pSiS->BIOS[0xf0];
-		    testcvbs_tempbl = pSiS->BIOS[0xef];
-		} else {
-		    testvga2_tempbh = pSiS->BIOS[0xc4];
-		    testvga2_tempbl = pSiS->BIOS[0xc3];
-		    testsvhs_tempbh = pSiS->BIOS[0xc6];
-		    testsvhs_tempbl = pSiS->BIOS[0xc5];
-		    testcvbs_tempbh = pSiS->BIOS[0xc8];
-		    testcvbs_tempbl = pSiS->BIOS[0xc7];
-		}
-#endif
-	    } else {
 		if (sis_vbflags & (VB_301B | VB_302B)) {
 		    testvga2_tempbh = 0x01;
 		    testvga2_tempbl = 0x90;
@@ -222,7 +149,6 @@ static void sis_sense_30x(void)
 		    testcvbs_tempbh = 0x01;
 		    testcvbs_tempbl = 0x00;
 		}
-	    }
 	}
 	if (sis_vbflags & (VB_301 | VB_301B | VB_302B)) {
 	    inSISIDXREG(SISPART4, 0x01, myflag);
@@ -276,16 +202,16 @@ static void sis_sense_30x(void)
 	if (result) {
 	    if (biosflag & 0x01) {
 		if (sis_verbose > 1) {
-		    printf
-			("[SiS] SiS30x: Detected TV connected to SCART output\n");
+		    mp_msg(MSGT_VO, MSGL_STATUS,
+			"[SiS] SiS30x: Detected TV connected to SCART output\n");
 		}
 		sis_vbflags |= TV_SCART;
 		orSISIDXREG(SISCR, 0x32, 0x04);
 		/*pSiS->postVBCR32 |= 0x04; */
 	    } else {
 		if (sis_verbose > 1) {
-		    printf
-			("[SiS] SiS30x: Detected secondary VGA connection\n");
+		    mp_msg(MSGT_VO, MSGL_STATUS,
+			"[SiS] SiS30x: Detected secondary VGA connection\n");
 		}
 		sis_vbflags |= VGA2_CONNECTED;
 		orSISIDXREG(SISCR, 0x32, 0x10);
@@ -316,8 +242,8 @@ static void sis_sense_30x(void)
     }
     if (result) {
 	if (sis_verbose > 1) {
-	    printf
-		("[SiS] SiS30x: Detected TV connected to SVIDEO output\n");
+	    mp_msg(MSGT_VO, MSGL_STATUS,
+		"[SiS] SiS30x: Detected TV connected to SVIDEO output\n");
 	}
 	/* TW: So we can be sure that there IS a SVIDEO output */
 	sis_vbflags |= TV_SVIDEO;
@@ -339,8 +265,8 @@ static void sis_sense_30x(void)
 	}
 	if (result) {
 	    if (sis_verbose > 1) {
-		printf
-		    ("[SiS] SiS30x: Detected TV connected to COMPOSITE output\n");
+		mp_msg(MSGT_VO, MSGL_STATUS,
+		    "[SiS] SiS30x: Detected TV connected to COMPOSITE output\n");
 	    }
 	    sis_vbflags |= TV_AVIDEO;
 	    orSISIDXREG(SISCR, 0x32, 0x01);
@@ -387,7 +313,7 @@ static void sis_detect_crt1(void)
 	}
     }
     if (sis_verbose > 0) {
-	printf("[SiS] %sCRT1 connection detected\n",
+	mp_msg(MSGT_VO, MSGL_STATUS, "[SiS] %sCRT1 connection detected\n",
 	       sis_crt1_off ? "No " : "");
     }
 }
@@ -483,7 +409,7 @@ static void sis_detect_tv(void)
 	(TV_SCART | TV_SVIDEO | TV_AVIDEO | TV_HIVISION | TV_CHSCART |
 	 TV_CHHDTV)) {
 	if (sis_verbose > 0) {
-	    printf("[SiS] %sTV standard %s\n",
+	    mp_msg(MSGT_VO, MSGL_STATUS, "[SiS] %sTV standard %s\n",
 		   (sis_vbflags & (TV_CHSCART | TV_CHHDTV)) ? "Using " :
 		   "Detected default ",
 		   (sis_vbflags & TV_NTSC) ? ((sis_vbflags & TV_CHHDTV) ?
@@ -511,33 +437,6 @@ static void sis_detect_crt2(void)
 
     if (CR32 & 0x10)
 	sis_vbflags |= CRT2_VGA;
-
-#if 0
-    if (!(pSiS->nocrt2ddcdetection)) {
-	if (sis_vbflags & (VB_301B | VB_302B)) {
-	    if (!(sis_vbflags & (CRT2_VGA | CRT2_LCD))) {
-		printf
-		    ("[SiS] BIOS detected no secondary VGA, sensing via DDC\n");
-		if (SiS_SenseVGA2DDC(pSiS->SiS_Pr, pSiS)) {
-		    printf
-			("[SiS] DDC error during secondary VGA detection\n");
-		} else {
-		    inSISIDXREG(SISCR, 0x32, CR32);
-		    if (CR32 & 0x10) {
-			sis_vbflags |= CRT2_VGA;
-			/*pSiS->postVBCR32 |= 0x10; */
-			printf
-			    ("[SiS] Detected secondary VGA connection\n");
-		    } else {
-			printf
-			    ("[SiS] No secondary VGA connection detected\n");
-		    }
-		}
-	    }
-	}
-    }
-#endif
-
 }
 
 
@@ -561,8 +460,8 @@ static void sis_detect_video_bridge(void)
 	    sis_vbflags |= VB_302LV;
 	    //pSiS->sishw_ext.ujVBChipID = VB_CHIP_302LV;
 	    if (sis_verbose > 1) {
-		printf
-		    ("[SiS] Detected SiS302LV video bridge (ID 1; Revision 0x%x)\n",
+		mp_msg(MSGT_VO, MSGL_STATUS,
+		    "[SiS] Detected SiS302LV video bridge (ID 1; Revision 0x%x)\n",
 		     temp1);
 	    }
 
@@ -570,8 +469,8 @@ static void sis_detect_video_bridge(void)
 	    sis_vbflags |= VB_301LV;
 	    //pSiS->sishw_ext.ujVBChipID = VB_CHIP_301LV;
 	    if (sis_verbose > 1) {
-		printf
-		    ("[SiS] Detected SiS301LV video bridge (ID 1; Revision 0x%x)\n",
+		mp_msg(MSGT_VO, MSGL_STATUS,
+		    "[SiS] Detected SiS301LV video bridge (ID 1; Revision 0x%x)\n",
 		     temp1);
 	    }
 	} else if (temp1 >= 0xB0) {
@@ -581,16 +480,16 @@ static void sis_detect_video_bridge(void)
 	    if (!(temp2 & 0x02))
 		sis_vbflags |= VB_30xBDH;
 	    if (sis_verbose > 1) {
-		printf
-		    ("[SiS] Detected SiS301B%s video bridge (Revision 0x%x)\n",
+		mp_msg(MSGT_VO, MSGL_STATUS,
+		    "[SiS] Detected SiS301B%s video bridge (Revision 0x%x)\n",
 		     (temp2 & 0x02) ? "" : " (DH)", temp1);
 	    }
 	} else {
 	    sis_vbflags |= VB_301;
 	    //pSiS->sishw_ext.ujVBChipID = VB_CHIP_301;
 	    if (sis_verbose > 1) {
-		printf
-		    ("[SiS] Detected SiS301 video bridge (Revision 0x%x)\n",
+		mp_msg(MSGT_VO, MSGL_STATUS,
+		    "[SiS] Detected SiS301 video bridge (Revision 0x%x)\n",
 		     temp1);
 	    }
 	}
@@ -605,16 +504,16 @@ static void sis_detect_video_bridge(void)
 	    sis_vbflags |= VB_302LV;
 	    //pSiS->sishw_ext.ujVBChipID = VB_CHIP_302LV;
 	    if (sis_verbose > 1) {
-		printf
-		    ("[SiS] Detected SiS302LV video bridge (ID 2; Revision 0x%x)\n",
+		mp_msg(MSGT_VO, MSGL_STATUS,
+		    "[SiS] Detected SiS302LV video bridge (ID 2; Revision 0x%x)\n",
 		     temp1);
 	    }
 	} else if (temp1 >= 0xD0) {
 	    sis_vbflags |= VB_301LV;
 	    //pSiS->sishw_ext.ujVBChipID = VB_CHIP_301LV;
 	    if (sis_verbose > 1) {
-		printf
-		    ("[SiS] Detected SiS301LV video bridge (ID 2; Revision 0x%x)\n",
+		mp_msg(MSGT_VO, MSGL_STATUS,
+		    "[SiS] Detected SiS301LV video bridge (ID 2; Revision 0x%x)\n",
 		     temp1);
 	    }
 	} else {
@@ -624,8 +523,8 @@ static void sis_detect_video_bridge(void)
 	    if (!(temp & 0x02))
 		sis_vbflags |= VB_30xBDH;
 	    if (sis_verbose > 1) {
-		printf
-		    ("[SiS] Detected SiS302B%s video bridge (Revision 0x%x)\n",
+		mp_msg(MSGT_VO, MSGL_STATUS,
+		    "[SiS] Detected SiS302B%s video bridge (Revision 0x%x)\n",
 		     (temp2 & 0x02) ? "" : " (DH)", temp1);
 	    }
 	}
@@ -634,14 +533,14 @@ static void sis_detect_video_bridge(void)
 
     } else if (temp == 3) {
 	if (sis_verbose > 1) {
-	    printf("[SiS] Detected SiS303 video bridge - not supported\n");
+	    mp_msg(MSGT_VO, MSGL_STATUS, "[SiS] Detected SiS303 video bridge - not supported\n");
 	}
     } else {
 	/* big scary mess of code to handle unknown or Chrontel LVDS */
 	/* skipping it for now */
 	if (sis_verbose > 1) {
-	    printf
-		("[SiS] Detected Chrontel video bridge - not supported\n");
+	    mp_msg(MSGT_VO, MSGL_STATUS,
+		"[SiS] Detected Chrontel video bridge - not supported\n");
 	}
     }
 
@@ -649,15 +548,6 @@ static void sis_detect_video_bridge(void)
     /* detects if brdige uses LCDA for low res text modes */
     if (sis_vga_engine == SIS_315_VGA) {
 	if (sis_vbflags & (VB_302B | VB_301LV | VB_302LV)) {
-#if 0
-	    if (pSiS->sisfblcda != 0xff) {
-		if ((pSiS->sisfblcda & 0x03) == 0x03) {
-		    //pSiS->SiS_Pr->SiS_UseLCDA = TRUE;
-		    sis_vbflags |= VB_USELCDA;
-		}
-	    } else
-#endif
-	    {
 		inSISIDXREG(SISCR, 0x34, temp);
 		if (temp <= 0x13) {
 		    inSISIDXREG(SISCR, 0x38, temp);
@@ -675,9 +565,8 @@ static void sis_detect_video_bridge(void)
 			}
 		    }
 		}
-	    }
 	    if (sis_vbflags & VB_USELCDA) {
-		/* printf("Bridge uses LCDA for low resolution and text modes\n"); */
+		/* mp_msg(MSGT_VO, MSGL_STATUS, "[SiS] Bridge uses LCDA for low resolution and text modes\n"); */
 	    }
 	}
     }
@@ -726,22 +615,22 @@ void sis_init_video_bridge(void)
 	else {
 	    sis_vbflags = sis_vbflags & ~(CRT2_LCD);
 	    if (sis_verbose > 0) {
-		printf
-		    ("[SiS] Can't force CRT2 to LCD, no panel detected\n");
+		mp_msg(MSGT_VO, MSGL_STATUS,
+		    "[SiS] Can't force CRT2 to LCD, no panel detected\n");
 	    }
 	}
 	break;
     case CRT2_VGA:
 	if (sis_vbflags & VB_LVDS) {
 	    if (sis_verbose > 0) {
-		printf("[SiS] LVDS does not support secondary VGA\n");
+		mp_msg(MSGT_VO, MSGL_STATUS, "[SiS] LVDS does not support secondary VGA\n");
 	    }
 	    break;
 	}
 	if (sis_vbflags & (VB_301LV | VB_302LV)) {
 	    if (sis_verbose > 0) {
-		printf
-		    ("[SiS] SiS30xLV bridge does not support secondary VGA\n");
+		mp_msg(MSGT_VO, MSGL_STATUS,
+		    "[SiS] SiS30xLV bridge does not support secondary VGA\n");
 	    }
 	    break;
 	}
@@ -799,7 +688,7 @@ void sis_init_video_bridge(void)
     }
 
     if (sis_verbose > 0) {
-	printf("[SiS] Using hardware overlay on CRT%d\n",
+	mp_msg(MSGT_VO, MSGL_STATUS, "[SiS] Using hardware overlay on CRT%d\n",
 	       sis_overlay_on_crt1 ? 1 : 2);
     }
 

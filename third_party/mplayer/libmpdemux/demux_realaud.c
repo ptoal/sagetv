@@ -1,8 +1,23 @@
-#include "config.h"
 /*
-    Realaudio demuxer for MPlayer
-		(c) 2003, 2005 Roberto Togni
-*/
+ * Realaudio demuxer
+ * copyright (c) 2003, 2005 Roberto Togni
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,6 +28,7 @@
 #include "help_mp.h"
 
 #include "stream/stream.h"
+#include "aviprint.h"
 #include "demuxer.h"
 #include "stheader.h"
 
@@ -58,7 +74,7 @@ typedef struct {
 static int ra_check_file(demuxer_t* demuxer)
 {
 	unsigned int chunk_id;
-  
+
 	chunk_id = stream_read_dword_le(demuxer->stream);
 	if (chunk_id == FOURCC_DOTRA)
 		return DEMUXER_TYPE_REALAUDIO;
@@ -142,10 +158,6 @@ static int demux_ra_fill_buffer(demuxer_t *demuxer, demux_stream_t *dsds)
 
 
 
-extern void print_wave_header(WAVEFORMATEX *h, int verbose_level);
-
-
-
 static demuxer_t* demux_open_ra(demuxer_t* demuxer)
 {
 	ra_priv_t* ra_priv = demuxer->priv;
@@ -160,9 +172,8 @@ static demuxer_t* demux_open_ra(demuxer_t* demuxer)
 	memset(ra_priv, 0, sizeof(ra_priv_t));
 
 	demuxer->priv = ra_priv;
-	sh = new_sh_audio(demuxer, 0);
+	sh = new_sh_audio(demuxer, 0, NULL);
 	demuxer->audio->id = 0;
-	sh->ds=demuxer->audio;
 	demuxer->audio->sh = sh;
 
 	ra_priv->version = stream_read_word(demuxer->stream);
@@ -275,8 +286,7 @@ static demuxer_t* demux_open_ra(demuxer_t* demuxer)
 	}
 
 	/* Fill WAVEFORMATEX */
-	sh->wf = malloc(sizeof(WAVEFORMATEX));
-	memset(sh->wf, 0, sizeof(WAVEFORMATEX));
+	sh->wf = calloc(1, sizeof(*sh->wf));
 	sh->wf->nChannels = sh->channels;
 	sh->wf->wBitsPerSample = sh->samplesize;
 	sh->wf->nSamplesPerSec = sh->samplerate;
@@ -323,14 +333,12 @@ static demuxer_t* demux_open_ra(demuxer_t* demuxer)
 
 static void demux_close_ra(demuxer_t *demuxer)
 {
-	ra_priv_t* ra_priv = demuxer->priv;
- 
+    ra_priv_t* ra_priv = demuxer->priv;
+
     if (ra_priv) {
-	    if (ra_priv->audio_buf)
-	        free (ra_priv->audio_buf);
-		free(ra_priv);
+        free(ra_priv->audio_buf);
+        free(ra_priv);
     }
-	return;
 }
 
 
@@ -351,7 +359,7 @@ int demux_seek_ra(demuxer_t *demuxer, float rel_seek_secs, float audio_delay, in
 #endif
 
 
-demuxer_desc_t demuxer_desc_realaudio = {
+const demuxer_desc_t demuxer_desc_realaudio = {
   "Realaudio demuxer",
   "realaudio",
   "REALAUDIO",

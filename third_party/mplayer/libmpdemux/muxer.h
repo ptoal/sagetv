@@ -1,3 +1,30 @@
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
+#ifndef MPLAYER_MUXER_H
+#define MPLAYER_MUXER_H
+
+#include <stdint.h>
+#include <sys/types.h>
+#include "aviheader.h"
+#include "m_option.h"
+#include "ms_hdr.h"
+#include "stream/stream.h"
 
 #define MUXER_MAX_STREAMS 16
 
@@ -40,6 +67,7 @@ typedef struct {
   BITMAPINFOHEADER *bih;   // in format
   int encoder_delay; // in number of frames
   int decoder_delay; // in number of frames
+  int imgfmt;
   // mpeg specific:
   size_t ipb[3]; // sizes of I/P/B frames
   // muxer of that stream
@@ -100,7 +128,12 @@ typedef struct muxbuf_t {
 
 extern char *force_fourcc;
 
+extern const m_option_t lavfopts_conf[];
+extern const m_option_t mpegopts_conf[];
+extern const m_option_t nuvopts_conf[];
+
 muxer_t *muxer_new_muxer(int type,stream_t *stream);
+void muxer_flush(muxer_t *m);
 #define muxer_new_stream(muxer,a) muxer->cont_new_stream(muxer,a)
 #define muxer_stream_fix_parameters(muxer, a) muxer->fix_stream_parameters(a)
 void muxer_write_chunk(muxer_stream_t *s, size_t len, unsigned int flags, double dts, double pts);
@@ -112,3 +145,5 @@ int muxer_init_muxer_mpeg(muxer_t *);
 int muxer_init_muxer_rawvideo(muxer_t *);
 int muxer_init_muxer_lavf(muxer_t *);
 int muxer_init_muxer_rawaudio(muxer_t *);
+
+#endif /* MPLAYER_MUXER_H */

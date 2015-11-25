@@ -1,6 +1,26 @@
+/*
+ * Copyright (C) 2003 Alban Bedel
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -18,13 +38,15 @@ static void print_tdfd_vid_cfg(tdfx_vid_config_t* cfg) {
 	    "  Screen: %d x %d\n",
 	    cfg->version,
 	    cfg->ram_size,
-	    cfg->screen_width, cfg->screen_height);	    
+	    cfg->screen_width, cfg->screen_height);
 }
-     
 
-int main(int argc, char** argv) {
-  int fd,i;
-  unsigned char *mem,*ptr;
+
+int main(void) {
+  int fd;
+  unsigned char *mem;
+  /* int i; */
+  /* unsigned char *ptr; */
   tdfx_vid_agp_move_t move;
   tdfx_vid_config_t cfg;
   tdfx_vid_blit_t blit;
@@ -41,7 +63,7 @@ int main(int argc, char** argv) {
     close(fd);
     return 1;
   }
-  
+
   print_tdfd_vid_cfg(&cfg);
 
   mem = mmap( NULL, 640*480*2, PROT_READ | PROT_WRITE, MAP_SHARED,
@@ -57,9 +79,9 @@ int main(int argc, char** argv) {
 /*     ptr[1] = (i & 0xFF); */
 /*     ptr += 2; */
 /*   } */
-    
+
   memset(mem,0xFF,640*480*2);
-  
+
   memset(&move, 0, sizeof(tdfx_vid_agp_move_t));
   move.width = 640;
   move.height = 240;
@@ -70,7 +92,7 @@ int main(int argc, char** argv) {
     printf("AGP Move failed !!!!\n");
     return 0;
   }
-  
+
   printf("AGP Move ????\n");
   sleep(1);
 
@@ -92,7 +114,7 @@ int main(int argc, char** argv) {
     printf("Blit failed !!!!\n");
     return 0;
   }
-  
+
   close(fd);
   return 1;
 }

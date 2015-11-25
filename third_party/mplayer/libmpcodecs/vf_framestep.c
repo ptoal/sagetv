@@ -1,6 +1,5 @@
 /*
- * vf_fstep.c - filter to ouput only 1 every n frame, or only the I (key)
- *              frame
+ * filter to output only 1 every n frame, or only the I (key)frame
  *
  * The parameters are:
  *
@@ -44,14 +43,30 @@
  *
  * As usual it depends on what you're doing.
  *
- *     Daniele Forghieri ( guru@digitalfantasy.it )
+ * copyright (c) 2003 Daniele Forghieri ( guru@digitalfantasy.it )
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#include "config.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "config.h"
 #include "mp_msg.h"
 #include "help_mp.h"
 #include "cpudetect.h"
@@ -59,8 +74,6 @@
 #include "img_format.h"
 #include "mp_image.h"
 #include "vf.h"
-
-#include "libvo/fastmemcpy.h"
 
 /* Uncomment if you want to print some info on the format */
 // #define DUMP_FORMAT_DATA
@@ -76,7 +89,7 @@ struct vf_priv_s {
 };
 
 /* Filter handler */
-static int put_image(struct vf_instance_s* vf, mp_image_t *mpi, double pts)
+static int put_image(struct vf_instance *vf, mp_image_t *mpi, double pts)
 {
     mp_image_t        *dmpi;
     struct vf_priv_s  *priv;
@@ -109,10 +122,10 @@ static int put_image(struct vf_instance_s* vf, mp_image_t *mpi, double pts)
     ++priv->frame_cur;
 
     if (skip == 0) {
-	/* Get image, export type (we don't modify tghe image) */
-	dmpi=vf_get_image(vf->next, mpi->imgfmt,
+        /* Get image, export type (we don't modify tghe image) */
+        dmpi=vf_get_image(vf->next, mpi->imgfmt,
                       MP_IMGTYPE_EXPORT, 0,
-	              mpi->w, mpi->h);
+                      mpi->w, mpi->h);
         /* Copy only the pointer ( MP_IMGTYPE_EXPORT ! ) */
         dmpi->planes[0] = mpi->planes[0];
         dmpi->planes[1] = mpi->planes[1];
@@ -133,23 +146,23 @@ static int put_image(struct vf_instance_s* vf, mp_image_t *mpi, double pts)
     return 0;
 }
 
-static void uninit(struct vf_instance_s* vf)
+static void uninit(struct vf_instance *vf)
 {
     /* Free private data */
     free(vf->priv);
 }
 
 /* Main entry funct for the filter */
-static int open(vf_instance_t *vf, char* args)
+static int vf_open(vf_instance_t *vf, char *args)
 {
-	struct vf_priv_s *p;
+        struct vf_priv_s *p;
 
         vf->put_image = put_image;
-	vf->uninit = uninit;
-	vf->default_reqs = VFCAP_ACCEPT_STRIDE;
-	vf->priv = p = calloc(1, sizeof(struct vf_priv_s));
+        vf->uninit = uninit;
+        vf->default_reqs = VFCAP_ACCEPT_STRIDE;
+        vf->priv = p = calloc(1, sizeof(struct vf_priv_s));
         if (p == NULL) {
-            return(0);
+            return 0;
         }
 
         if (args != NULL) {
@@ -174,21 +187,19 @@ static int open(vf_instance_t *vf, char* args)
                     p->frame_step = atoi(args);
                     if (p->frame_step <= 0) {
                         mp_msg(MSGT_VFILTER, MSGL_WARN, MSGTR_MPCODECS_ErrorParsingArgument);
-                        return(0);
+                        return 0;
                     }
                 }
             }
         }
-	return 1;
+        return 1;
 }
 
-vf_info_t vf_info_framestep = {
+const vf_info_t vf_info_framestep = {
     "Dump one every n / key frames",
     "framestep",
     "Daniele Forghieri",
     "",
-    open,
+    vf_open,
     NULL
 };
-
-

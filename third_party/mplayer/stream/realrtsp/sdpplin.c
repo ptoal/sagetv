@@ -25,9 +25,9 @@
  * sdp/sdpplin parser.
  *
  */
- 
+
 #include "config.h"
-#include "../librtsp/rtsp.h"
+#include "stream/librtsp/rtsp.h"
 #include "sdpplin.h"
 #include "xbuffer.h"
 #include "mp_msg.h"
@@ -62,7 +62,7 @@ static char *b64_decode(const char *in, char *out, int *size)
   dtable['='] = 0;
 
   k=0;
-  
+
   /*CONSTANTCONDITION*/
   for (j=0; j<strlen(in); j+=4)
   {
@@ -121,7 +121,7 @@ static int filter(const char *in, const char *filter, char **out) {
 
     return len-flen;
   }
-  
+
   return 0;
 }
 static sdpplin_stream_t *sdpplin_parse_stream(char **data) {
@@ -131,7 +131,7 @@ static sdpplin_stream_t *sdpplin_parse_stream(char **data) {
   char      *decoded=xbuffer_init(32);
   int       handled;
   int       got_mimetype;
-    
+
   if (filter(*data, "m=", &buf)) {
     desc->id = strdup(buf);
   } else
@@ -139,6 +139,7 @@ static sdpplin_stream_t *sdpplin_parse_stream(char **data) {
     printf("sdpplin: no m= found.\n");
     free(desc);
     xbuffer_free(buf);
+    xbuffer_free(decoded);
     return NULL;
   }
   *data=nl(*data);
@@ -156,7 +157,7 @@ static sdpplin_stream_t *sdpplin_parse_stream(char **data) {
 #endif
 
     handled=0;
-    
+
     if(filter(*data,"a=control:streamid=",&buf)) {
       desc->stream_id=atoi(buf);
       handled=1;
@@ -178,7 +179,7 @@ static sdpplin_stream_t *sdpplin_parse_stream(char **data) {
       handled=1;
       *data=nl(*data);
     }
-    
+
     if(filter(*data,"a=StartTime:integer;",&buf)) {
       desc->start_time=atoi(buf);
       handled=1;
@@ -222,7 +223,7 @@ static sdpplin_stream_t *sdpplin_parse_stream(char **data) {
       printf("mlti_data_size: %i\n", desc->mlti_data_size);
 #endif
     }
-    
+
     if(filter(*data,"a=ASMRuleBook:string;",&buf)) {
       desc->asm_rule_book=strdup(buf);
       handled=1;
@@ -250,7 +251,7 @@ static sdpplin_stream_t *sdpplin_parse_stream(char **data) {
 
   xbuffer_free(buf);
   xbuffer_free(decoded);
-  
+
   return desc;
 }
 
@@ -273,7 +274,7 @@ sdpplin_t *sdpplin_parse(char *data) {
 #endif
 
     handled=0;
-    
+
     if (filter(data, "m=", &buf)) {
       sdpplin_stream_t *stream=sdpplin_parse_stream(&data);
 #ifdef LOG
@@ -306,31 +307,32 @@ sdpplin_t *sdpplin_parse(char *data) {
       handled=1;
       data=nl(data);
     }
-    
+
     if(filter(data,"a=Author:buffer;",&buf)) {
       decoded=b64_decode(buf, decoded, &len);
       desc->author=strdup(decoded);
       handled=1;
       data=nl(data);
     }
-    
+
     if(filter(data,"a=Copyright:buffer;",&buf)) {
       decoded=b64_decode(buf, decoded, &len);
       desc->copyright=strdup(decoded);
       handled=1;
       data=nl(data);
     }
-    
+
     if(filter(data,"a=Abstract:buffer;",&buf)) {
       decoded=b64_decode(buf, decoded, &len);
       desc->abstract=strdup(decoded);
       handled=1;
       data=nl(data);
     }
-    
+
     if(filter(data,"a=StreamCount:integer;",&buf)) {
       desc->stream_count=(unsigned int)atoi(buf);
-      desc->stream=malloc(sizeof(sdpplin_stream_t*)*desc->stream_count);
+      desc->stream=calloc(desc->stream_count, sizeof(sdpplin_stream_t*));
+      if (!desc->stream) desc->stream_count = 0;
       handled=1;
       data=nl(data);
     }
@@ -354,7 +356,7 @@ sdpplin_t *sdpplin_parse(char *data) {
 
   xbuffer_free(buf);
   xbuffer_free(decoded);
-  
+
   return desc;
 }
 
@@ -367,28 +369,21 @@ void sdpplin_free(sdpplin_t *description) {
 
   for (i = 0; i < description->stream_count; i++) {
     if (description->stream[i]) {
-      if (description->stream[i]->stream_name)
-        free(description->stream[i]->stream_name);
-      if (description->stream[i]->mime_type)
-        free(description->stream[i]->mime_type);
-      if (description->stream[i]->mlti_data)
-        free(description->stream[i]->mlti_data);
-      if (description->stream[i]->asm_rule_book)
-        free(description->stream[i]->asm_rule_book);
+      free(description->stream[i]->stream_name);
+      free(description->stream[i]->mime_type);
+      free(description->stream[i]->mlti_data);
+      free(description->stream[i]->asm_rule_book);
+      free(description->stream[i]->id);
       free(description->stream[i]);
     }
   }
 
   if(description->stream_count)
     free(description->stream);
-  if (description->title)
-    free(description->title);
-  if (description->author)
-    free(description->author);
-  if (description->copyright)
-    free(description->copyright);
-  if (description->abstract)
-    free(description->abstract);
+  free(description->title);
+  free(description->author);
+  free(description->copyright);
+  free(description->abstract);
 
   free(description);
 }

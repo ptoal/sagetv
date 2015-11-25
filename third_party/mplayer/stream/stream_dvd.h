@@ -1,22 +1,31 @@
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-#ifdef USE_DVDREAD
+#ifndef MPLAYER_STREAM_DVD_H
+#define MPLAYER_STREAM_DVD_H
 
-#ifdef USE_DVDREAD_INTERNAL
-#include "dvdread/dvd_reader.h"
-#include "dvdread/ifo_types.h"
-#include "dvdread/ifo_read.h"
-#include "dvdread/nav_read.h"
-#elif defined(USE_DVDNAV)
-#include <dvd_reader.h>
-#include <ifo_types.h>
-#include <ifo_read.h>
-#include <nav_read.h>
-#else
+#include "config.h"
+#include <stdint.h>
 #include <dvdread/dvd_reader.h>
 #include <dvdread/ifo_types.h>
 #include <dvdread/ifo_read.h>
 #include <dvdread/nav_read.h>
-#endif
+#include "stream.h"
 
 typedef struct {
   dvd_reader_t *dvd;
@@ -47,10 +56,8 @@ typedef struct {
 } dvd_priv_t;
 
 int dvd_number_of_subs(stream_t *stream);
-int dvd_lang_from_aid(stream_t *stream, int id);
-int dvd_lang_from_sid(stream_t *stream, int id);
-int dvd_aid_from_lang(stream_t *stream, unsigned char* lang);
-int dvd_sid_from_lang(stream_t *stream, unsigned char* lang);
+int dvd_aid_from_lang(stream_t *stream, const unsigned char* lang);
+int dvd_sid_from_lang(stream_t *stream, const unsigned char* lang);
 int dvd_chapter_from_cell(dvd_priv_t *dvd,int title,int cell);
 
-#endif
+#endif /* MPLAYER_STREAM_DVD_H */

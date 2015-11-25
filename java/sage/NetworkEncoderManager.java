@@ -103,7 +103,7 @@ public class NetworkEncoderManager implements CaptureDeviceManager
         //				String myIP = SageTV.api("GetLocalIPAddress", new Object[0]).toString();
         //				int lastIdx = myIP.lastIndexOf('.');
         //				myIP = myIP.substring(0, lastIdx) + ".255";
-        pack.setAddress(java.net.InetAddress.getByName("255.255.255.255"));
+        pack.setAddress(java.net.InetAddress.getByName("127.0.0.1"));
         pack.setPort(Sage.getInt("encoding_discovery_port", 8271));
         sock.send(pack);
         long startTime = Sage.eventTime();

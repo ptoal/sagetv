@@ -1,9 +1,23 @@
 /*
-   GPL v2 blah blah
-   
-   This is a small dll that works as a wrapper for the actual cook.so.6.0
-   dll from real player 8.0. 
-*/
+ * This is a small DLL that works as a wrapper for the actual realrv30.so.6.0
+ * DLL from RealPlayer 8.0.
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 /*
    Assuming that RACloseCodec is the last call.
@@ -11,6 +25,7 @@
 
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <dlfcn.h>
 #include <sys/time.h>
 
@@ -43,7 +58,7 @@ int b_dlOpened=0;
 void *handle=NULL;
 
 /* exits program when failure */
-void loadSyms() {
+void loadSyms(void) {
 	fputs("loadSyms()\n", stderr);
 	if (!b_dlOpened) {
 		char *error;
@@ -160,7 +175,7 @@ void loadSyms() {
 	}
 }
 
-void closeDll() {
+void closeDll(void) {
 	if (handle) {
 		b_dlOpened=0;
 		dlclose(handle);
@@ -172,23 +187,22 @@ void _init(void) {
 	loadSyms();
 }
 
-struct timezone tz;
 struct timeval tv1, tv2;
 
-void tic() {
-	gettimeofday(&tv1, &tz);
+void tic(void) {
+	gettimeofday(&tv1, NULL);
 }
 
-void toc() {
+void toc(void) {
 	long secs, usecs;
-	gettimeofday(&tv2, &tz);
+	gettimeofday(&tv2, NULL);
 	secs=tv2.tv_sec-tv1.tv_sec;
 	usecs=tv2.tv_usec-tv1.tv_usec;
 	if (usecs<0) {
 		usecs+=1000000;
 		--secs;
 	}
-	fprintf(stderr, "Duration: %d.%0.6ds\n", secs, usecs);
+	fprintf(stderr, "Duration: %ld.%.6lds\n", secs, usecs);
 }
 
 
@@ -197,7 +211,7 @@ void hexdump(void *pos, int len) {
 	int lines=(len+15)>>4;
 	while(lines--) {
 		int len1=len, i;
-		fprintf(stderr, "%0x  ", cpos); 
+		fprintf(stderr, "%0x  ", cpos);
 		cpos1=cpos;
 		for (i=0;i<16;i++) {
 			if (len1>0) {
@@ -217,7 +231,7 @@ void hexdump(void *pos, int len) {
 			}
 			len--;
 		}
-		fputs("\n", stderr);		
+		fputs("\n", stderr);
 	}
 	fputc('\n', stderr);
 }
@@ -225,34 +239,34 @@ void hexdump(void *pos, int len) {
 
 ulong PNCodec_Open(ulong p1,ulong p2) {
 	ulong result;
-	fprintf(stderr, "PNCodec_Open(ulong fourcc=0x%0x(%d), ", p1, p1);
-	fprintf(stderr, "PNCMain **pncMain=0x%0x(%d))\n", p2, p2);
+	fprintf(stderr, "PNCodec_Open(ulong fourcc=0x%0lx(%ld), ", p1, p1);
+	fprintf(stderr, "PNCMain **pncMain=0x%0lx(%ld))\n", p2, p2);
 //	hexdump((void*)p1, 44);
 	tic();
 	result=(*pncOpen)(p1,p2);
 	toc();
 	hexdump((void*)p2, 4);
 //	hexdump(*((void**)p2), 0x1278);
-	fprintf(stderr, "PNCodec_Open --> 0x%0x(%d)\n\n\n", result, result);
+	fprintf(stderr, "PNCodec_Open --> 0x%0lx(%ld)\n\n\n", result, result);
 	return result;
 }
 
 ulong PNCodec_Close(ulong p1) {
 	ulong result;
-	fprintf(stderr, "PNCodec_Close(PNCMain *pncMain=0x%0x(%d))\n", p1, p1);
+	fprintf(stderr, "PNCodec_Close(PNCMain *pncMain=0x%0lx(%ld))\n", p1, p1);
 //	hexdump((void*)p1, 44);
 	tic();
 	result=(*pncClose)(p1);
 	toc();
 //	hexdump((void*)p1, 44);
-	fprintf(stderr, "PNCodec_Close --> 0x%0x(%d)\n\n\n", result, result);
+	fprintf(stderr, "PNCodec_Close --> 0x%0lx(%ld)\n\n\n", result, result);
 	return result;
 }
 
 ulong PNCodec_GetUIName(ulong p1,ulong p2) {
 	ulong result;
-	fprintf(stderr, "PNCodec_GetUIName(PNCMain *pncMain=0x%0x(%d), ", p1, p1);
-	fprintf(stderr, "char **appname=0x%0x(%d))\n", p2, p2);
+	fprintf(stderr, "PNCodec_GetUIName(PNCMain *pncMain=0x%0lx(%ld), ", p1, p1);
+	fprintf(stderr, "char **appname=0x%0lx(%ld))\n", p2, p2);
 //	hexdump((void*)p1, 0x1278);
 //	hexdump((void*)p2, 128);
 	tic();
@@ -260,73 +274,73 @@ ulong PNCodec_GetUIName(ulong p1,ulong p2) {
 	toc();
 //	hexdump((void*)p1, 0x1278);
 //	hexdump((void*)p2, 128);
-	fprintf(stderr, "PNCodec_GetUIName --> 0x%0x(%d)\n\n\n", result, result);
+	fprintf(stderr, "PNCodec_GetUIName --> 0x%0lx(%ld)\n\n\n", result, result);
 	return result;
 }
 
 ulong PNCodec_GetVersion(ulong p1,ulong p2) {
 	ulong result;
-	fprintf(stderr, "PNCodec_GetVersion(ulong p1=0x%0x(%d), ", p1, p1);
-	fprintf(stderr, "ulong p2=0x%0x(%d))\n", p2, p2);
+	fprintf(stderr, "PNCodec_GetVersion(ulong p1=0x%0lx(%ld), ", p1, p1);
+	fprintf(stderr, "ulong p2=0x%0lx(%ld))\n", p2, p2);
 //	hexdump((void*)p1, 44);
 	tic();
 	result=(*pncGetVersion)(p1,p2);
 	toc();
 //	hexdump((void*)p1, 44);
-	fprintf(stderr, "PNCodec_GetVersion --> 0x%0x(%d)\n\n\n", result, result);
+	fprintf(stderr, "PNCodec_GetVersion --> 0x%0lx(%ld)\n\n\n", result, result);
 	return result;
 }
 
 ulong PNCodec_QueryMediaFormat(ulong p1,ulong p2,ulong p3,ulong p4) {
 	ulong result;
-	fprintf(stderr, "PNCodec_QueryMediaFormat(ulong p1=0x%0x(%d), ", p1, p1);
-	fprintf(stderr, "ulong p2=0x%0x(%d),\n\t", p2, p2);
-	fprintf(stderr, "ulong p3=0x%0x(%d),", p3, p3);
-	fprintf(stderr, "ulong p4=0x%0x(%d),\n", p4, p4);
+	fprintf(stderr, "PNCodec_QueryMediaFormat(ulong p1=0x%0lx(%ld), ", p1, p1);
+	fprintf(stderr, "ulong p2=0x%0lx(%ld),\n\t", p2, p2);
+	fprintf(stderr, "ulong p3=0x%0lx(%ld),", p3, p3);
+	fprintf(stderr, "ulong p4=0x%0lx(%ld),\n", p4, p4);
 //	hexdump((void*)p1, 44);
 	tic();
 	result=(*pncQueryMediaFormat)(p1,p2,p3,p4);
 	toc();
 //	hexdump((void*)p1, 44);
-	fprintf(stderr, "PNCodec_QueryMediaFormat --> 0x%0x(%d)\n\n\n", result, result);
+	fprintf(stderr, "PNCodec_QueryMediaFormat --> 0x%0lx(%ld)\n\n\n", result, result);
 	return result;
 }
 
 ulong PNCodec_PreferredMediaFormat(ulong p1,ulong p2,ulong p3,ulong p4) {
 	ulong result;
-	fprintf(stderr, "PNCodec_PreferredMediaFormat(ulong p1=0x%0x(%d), ", p1, p1);
-	fprintf(stderr, "ulong p2=0x%0x(%d),\n\t", p2, p2);
-	fprintf(stderr, "ulong p3=0x%0x(%d),", p3, p3);
-	fprintf(stderr, "ulong p4=0x%0x(%d),\n", p4, p4);
+	fprintf(stderr, "PNCodec_PreferredMediaFormat(ulong p1=0x%0lx(%ld), ", p1, p1);
+	fprintf(stderr, "ulong p2=0x%0lx(%ld),\n\t", p2, p2);
+	fprintf(stderr, "ulong p3=0x%0lx(%ld),", p3, p3);
+	fprintf(stderr, "ulong p4=0x%0lx(%ld),\n", p4, p4);
 //	hexdump((void*)p1, 44);
 	tic();
 	result=(*pncPreferredMediaFormat)(p1,p2,p3,p4);
 	toc();
 //	hexdump((void*)p1, 44);
-	fprintf(stderr, "PNCodec_PreferredMediaFormat --> 0x%0x(%d)\n\n\n", result, result);
+	fprintf(stderr, "PNCodec_PreferredMediaFormat --> 0x%0lx(%ld)\n\n\n", result, result);
 	return result;
 }
 
 ulong PNCodec_GetMediaFormats(ulong p1,ulong p2,ulong p3,ulong p4) {
 	ulong result;
-	fprintf(stderr, "PNCodec_GetMediaFormats(ulong p1=0x%0x(%d), ", p1, p1);
-	fprintf(stderr, "ulong p2=0x%0x(%d),\n\t", p2, p2);
-	fprintf(stderr, "ulong p3=0x%0x(%d),", p3, p3);
-	fprintf(stderr, "ulong p4=0x%0x(%d),\n", p4, p4);
+	fprintf(stderr, "PNCodec_GetMediaFormats(ulong p1=0x%0lx(%ld), ", p1, p1);
+	fprintf(stderr, "ulong p2=0x%0lx(%ld),\n\t", p2, p2);
+	fprintf(stderr, "ulong p3=0x%0lx(%ld),", p3, p3);
+	fprintf(stderr, "ulong p4=0x%0lx(%ld),\n", p4, p4);
 //	hexdump((void*)p1, 44);
 	tic();
 	result=(*pncGetMediaFormats)(p1,p2,p3,p4);
 	toc();
 //	hexdump((void*)p1, 44);
-	fprintf(stderr, "PNCodec_GetMediaFormats --> 0x%0x(%d)\n\n\n", result, result);
+	fprintf(stderr, "PNCodec_GetMediaFormats --> 0x%0lx(%ld)\n\n\n", result, result);
 	return result;
 }
 
 ulong PNCodec_StreamOpen(ulong p1,ulong p2,ulong p3) {
 	ulong result;
-	fprintf(stderr, "PNCodec_StreamOpen(PNCMain *pncMain=0x%0x(%d), ", p1, p1);
-	fprintf(stderr, "PNSMain **pnsMain=0x%0x(%d),\n\t", p2, p2);
-	fprintf(stderr, "ulong **p3=0x%0x(%d),\n", p3, p3);
+	fprintf(stderr, "PNCodec_StreamOpen(PNCMain *pncMain=0x%0lx(%ld), ", p1, p1);
+	fprintf(stderr, "PNSMain **pnsMain=0x%0lx(%ld),\n\t", p2, p2);
+	fprintf(stderr, "ulong **p3=0x%0lx(%ld),\n", p3, p3);
 //	hexdump((void*)p1, 0x1278);
 //	hexdump((void*)p2, 128);
 //	hexdump((void*)p3, 4);
@@ -339,32 +353,32 @@ ulong PNCodec_StreamOpen(ulong p1,ulong p2,ulong p3) {
 //	hexdump((void*)p3, 128);
 	hexdump(*((void**)p2), 128);
 	hexdump(**((void***)p2), 128);
-	fprintf(stderr, "PNCodec_StreamOpen --> 0x%0x(%d)\n\n\n", result, result);
+	fprintf(stderr, "PNCodec_StreamOpen --> 0x%0lx(%ld)\n\n\n", result, result);
 	return result;
 }
 
 ulong PNStream_OpenSettingsBox(ulong p1,ulong p2) {
 	ulong result;
-	fprintf(stderr, "PNStream_OpenSettingsBox(ulong p1=0x%0x(%d), ", p1, p1);
-	fprintf(stderr, "ulong p2=0x%0x(%d),\n", p2, p2);
+	fprintf(stderr, "PNStream_OpenSettingsBox(ulong p1=0x%0lx(%ld), ", p1, p1);
+	fprintf(stderr, "ulong p2=0x%0lx(%ld),\n", p2, p2);
 //	hexdump((void*)p1, 44);
 	tic();
 	result=(*pnsOpenSettingsBox)(p1,p2);
 	toc();
 //	hexdump((void*)p1, 44);
-	fprintf(stderr, "PNStream_OpenSettingsBox --> 0x%0x(%d)\n\n\n", result, result);
+	fprintf(stderr, "PNStream_OpenSettingsBox --> 0x%0lx(%ld)\n\n\n", result, result);
 	return result;
 }
 
 ulong PNStream_GetIPNUnknown(ulong p1) {
 	ulong result;
-	fprintf(stderr, "PNStream_GetIPNUnknown(ulong p1=0x%0x(%d))\n", p1, p1);
+	fprintf(stderr, "PNStream_GetIPNUnknown(ulong p1=0x%0lx(%ld))\n", p1, p1);
 //	hexdump((void*)p1, 44);
 	tic();
 	result=(*pnsGetIPNUnknown)(p1);
 	toc();
 //	hexdump((void*)p1, 44);
-	fprintf(stderr, "PNStream_GetIPNUnknown --> 0x%0x(%d)\n\n\n", result, result);
+	fprintf(stderr, "PNStream_GetIPNUnknown --> 0x%0lx(%ld)\n\n\n", result, result);
 	return result;
 }
 
@@ -372,10 +386,10 @@ ulong PNStream_SetDataCallback(ulong p1,ulong p2,ulong p3,ulong p4) {
 	ulong result;
 	int i=0;
 	void **pp;
-	fprintf(stderr, "PNStream_SetDataCallback(ulong p1=0x%0x(%d), ", p1, p1);
-	fprintf(stderr, "ulong p2=0x%0x(%d),\n\t", p2, p2);
-	fprintf(stderr, "ulong p3=0x%0x(%d),", p3, p3);
-	fprintf(stderr, "ulong p4=0x%0x(%d))\n", p4, p4);
+	fprintf(stderr, "PNStream_SetDataCallback(ulong p1=0x%0lx(%ld), ", p1, p1);
+	fprintf(stderr, "ulong p2=0x%0lx(%ld),\n\t", p2, p2);
+	fprintf(stderr, "ulong p3=0x%0lx(%ld),", p3, p3);
+	fprintf(stderr, "ulong p4=0x%0lx(%ld))\n", p4, p4);
 	hexdump((void*)p1, 0x24);
 	hexdump((void*)p2, 32);
 	hexdump((void*)p3, 4);
@@ -400,47 +414,47 @@ ulong PNStream_SetDataCallback(ulong p1,ulong p2,ulong p3,ulong p4) {
 //	hexdump((void*)p2, 256);
 //	hexdump((void*)p3, 4);
 	hexdump(*((void**)p3), 256);
-	fprintf(stderr, "PNStream_SetDataCallback --> 0x%0x(%d)\n\n\n", result, result);
+	fprintf(stderr, "PNStream_SetDataCallback --> 0x%0lx(%ld)\n\n\n", result, result);
 	return result;
 }
 
 ulong PNStream_SetProperty(ulong p1,ulong p2,ulong p3) {
 	ulong result;
-	fprintf(stderr, "PNStream_SetProperty(ulong p1=0x%0x(%d), ", p1, p1);
-	fprintf(stderr, "ulong p2=0x%0x(%d),\n\t", p2, p2);
-	fprintf(stderr, "ulong p3=0x%0x(%d))\n", p3, p3);
+	fprintf(stderr, "PNStream_SetProperty(ulong p1=0x%0lx(%ld), ", p1, p1);
+	fprintf(stderr, "ulong p2=0x%0lx(%ld),\n\t", p2, p2);
+	fprintf(stderr, "ulong p3=0x%0lx(%ld))\n", p3, p3);
 	hexdump((void*)p3, 4);
 	tic();
 	result=(*pnsSetProperty)(p1,p2,p3);
 	toc();
 //	hexdump((void*)p3, 44);
-	fprintf(stderr, "PNStream_SetProperty --> 0x%0x(%d)\n\n\n", result, result);
+	fprintf(stderr, "PNStream_SetProperty --> 0x%0lx(%ld)\n\n\n", result, result);
 	return result;
 }
 
 ulong PNStream_GetProperty(ulong p1,ulong p2,ulong p3) {
 	ulong result;
-	fprintf(stderr, "PNStream_GetProperty(ulong p1=0x%0x(%d), ", p1, p1);
-	fprintf(stderr, "ulong p2=0x%0x(%d),\n\t", p2, p2);
-	fprintf(stderr, "ulong p3=0x%0x(%d))\n", p3, p3);
+	fprintf(stderr, "PNStream_GetProperty(ulong p1=0x%0lx(%ld), ", p1, p1);
+	fprintf(stderr, "ulong p2=0x%0lx(%ld),\n\t", p2, p2);
+	fprintf(stderr, "ulong p3=0x%0lx(%ld))\n", p3, p3);
 //	hexdump((void*)p3, 44);
 	tic();
 	result=(*pnsGetProperty)(p1,p2,p3);
 	toc();
 	hexdump((void*)p3, 4);
-	fprintf(stderr, "PNStream_GetProperty --> 0x%0x(%d)\n\n\n", result, result);
+	fprintf(stderr, "PNStream_GetProperty --> 0x%0lx(%ld)\n\n\n", result, result);
 	return result;
 }
 
 ulong PNStream_Close(ulong p1) {
 	ulong result;
-	fprintf(stderr, "PNStream_Close(ulong p1=0x%0x(%d))\n", p1, p1);
+	fprintf(stderr, "PNStream_Close(ulong p1=0x%0lx(%ld))\n", p1, p1);
 //	hexdump((void*)p1, 44);
 	tic();
 	result=(*pnsClose)(p1);
 	toc();
 //	hexdump((void*)p1, 44);
-	fprintf(stderr, "PNStream_Close --> 0x%0x(%d)\n\n\n", result, result);
+	fprintf(stderr, "PNStream_Close --> 0x%0lx(%ld)\n\n\n", result, result);
 	return result;
 }
 
@@ -448,78 +462,77 @@ ulong streamHeaderSize=0;
 
 ulong PNStream_GetStreamHeaderSize(ulong p1,ulong p2) {
 	ulong result;
-	fprintf(stderr, "PNStream_GetStreamHeaderSize(ulong p1=0x%0x(%d), ", p1, p1);
-	fprintf(stderr, "ulong p2=0x%0x(%d),\n", p2, p2);
+	fprintf(stderr, "PNStream_GetStreamHeaderSize(ulong p1=0x%0lx(%ld), ", p1, p1);
+	fprintf(stderr, "ulong p2=0x%0lx(%ld),\n", p2, p2);
 //	hexdump((void*)p2, 44);
 	tic();
 	result=(*pnsGetStreamHeaderSize)(p1,p2);
 	toc();
 	hexdump((void*)p2, 4);
 	streamHeaderSize=*((ulong *)p2);
-	fprintf(stderr, "PNStream_GetStreamHeaderSize --> 0x%0x(%d)\n\n\n", result, result);
+	fprintf(stderr, "PNStream_GetStreamHeaderSize --> 0x%0lx(%ld)\n\n\n", result, result);
 	return result;
 }
 
 ulong PNStream_GetStreamHeader(ulong p1,ulong p2) {
 	ulong result;
-	fprintf(stderr, "PNStream_GetStreamHeader(ulong p1=0x%0x(%d), ", p1, p1);
-	fprintf(stderr, "ulong p2=0x%0x(%d),\n", p2, p2);
+	fprintf(stderr, "PNStream_GetStreamHeader(ulong p1=0x%0lx(%ld), ", p1, p1);
+	fprintf(stderr, "ulong p2=0x%0lx(%ld),\n", p2, p2);
 //	hexdump((void*)p2, 44);
 	tic();
 	result=(*pnsGetStreamHeader)(p1,p2);
 	toc();
 	hexdump((void*)p2, streamHeaderSize);
-	fprintf(stderr, "PNStream_GetStreamHeader --> 0x%0x(%d)\n\n\n", result, result);
+	fprintf(stderr, "PNStream_GetStreamHeader --> 0x%0lx(%ld)\n\n\n", result, result);
 	return result;
 }
 
 ulong PNStream_Input(ulong p1,ulong p2,ulong p3) {
 	ulong result;
-	fprintf(stderr, "PNStream_Input(ulong p1=0x%0x(%d), ", p1, p1);
-	fprintf(stderr, "ulong p2=0x%0x(%d),\n\t", p2, p2);
-	fprintf(stderr, "ulong p3=0x%0x(%d))\n", p3, p3);
+	fprintf(stderr, "PNStream_Input(ulong p1=0x%0lx(%ld), ", p1, p1);
+	fprintf(stderr, "ulong p2=0x%0lx(%ld),\n\t", p2, p2);
+	fprintf(stderr, "ulong p3=0x%0lx(%ld))\n", p3, p3);
 	hexdump((void*)p3, 4);
 	tic();
 	result=(*pnsInput)(p1,p2,p3);
 	toc();
 //	hexdump((void*)p3, 44);
-	fprintf(stderr, "PNStream_Input --> 0x%0x(%d)\n\n\n", result, result);
+	fprintf(stderr, "PNStream_Input --> 0x%0lx(%ld)\n\n\n", result, result);
 	return result;
 }
 
 ulong PNStream_SetOutputPacketSize(ulong p1,ulong p2,ulong p3,ulong p4) {
 	ulong result;
-	fprintf(stderr, "PNStream_SetOutputPacketSize(ulong p1=0x%0x(%d), ", p1, p1);
-	fprintf(stderr, "ulong p2=0x%0x(%d),\n\t", p2, p2);
-	fprintf(stderr, "ulong p3=0x%0x(%d),", p3, p3);
-	fprintf(stderr, "ulong p4=0x%0x(%d))\n", p4, p4);
+	fprintf(stderr, "PNStream_SetOutputPacketSize(ulong p1=0x%0lx(%ld), ", p1, p1);
+	fprintf(stderr, "ulong p2=0x%0lx(%ld),\n\t", p2, p2);
+	fprintf(stderr, "ulong p3=0x%0lx(%ld),", p3, p3);
+	fprintf(stderr, "ulong p4=0x%0lx(%ld))\n", p4, p4);
 //	hexdump((void*)p1, 44);
 	tic();
 	result=(*pnsSetOutputPacketSize)(p1,p2,p3,p4);
 	toc();
 //	hexdump((void*)p1, 44);
-	fprintf(stderr, "PNStream_SetOutputPacketSize --> 0x%0x(%d)\n\n\n", result, result);
+	fprintf(stderr, "PNStream_SetOutputPacketSize --> 0x%0lx(%ld)\n\n\n", result, result);
 	return result;
 }
 
 ulong PNStream_GetInputBufferSize(ulong p1,ulong p2) {
 	ulong result;
-	fprintf(stderr, "PNStream_GetInputBufferSize(ulong p1=0x%0x(%d), ", p1, p1);
-	fprintf(stderr, "ulong p2=0x%0x(%d))\n", p2, p2);
+	fprintf(stderr, "PNStream_GetInputBufferSize(ulong p1=0x%0lx(%ld), ", p1, p1);
+	fprintf(stderr, "ulong p2=0x%0lx(%ld))\n", p2, p2);
 //	hexdump((void*)p1, 44);
 	tic();
 	result=(*pnsGetInputBufferSize)(p1,p2);
 	toc();
 //	hexdump((void*)p1, 44);
-	fprintf(stderr, "PNStream_GetInputBufferSize --> 0x%0x(%d)\n\n\n", result, result);
+	fprintf(stderr, "PNStream_GetInputBufferSize --> 0x%0lx(%ld)\n\n\n", result, result);
 	return result;
 }
 
 void  SetDLLAccessPath(ulong p1) {
-	fprintf(stderr, "SetDLLAccessPath(ulong p1=0x%0x(%d))\n", p1, p1);
+	fprintf(stderr, "SetDLLAccessPath(ulong p1=0x%0lx(%ld))\n", p1, p1);
 //	hexdump((void*)p1, 44);
 	(*setDLLAccessPath)(p1);
 //	hexdump((void*)p1, 44);
 	fprintf(stderr, "--> void\n\n\n");
 }
-

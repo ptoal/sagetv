@@ -1,13 +1,23 @@
 /*
- * MPlayer
- * 
- * Video driver for AAlib - 1.0
- * 
- * by Folke Ashberg <folke@ashberg.de>
- * 
- * Code started: Sun Aug 12 2001
- * Version 1.0 : Thu Aug 16 2001
+ * video output driver for AAlib
  *
+ * copyright (c) 2001 Folke Ashberg <folke@ashberg.de>
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include <stdio.h>
@@ -21,16 +31,18 @@
 #include <stdarg.h>
 #include <time.h>
 #include <string.h>
+#include <strings.h>
 #include <errno.h>
 
 #include "config.h"
 #include "video_out.h"
 #include "video_out_internal.h"
+#include "libmpcodecs/vf.h"
 #include "aspect.h"
 #include "libswscale/swscale.h"
 #include "libmpcodecs/vf_scale.h"
-#include "font_load.h"
-#include "sub.h"
+#include "sub/font_load.h"
+#include "sub/sub.h"
 
 #include "osdep/keycodes.h"
 #include <aalib.h>
@@ -44,22 +56,22 @@
 #define MESSAGE_SIZE 512
 #define MESSAGE_DEKO " +++ %s +++ "
 
-	static vo_info_t info = {
+	static const vo_info_t info = {
 	    "AAlib",
 	    "aa",
 	    "Alban Bedel <albeu@free.fr> and Folke Ashberg <folke@ashberg.de>",
 	    ""
 	};
 
-LIBVO_EXTERN(aa)
+const LIBVO_EXTERN(aa)
 
 /* aa's main context we use */
 aa_context *c;
 aa_renderparams *p;
 static int fast =0;
 /* used for the sws */
-static uint8_t * image[3];
-static int image_stride[3];
+static uint8_t * image[MP_MAX_PLANES];
+static int image_stride[MP_MAX_PLANES];
 
 /* image infos */
 static int image_format;
@@ -82,21 +94,13 @@ int aaconfigmode=1;
 font_desc_t* vo_font_save = NULL;
 static struct SwsContext *sws=NULL;
 
-/* our version of the playmodes :) */
-
-/* to disable stdout outputs when curses/linux mode */
-extern int quiet;
-
 /* configuration */
 int aaopt_osdcolor = AA_SPECIAL;
 int aaopt_subcolor = AA_SPECIAL;
 
-extern struct aa_hardware_params aa_defparams;
-extern struct aa_renderparams aa_defrenderparams;
-
-void
+static void
 resize(void){
-    /* 
+    /*
      * this function is called by aa lib if windows resizes
      * further during init, because here we have to calculate
      * a little bit
@@ -116,18 +120,16 @@ resize(void){
     screen_h = image_height * aa_scrheight(c) / aa_imgheight(c);
     screen_x = (aa_scrwidth(c) - screen_w) / 2;
     screen_y = (aa_scrheight(c) - screen_h) / 2;
-    
+
     if(sws) sws_freeContext(sws);
     sws = sws_getContextFromCmdLine(src_width,src_height,image_format,
 				   image_width,image_height,IMGFMT_Y8);
 
+    memset(image, 0, sizeof(image));
     image[0] = aa_image(c) + image_y * aa_imgwidth(c) + image_x;
-    image[1] = NULL;
-    image[2] = NULL;
 
+    memset(image_stride, 0, sizeof(image_stride));
     image_stride[0] = aa_imgwidth(c);
-    image_stride[1] = 0; 
-    image_stride[2] = 0;
 
     showosdmessage=0;
 
@@ -170,7 +172,7 @@ osdpercent(int duration, int deko, int min, int max, int val, const char * desc,
     int where;
     int i;
 
-    
+
     step=(float)aa_scrwidth(c) /(float)(max-min);
     where=(val-min)*step;
     osdmessage(duration,deko,"%s: %i%s",desc, val, unit);
@@ -184,7 +186,7 @@ osdpercent(int duration, int deko, int min, int max, int val, const char * desc,
     if (where!=(aa_scrwidth(c)-1) ) posbar[aa_scrwidth(c)-1]='|';
 
     posbar[aa_scrwidth(c)]='\0';
- 
+
 }
 
 static void
@@ -195,14 +197,14 @@ printosdtext(void)
     memset(c->attrbuffer,0,osd_text_length);
     osd_text_length = 0;
   }
-    /* 
+    /*
      * places the mplayer status osd
      */
   if (vo_osd_text && vo_osd_text[0] != 0) {
     int len;
     if(vo_osd_text[0] < 32) {
-      len = strlen(__sub_osd_names_short[vo_osd_text[0]]) + strlen(vo_osd_text+1) + 2;
-      aa_printf(c, 0, 0 , aaopt_osdcolor, "%s %s ", __sub_osd_names_short[vo_osd_text[0]], vo_osd_text+1);
+      len = strlen(sub_osd_names_short[vo_osd_text[0]]) + strlen(vo_osd_text+1) + 2;
+      aa_printf(c, 0, 0 , aaopt_osdcolor, "%s %s ", sub_osd_names_short[vo_osd_text[0]], vo_osd_text+1);
     } else {
       len = strlen(vo_osd_text) + 1;
       aa_printf(c, 0, 0 , aaopt_osdcolor, "%s ",vo_osd_text);
@@ -213,7 +215,7 @@ printosdtext(void)
       memset(c->attrbuffer + len,0,osd_text_length - len);
     }
     osd_text_length = len;
-    
+
   }
 }
 
@@ -221,12 +223,12 @@ static void
 printosdprogbar(void){
     /* print mplayer osd-progbar */
     if (vo_osd_progbar_type!=-1){
-	osdpercent(1,1,0,255,vo_osd_progbar_value, __sub_osd_names[vo_osd_progbar_type], "");	
+        osdpercent(1,1,0,255,vo_osd_progbar_value, sub_osd_names[vo_osd_progbar_type], "");
     }
 }
 static int
 config(uint32_t width, uint32_t height, uint32_t d_width,
-	    uint32_t d_height, uint32_t flags, char *title, 
+	    uint32_t d_height, uint32_t flags, char *title,
 	    uint32_t format) {
     /*
      * main init
@@ -245,7 +247,7 @@ config(uint32_t width, uint32_t height, uint32_t d_width,
     /* nothing will change its size, be we need some values initialized */
     resize();
 
-    /* now init out own 'font' (to use vo_draw_text_sub without edit them) */
+    /* now init our own 'font' */
     if(!vo_font_save) vo_font_save = vo_font;
     if(vo_font == vo_font_save) {
       vo_font=malloc(sizeof(font_desc_t));//if(!desc) return NULL;
@@ -255,7 +257,7 @@ config(uint32_t width, uint32_t height, uint32_t d_width,
       vo_font->pic_b[0]=malloc(sizeof(raw_file));
       memset(vo_font->pic_b[0],0,sizeof(raw_file));
 
-#ifdef HAVE_FREETYPE
+#ifdef CONFIG_FREETYPE
       vo_font->dynamic = 0;
 #endif
 
@@ -278,7 +280,7 @@ config(uint32_t width, uint32_t height, uint32_t d_width,
     }
 
     /* say hello */
-    osdmessage(5, 1, "Welcome to ASCII ART MPlayer");  
+    osdmessage(5, 1, "Welcome to ASCII ART MPlayer");
 
     mp_msg(MSGT_VO,MSGL_V,"VO: [aa] screendriver:   %s\n", c->driver->name);
     mp_msg(MSGT_VO,MSGL_V,"VO: [aa] keyboarddriver: %s\n", c->kbddriver->name);
@@ -310,7 +312,7 @@ config(uint32_t width, uint32_t height, uint32_t d_width,
     return 0;
 }
 
-static int 
+static int
 query_format(uint32_t format) {
     /*
      * ...are we able to... ?
@@ -335,9 +337,9 @@ query_format(uint32_t format) {
     return 0;
 }
 
-static int 
+static int
 draw_frame(uint8_t *src[]) {
-  int stride[3] = { 0 , 0 , 0 };
+  int stride[MP_MAX_PLANES] = {0};
 
   switch(image_format) {
   case IMGFMT_BGR15:
@@ -353,9 +355,9 @@ draw_frame(uint8_t *src[]) {
     break;
   }
 
-  sws_scale_ordered(sws,src,stride,0,src_height,image,image_stride);
+  sws_scale(sws,src,stride,0,src_height,image,image_stride);
 
-   /* Now 'ASCIInate' the image */ 
+   /* Now 'ASCIInate' the image */
   if (fast)
     aa_fastrender(c, screen_x, screen_y, screen_w + screen_x, screen_h + screen_y );
   else
@@ -364,8 +366,8 @@ draw_frame(uint8_t *src[]) {
   return 0;
 }
 
-static int 
-draw_slice(uint8_t *src[], int stride[], 
+static int
+draw_slice(uint8_t *src[], int stride[],
 	    int w, int h, int x, int y) {
 
   int dx1 = screen_x + (x * screen_w / src_width);
@@ -373,19 +375,19 @@ draw_slice(uint8_t *src[], int stride[],
   int dx2 = screen_x + ((x+w) * screen_w / src_width);
   int dy2 = screen_y + ((y+h) * screen_h / src_height);
 
-  sws_scale_ordered(sws,src,stride,y,h,image,image_stride);
+  sws_scale(sws,src,stride,y,h,image,image_stride);
 
-  /* Now 'ASCIInate' the image */ 
+  /* Now 'ASCIInate' the image */
   if (fast)
     aa_fastrender(c, dx1, dy1, dx2, dy2 );
   else
     aa_render(c, p,dx1, dy1, dx2, dy2 );
 
-  
+
   return 0;
 }
 
-static void 
+static void
 flip_page(void) {
 
    /* do we have to put *our* (messages, progbar) osd to aa's txtbuf ? */
@@ -393,12 +395,12 @@ flip_page(void) {
       {
 	if (time(NULL)>=stoposd ) {
 	  showosdmessage=0;
-	  if(osdmessagetext) {
+	  if(*osdmessagetext) {
 	    memset(c->textbuffer + osdy * aa_scrwidth(c) + osdx,' ',strlen(osdmessagetext));
 	    memset(c->attrbuffer + osdy * aa_scrwidth(c) + osdx ,0,strlen(osdmessagetext));
 	    osdmessagetext[0] = '\0';
 	  }
-	  if(posbar) {
+	  if(*posbar) {
 	    memset(c->textbuffer + (osdy+1) * aa_scrwidth(c),' ',strlen(posbar));
 	    memset(c->attrbuffer + (osdy+1) * aa_scrwidth(c),0,strlen(posbar));
 	  }
@@ -418,9 +420,9 @@ flip_page(void) {
     aa_flush(c);
 }
 
-static void 
+static void
 check_events(void) {
-    /* 
+    /*
      * any events?
      * called by show_image and mplayer
      */
@@ -497,7 +499,7 @@ check_events(void) {
     }
 }
 
-static void 
+static void
 uninit(void) {
     /*
      * THE END
@@ -576,23 +578,23 @@ static int parse_suboptions(const char *arg) {
     char *pseudoargv[4], *osdcolor = NULL, *subcolor = NULL, **strings,
          *helpmsg = NULL;
     int pseudoargc, displayhelp = 0, *booleans;
-    opt_t extra_opts[] = {
-            {"osdcolor", OPT_ARG_MSTRZ, &osdcolor,    NULL, 0},
-            {"subcolor", OPT_ARG_MSTRZ, &subcolor,    NULL, 0},
-            {"help",     OPT_ARG_BOOL,  &displayhelp, NULL, 0} };
+    const opt_t extra_opts[] = {
+            {"osdcolor", OPT_ARG_MSTRZ, &osdcolor,    NULL},
+            {"subcolor", OPT_ARG_MSTRZ, &subcolor,    NULL},
+            {"help",     OPT_ARG_BOOL,  &displayhelp, NULL} };
     opt_t *subopts = NULL, *p;
-    char *strings_list[] = {"-driver", "-kbddriver", "-mousedriver", "-font",
+    char * const strings_list[] = {"-driver", "-kbddriver", "-mousedriver", "-font",
         "-width", "-height", "-minwidth", "-minheight", "-maxwidth",
         "-maxheight", "-recwidth", "-recheight", "-bright",  "-contrast",
         "-gamma",  "-dimmul", "-boldmul", "-random" };
-    char *booleans_list[] = {"-dim", "-bold", "-reverse", "-normal",
+    char * const booleans_list[] = {"-dim", "-bold", "-reverse", "-normal",
         "-boldfont", "-inverse", "-extended", "-eight", "-dither",
         "-floyd_steinberg", "-error_distribution"};
-    char *nobooleans_list[] = {"-nodim", "-nobold", "-noreverse", "-nonormal",
+    char * const nobooleans_list[] = {"-nodim", "-nobold", "-noreverse", "-nonormal",
         "-noboldfont", "-noinverse", "-noextended", "-noeight", "-nodither",
         "-nofloyd_steinberg", "-noerror_distribution"};
     const int nstrings = sizeof(strings_list) / sizeof(char*);
-    const int nbooleans = sizeof(booleans_list) / sizeof(int);
+    const int nbooleans = sizeof(booleans_list) / sizeof(char*);
     const int nextra_opts = sizeof(extra_opts) / sizeof(opt_t);
     const int nsubopts = nstrings + nbooleans + nextra_opts;
     int i, retval = 0;
@@ -611,6 +613,7 @@ static int parse_suboptions(const char *arg) {
         p->name = booleans_list[i] + 1;
         p->type = OPT_ARG_BOOL;
         p->valp = &booleans[i];
+        booleans[i] = -1;
     }
     memcpy(p, extra_opts, sizeof(extra_opts));
 
@@ -633,60 +636,59 @@ static int parse_suboptions(const char *arg) {
                 pseudoargv[1] = strings_list[i];
                 pseudoargv[2] = strings[i];
                 aa_parseoptions(&aa_defparams, &aa_defrenderparams,
-                                                &pseudoargc, pseudoargv) != 1;
+                                                &pseudoargc, pseudoargv);
             }
         }
         pseudoargv[2] = NULL;
         for (i=0; i<nbooleans; i++) {
+            if (booleans[i] == -1) continue;
             pseudoargc = 2;
             if (booleans[i]) pseudoargv[1] = booleans_list[i];
             else pseudoargv[1] = nobooleans_list[i];
             aa_parseoptions(&aa_defparams, &aa_defrenderparams,
-                                                &pseudoargc, pseudoargv) != 1;
+                                                &pseudoargc, pseudoargv);
         }
         if (osdcolor) aaopt_osdcolor = getcolor(osdcolor);
         if (subcolor) aaopt_subcolor = getcolor(subcolor);
     }
 
-    if (subopts) free(subopts);
-    if (booleans) free(booleans);
+    free(subopts);
+    free(booleans);
     if (strings) {
         for (i=0; i<nstrings; i++)
-            if (strings[i])
-                free(strings[i]);
+            free(strings[i]);
         free(strings);
     }
-    if (osdcolor) free(osdcolor);
-    if (subcolor) free(subcolor);
-    if (helpmsg) free(helpmsg);
+    free(osdcolor);
+    free(subcolor);
+    free(helpmsg);
     return retval;
 }
 
 static int preinit(const char *arg)
 {
     char * hidis = NULL;
-    struct stat sbuf;
-    int fd, vt, major, minor;
-    FILE * fp;
-    char fname[12];
-    extern aa_linkedlist *aa_displayrecommended;
 
-    if(arg) 
+    if(arg)
     {
         if (parse_suboptions(arg) != 0)
 	return ENOSYS;
     }
 
         /* initializing of aalib */
-    
-    hidis=aa_getfirst(&aa_displayrecommended); 
+
+    hidis=aa_getfirst(&aa_displayrecommended);
     if ( hidis==NULL ){
+	struct stat sbuf;
+	char fname[12];
+	FILE *fp;
+	int fd, vt;
 	/* check /dev/vcsa<vt> */
 	/* check only, if no driver is explicit set */
 	fd = dup (fileno (stderr));
 	fstat (fd, &sbuf);
-	major = sbuf.st_rdev >> 8;
-	vt = minor = sbuf.st_rdev & 0xff;
+	// vt number stored in device minor
+	vt = sbuf.st_rdev & 0xff;
 	close (fd);
 	sprintf (fname, "/dev/vcsa%2.2i", vt);
 	fp = fopen (fname, "w+");
@@ -703,7 +705,7 @@ static int preinit(const char *arg)
     if (c == NULL) {
 	mp_msg(MSGT_VO,MSGL_ERR,"Cannot initialize aalib\n");
 	return VO_ERROR;
-    }   
+    }
     if (!aa_autoinitkbd(c,0)) {
 	mp_msg(MSGT_VO,MSGL_ERR,"Cannot initialize keyboard\n");
 	aa_close(c);
@@ -727,37 +729,27 @@ static int preinit(const char *arg)
     return 0;
 }
 
-static int control(uint32_t request, void *data, ...)
+static int control(uint32_t request, void *data)
 {
   switch (request) {
   case VOCTRL_QUERY_FORMAT:
     return query_format(*((uint32_t*)data));
   case VOCTRL_SET_EQUALIZER: {
-    va_list ap;
-    int val;
+    vf_equalizer_t *eq=data;
 
-    va_start(ap, data);
-    val = va_arg(ap, int);
-    va_end(ap);
-
-    if(strcmp((char*)data,"contrast") == 0)
-      p->contrast = ( val + 100 ) * 64 / 100;
-    else if(strcmp((char*)data,"brightness") == 0)
-      p->bright = ( val + 100) * 128 / 100;
+    if(strcmp(eq->item,"contrast") == 0)
+      p->contrast = ( eq->value + 100 ) * 64 / 100;
+    else if(strcmp(eq->item,"brightness") == 0)
+      p->bright = ( eq->value + 100) * 128 / 100;
     return VO_TRUE;
   }
   case VOCTRL_GET_EQUALIZER: {
-    va_list ap;
-    int* val;
+    vf_equalizer_t *eq=data;
 
-    va_start(ap, data);
-    val = va_arg(ap, int*);
-    va_end(ap);
-
-    if(strcmp((char*)data,"contrast") == 0)
-      *val = (p->contrast - 64) * 100 / 64;
-    else if(strcmp((char*)data,"brightness") == 0)
-      *val = (p->bright - 128) * 100 / 128;
+    if(strcmp(eq->item,"contrast") == 0)
+      eq->value = (p->contrast - 64) * 100 / 64;
+    else if(strcmp(eq->item,"brightness") == 0)
+      eq->value = (p->bright - 128) * 100 / 128;
 
     return VO_TRUE;
   }

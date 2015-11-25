@@ -1,30 +1,55 @@
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
 #define OSD_SUPPORT
 
-#include "config.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "config.h"
 #include "mp_msg.h"
 #include "help_mp.h"
 
 #include "img_format.h"
 #include "mp_image.h"
+#include "vd.h"
 #include "vf.h"
 
 #include "libvo/fastmemcpy.h"
+#include "libavutil/avutil.h"
 
 #ifdef OSD_SUPPORT
-#include "libvo/sub.h"
-#include "libvo/osd.h"
+#include "sub/sub.h"
+#include "sub/osd.h"
 #endif
 
 #include "m_option.h"
 #include "m_struct.h"
 
-#define MAX(a,b) ((a) > (b) ? (a) : (b))
-
 static struct vf_priv_s {
+    // These four values are a backup of the values parsed from the command line.
+    // This is necessary so that we do not get a mess upon filter reinit due to
+    // e.g. aspect changes and with only aspect specified on the command line,
+    // where we would otherwise use the values calculated for a different aspect
+    // instead of recalculating them again.
+    int cfg_exp_w, cfg_exp_h;
+    int cfg_exp_x, cfg_exp_y;
     int exp_w,exp_h;
     int exp_x,exp_y;
     int osd;
@@ -36,6 +61,8 @@ static struct vf_priv_s {
 } const vf_priv_dflt = {
   -1,-1,
   -1,-1,
+  -1,-1,
+  -1,-1,
   0,
   0.,
   1,
@@ -44,13 +71,10 @@ static struct vf_priv_s {
   0
 };
 
-extern int opt_screen_size_x;
-extern int opt_screen_size_y;
-
 //===========================================================================//
 #ifdef OSD_SUPPORT
 
-static struct vf_instance_s* vf=NULL; // fixme (needs sub.c changes)
+static struct vf_instance *vf=NULL; // fixme (needs sub.c changes)
 static int orig_w,orig_h;
 
 static void remove_func_2(int x0,int y0, int w,int h){
@@ -78,8 +102,22 @@ static void remove_func(int x0,int y0, int w,int h){
 	if(y0>=vf->priv->exp_y+orig_h) return;
 	h=y-y0;
     }
-    if(x0>=vf->priv->exp_x || x0+w<=vf->priv->exp_x+orig_w) return;
-    // TODO  clear left and right side of the image if needed
+    if(x0<vf->priv->exp_x){
+	// it has parts on the left side of the image:
+	int x=x0+w;
+	if(x>vf->priv->exp_x) x=vf->priv->exp_x;
+	remove_func_2(x0,y0,x-x0,h);
+	if(x0+w<=vf->priv->exp_x) return;
+	w-=x-x0;x0=x;
+    }
+    if(x0+w>vf->priv->exp_x+orig_w){
+	// it has parts on the right side of the image:
+	int x=x0;
+	if(x<vf->priv->exp_x+orig_w) x=vf->priv->exp_x+orig_w;
+	remove_func_2(x,y0,x0+w-x,h);
+	if(x0>=vf->priv->exp_x+orig_w) return;
+	w=x-x0;
+    }
 }
 
 static void draw_func(int x0,int y0, int w,int h,unsigned char* src, unsigned char *srca, int stride){
@@ -108,6 +146,10 @@ static void draw_func(int x0,int y0, int w,int h,unsigned char* src, unsigned ch
 			vf->dmpi->stride[0]*y0+
 			(vf->dmpi->bpp>>3)*x0;
     switch(vf->dmpi->imgfmt){
+    case IMGFMT_BGR12:
+    case IMGFMT_RGB12:
+        vo_draw_alpha_rgb12(w, h, src, srca, stride, dst, vf->dmpi->stride[0]);
+        break;
     case IMGFMT_BGR15:
     case IMGFMT_RGB15:
 	vo_draw_alpha_rgb15(w,h,src,srca,stride,dst,vf->dmpi->stride[0]);
@@ -142,7 +184,7 @@ static void draw_func(int x0,int y0, int w,int h,unsigned char* src, unsigned ch
     }
 }
 
-static void draw_osd(struct vf_instance_s* vf_,int w,int h){
+static void draw_osd(struct vf_instance *vf_,int w,int h){
     vf=vf_;orig_w=w;orig_h=h;
 //    printf("======================================\n");
     if(vf->priv->exp_w!=w || vf->priv->exp_h!=h ||
@@ -154,6 +196,10 @@ static void draw_osd(struct vf_instance_s* vf_,int w,int h){
 		remove_func_2(0,0,vf->priv->exp_w,vf->priv->exp_y);
 	    if (vf->priv->exp_y+h < vf->priv->exp_h)
 		remove_func_2(0,vf->priv->exp_y+h,vf->priv->exp_w,vf->priv->exp_h-h-vf->priv->exp_y);
+	    if (vf->priv->exp_x > 0)
+		remove_func_2(0,vf->priv->exp_y,vf->priv->exp_x,h);
+	    if (vf->priv->exp_x+w < vf->priv->exp_w)
+		remove_func_2(vf->priv->exp_x+w,vf->priv->exp_y,vf->priv->exp_w-w-vf->priv->exp_x,h);
 	} else {
 	    // partial clear:
 	    vo_remove_text(vf->priv->exp_w,vf->priv->exp_h,remove_func);
@@ -169,14 +215,20 @@ static void draw_osd(struct vf_instance_s* vf_,int w,int h){
 #endif
 //===========================================================================//
 
-static int config(struct vf_instance_s* vf,
+static int config(struct vf_instance *vf,
         int width, int height, int d_width, int d_height,
 	unsigned int flags, unsigned int outfmt){
+    mp_image_t test_mpi;
     if(outfmt == IMGFMT_MPEGPES) {
       vf->priv->passthrough = 1;
       return vf_next_config(vf,width,height,d_width,d_height,flags,outfmt);
     }
-    if (outfmt == IMGFMT_IF09) return 0;
+    mp_image_setfmt(&test_mpi, outfmt);
+    if (outfmt == IMGFMT_IF09 || !test_mpi.bpp) return 0;
+    vf->priv->exp_x = vf->priv->cfg_exp_x;
+    vf->priv->exp_y = vf->priv->cfg_exp_y;
+    vf->priv->exp_w = vf->priv->cfg_exp_w;
+    vf->priv->exp_h = vf->priv->cfg_exp_h;
     // calculate the missing parameters:
 #if 0
     if(vf->priv->exp_w<width) vf->priv->exp_w=width;
@@ -205,6 +257,23 @@ static int config(struct vf_instance_s* vf,
 
     if(vf->priv->exp_x<0 || vf->priv->exp_x+width>vf->priv->exp_w) vf->priv->exp_x=(vf->priv->exp_w-width)/2;
     if(vf->priv->exp_y<0 || vf->priv->exp_y+height>vf->priv->exp_h) vf->priv->exp_y=(vf->priv->exp_h-height)/2;
+    if(test_mpi.flags & MP_IMGFLAG_YUV) {
+        int x_align_mask = (1 << test_mpi.chroma_x_shift) - 1;
+        int y_align_mask = (1 << test_mpi.chroma_y_shift) - 1;
+        // For 1-plane format non-aligned offsets will completely
+        // destroy the colours, for planar it will break the chroma
+        // sampling position.
+        if (vf->priv->exp_x & x_align_mask) {
+            vf->priv->exp_x &= ~x_align_mask;
+            mp_msg(MSGT_VFILTER, MSGL_ERR, "Specified x offset not supported "
+                   "for YUV, reduced to %i.\n", vf->priv->exp_x);
+        }
+        if (vf->priv->exp_y & y_align_mask) {
+            vf->priv->exp_y &= ~y_align_mask;
+            mp_msg(MSGT_VFILTER, MSGL_ERR, "Specified y offset not supported "
+                   "for YUV, reduced to %i.\n", vf->priv->exp_y);
+        }
+    }
     vf->priv->fb_ptr=NULL;
 
     if(!opt_screen_size_x && !opt_screen_size_y){
@@ -220,7 +289,7 @@ static int config(struct vf_instance_s* vf,
 // codec -copy-> expand --DR--> vo
 // codec -copy-> expand -copy-> vo (worst case)
 
-static void get_image(struct vf_instance_s* vf, mp_image_t *mpi){
+static void get_image(struct vf_instance *vf, mp_image_t *mpi){
 //    if(mpi->type==MP_IMGTYPE_IPB) return; // not yet working
 #ifdef OSD_SUPPORT
     if(vf->priv->osd && (mpi->flags&MP_IMGFLAG_PRESERVE)){
@@ -234,16 +303,14 @@ static void get_image(struct vf_instance_s* vf, mp_image_t *mpi){
        (mpi->flags&(MP_IMGFLAG_ACCEPT_STRIDE|MP_IMGFLAG_ACCEPT_WIDTH)) ){
 	// try full DR !
 	mpi->priv=vf->dmpi=vf_get_image(vf->next,mpi->imgfmt,
-	    mpi->type, mpi->flags, 
-            MAX(vf->priv->exp_w, mpi->width +vf->priv->exp_x), 
-            MAX(vf->priv->exp_h, mpi->height+vf->priv->exp_y));
-#if 1
+	    mpi->type, mpi->flags,
+            FFMAX(vf->priv->exp_w, mpi->width +vf->priv->exp_x),
+            FFMAX(vf->priv->exp_h, mpi->height+vf->priv->exp_y));
 	if((vf->dmpi->flags & MP_IMGFLAG_DRAW_CALLBACK) &&
 	  !(vf->dmpi->flags & MP_IMGFLAG_DIRECT)){
 	    mp_msg(MSGT_VFILTER, MSGL_INFO, MSGTR_MPCODECS_FullDRNotPossible);
 	    return;
 	}
-#endif
 	// set up mpi as a cropped-down image of dmpi:
 	if(mpi->flags&MP_IMGFLAG_PLANAR){
 	    mpi->planes[0]=vf->dmpi->planes[0]+
@@ -267,34 +334,28 @@ static void get_image(struct vf_instance_s* vf, mp_image_t *mpi){
     }
 }
 
-static void start_slice(struct vf_instance_s* vf, mp_image_t *mpi){
+static void start_slice(struct vf_instance *vf, mp_image_t *mpi){
 //    printf("start_slice called! flag=%d\n",mpi->flags&MP_IMGFLAG_DRAW_CALLBACK);
-    if(!vf->next->draw_slice){
-	mpi->flags&=~MP_IMGFLAG_DRAW_CALLBACK;
-	return;
-    }
     // they want slices!!! allocate the buffer.
     if(!mpi->priv)
 	mpi->priv=vf->dmpi=vf_get_image(vf->next,mpi->imgfmt,
 //	MP_IMGTYPE_TEMP, MP_IMGFLAG_ACCEPT_STRIDE | MP_IMGFLAG_PREFER_ALIGNED_STRIDE,
-	    MP_IMGTYPE_TEMP, mpi->flags, 
-            MAX(vf->priv->exp_w, mpi->width +vf->priv->exp_x), 
-            MAX(vf->priv->exp_h, mpi->height+vf->priv->exp_y));
-    if(!(vf->dmpi->flags&MP_IMGFLAG_DRAW_CALLBACK))
-	mp_msg(MSGT_VFILTER, MSGL_WARN, MSGTR_MPCODECS_WarnNextFilterDoesntSupportSlices); // shouldn't happen.
+	    MP_IMGTYPE_TEMP, mpi->flags,
+            FFMAX(vf->priv->exp_w, mpi->width +vf->priv->exp_x),
+            FFMAX(vf->priv->exp_h, mpi->height+vf->priv->exp_y));
     vf->priv->first_slice = 1;
 }
 
-static void draw_top_blackbar_slice(struct vf_instance_s* vf,
+static void draw_top_blackbar_slice(struct vf_instance *vf,
 				    unsigned char** src, int* stride, int w,int h, int x, int y){
     if(vf->priv->exp_y>0 && y == 0) {
 	vf_next_draw_slice(vf, vf->dmpi->planes, vf->dmpi->stride,
 			   vf->dmpi->w,vf->priv->exp_y,0,0);
     }
-    
+
 }
 
-static void draw_bottom_blackbar_slice(struct vf_instance_s* vf,
+static void draw_bottom_blackbar_slice(struct vf_instance *vf,
 				    unsigned char** src, int* stride, int w,int h, int x, int y){
     if(vf->priv->exp_y+vf->h<vf->dmpi->h && y+h == vf->h) {
 	unsigned char *src2[MP_MAX_PLANES];
@@ -314,10 +375,10 @@ static void draw_bottom_blackbar_slice(struct vf_instance_s* vf,
     }
 }
 
-static void draw_slice(struct vf_instance_s* vf,
+static void draw_slice(struct vf_instance *vf,
         unsigned char** src, int* stride, int w,int h, int x, int y){
 //    printf("draw_slice() called %d at %d\n",h,y);
-    
+
     if (y == 0 && y+h == vf->h) {
 	// special case - only one slice
 	draw_top_blackbar_slice(vf, src, stride, w, h, x, y);
@@ -337,7 +398,7 @@ static void draw_slice(struct vf_instance_s* vf,
     vf->priv->first_slice = 0;
 }
 
-static int put_image(struct vf_instance_s* vf, mp_image_t *mpi, double pts){
+static int put_image(struct vf_instance *vf, mp_image_t *mpi, double pts){
     if (vf->priv->passthrough) {
       mp_image_t *dmpi = vf_get_image(vf->next, IMGFMT_MPEGPES,
                                       MP_IMGTYPE_EXPORT, 0, mpi->w, mpi->h);
@@ -346,12 +407,19 @@ static int put_image(struct vf_instance_s* vf, mp_image_t *mpi, double pts){
     }
 
     if(mpi->flags&MP_IMGFLAG_DIRECT || mpi->flags&MP_IMGFLAG_DRAW_CALLBACK){
+	int full_w = FFMIN(mpi->width,  vf->priv->exp_w);
+	int full_h = FFMIN(mpi->height, vf->priv->exp_h);
 	vf->dmpi=mpi->priv;
 	if(!vf->dmpi) { mp_msg(MSGT_VFILTER, MSGL_WARN, MSGTR_MPCODECS_FunWhydowegetNULL); return 0; }
 	mpi->priv=NULL;
 #ifdef OSD_SUPPORT
 	if(vf->priv->osd) draw_osd(vf,mpi->w,mpi->h);
 #endif
+	// padding for use by decoder needs to be cleared
+	if (mpi->w < full_w)
+	    vf_mpi_clear(mpi, mpi->w, 0, full_w - mpi->w, full_h);
+	if (mpi->h < full_h)
+	    vf_mpi_clear(mpi, 0, mpi->h, full_w, full_h - mpi->h);
 	// we've used DR, so we're ready...
 	if(!(mpi->flags&MP_IMGFLAG_PLANAR))
 	    vf->dmpi->planes[1] = mpi->planes[1]; // passthrough rgb8 palette
@@ -362,7 +430,7 @@ static int put_image(struct vf_instance_s* vf, mp_image_t *mpi, double pts){
     vf->dmpi=vf_get_image(vf->next,mpi->imgfmt,
 	MP_IMGTYPE_TEMP, MP_IMGFLAG_ACCEPT_STRIDE,
 	vf->priv->exp_w, vf->priv->exp_h);
-    
+
     // copy mpi->dmpi...
     if(mpi->flags&MP_IMGFLAG_PLANAR){
 	memcpy_pic(vf->dmpi->planes[0]+
@@ -392,7 +460,7 @@ static int put_image(struct vf_instance_s* vf, mp_image_t *mpi, double pts){
 
 //===========================================================================//
 
-static int control(struct vf_instance_s* vf, int request, void* data){
+static int control(struct vf_instance *vf, int request, void* data){
 #ifdef OSD_SUPPORT
     switch(request){
     case VFCTRL_DRAW_OSD:
@@ -402,11 +470,11 @@ static int control(struct vf_instance_s* vf, int request, void* data){
     return vf_next_control(vf,request,data);
 }
 
-static int query_format(struct vf_instance_s* vf, unsigned int fmt){
-  return (vf_next_query_format(vf,fmt));
+static int query_format(struct vf_instance *vf, unsigned int fmt){
+  return vf_next_query_format(vf,fmt);
 }
 
-static int open(vf_instance_t *vf, char* args){
+static int vf_open(vf_instance_t *vf, char *args){
     vf->config=config;
     vf->control=control;
     vf->query_format=query_format;
@@ -414,11 +482,11 @@ static int open(vf_instance_t *vf, char* args){
     vf->draw_slice=draw_slice;
     vf->get_image=get_image;
     vf->put_image=put_image;
-    mp_msg(MSGT_VFILTER, MSGL_INFO, "Expand: %d x %d, %d ; %d, osd: %d, aspect: %lf, round: %d\n",
-    vf->priv->exp_w,
-    vf->priv->exp_h,
-    vf->priv->exp_x,
-    vf->priv->exp_y,
+    mp_msg(MSGT_VFILTER, MSGL_INFO, "Expand: %d x %d, %d ; %d, osd: %d, aspect: %f, round: %d\n",
+    vf->priv->cfg_exp_w,
+    vf->priv->cfg_exp_h,
+    vf->priv->cfg_exp_x,
+    vf->priv->cfg_exp_y,
     vf->priv->osd,
     vf->priv->aspect,
     vf->priv->round);
@@ -426,18 +494,18 @@ static int open(vf_instance_t *vf, char* args){
 }
 
 #define ST_OFF(f) M_ST_OFF(struct vf_priv_s,f)
-static m_option_t vf_opts_fields[] = {
-  {"w", ST_OFF(exp_w), CONF_TYPE_INT, 0, 0 ,0, NULL},
-  {"h", ST_OFF(exp_h), CONF_TYPE_INT, 0, 0 ,0, NULL},
-  {"x", ST_OFF(exp_x), CONF_TYPE_INT, M_OPT_MIN, -1, 0, NULL},
-  {"y", ST_OFF(exp_y), CONF_TYPE_INT, M_OPT_MIN, -1, 0, NULL},
+static const m_option_t vf_opts_fields[] = {
+  {"w", ST_OFF(cfg_exp_w), CONF_TYPE_INT, 0, 0 ,0, NULL},
+  {"h", ST_OFF(cfg_exp_h), CONF_TYPE_INT, 0, 0 ,0, NULL},
+  {"x", ST_OFF(cfg_exp_x), CONF_TYPE_INT, M_OPT_MIN, -1, 0, NULL},
+  {"y", ST_OFF(cfg_exp_y), CONF_TYPE_INT, M_OPT_MIN, -1, 0, NULL},
   {"osd", ST_OFF(osd), CONF_TYPE_FLAG, 0 , 0, 1, NULL},
   {"aspect", ST_OFF(aspect), CONF_TYPE_DOUBLE, M_OPT_MIN, 0, 0, NULL},
   {"round", ST_OFF(round), CONF_TYPE_INT, M_OPT_MIN, 1, 0, NULL},
   { NULL, NULL, 0, 0, 0, 0,  NULL }
 };
 
-static m_struct_t vf_opts = {
+static const m_struct_t vf_opts = {
   "expand",
   sizeof(struct vf_priv_s),
   &vf_priv_dflt,
@@ -446,7 +514,7 @@ static m_struct_t vf_opts = {
 
 
 
-vf_info_t vf_info_expand = {
+const vf_info_t vf_info_expand = {
 #ifdef OSD_SUPPORT
     "expanding & osd",
 #else
@@ -455,7 +523,7 @@ vf_info_t vf_info_expand = {
     "expand",
     "A'rpi",
     "",
-    open,
+    vf_open,
     &vf_opts
 };
 

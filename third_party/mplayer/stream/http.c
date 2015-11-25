@@ -1,7 +1,23 @@
-/* 
+/*
  * HTTP Helper
- * by Bertrand Baudet <bertrand_baudet@yahoo.com>
- * (C) 2001, MPlayer team.
+ *
+ * Copyright (C) 2001 Bertrand Baudet <bertrand_baudet@yahoo.com>
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include "config.h"
@@ -9,10 +25,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 
-#ifndef HAVE_WINSOCK2
-#define closesocket close
+#if !HAVE_WINSOCK2_H
 #else
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -27,12 +43,7 @@
 #include "network.h"
 #include "help_mp.h"
 
-
-extern mime_struct_t mime_type_table[];
-extern int stream_cache_size;
-extern int network_bandwidth;
-
-extern int http_seek(stream_t *stream, off_t pos);
+#include "libavutil/base64.h"
 
 typedef struct {
   unsigned metaint;
@@ -70,6 +81,9 @@ static unsigned my_read(int fd, char *buffer, int len, streaming_ctrl_t *sc) {
  * \param fd file descriptor to read from
  * \param sc streaming_ctrl_t whose buffer is consumed before reading from fd
  * \return number of real data before next metadata block starts or 0 on error
+ *
+ * You can use unsv://samples.mplayerhq.hu/V-codecs/VP5/vp5_artefacts.nsv to
+ * test.
  */
 static unsigned uvox_meta_read(int fd, streaming_ctrl_t *sc) {
   unsigned metaint;
@@ -111,8 +125,13 @@ static void scast_meta_read(int fd, streaming_ctrl_t *sc) {
   my_read(fd, &tmp, 1, sc);
   metalen = tmp * 16;
   if (metalen > 0) {
-    char *info = malloc(metalen + 1);
+    int i;
+    uint8_t *info = malloc(metalen + 1);
     unsigned nlen = my_read(fd, info, metalen, sc);
+    // avoid breaking the user's terminal too much
+    if (nlen > 256) nlen = 256;
+    for (i = 0; i < nlen; i++)
+      if (info[i] && info[i] < 32) info[i] = '?';
     info[nlen] = 0;
     mp_msg(MSGT_DEMUXER, MSGL_INFO, "\nICY Info: %s\n", info);
     free(info);
@@ -199,13 +218,12 @@ static int scast_streaming_start(stream_t *stream) {
 static int nop_streaming_start( stream_t *stream ) {
 	HTTP_header_t *http_hdr = NULL;
 	char *next_url=NULL;
-	URL_t *rd_url=NULL;
 	int fd,ret;
 	if( stream==NULL ) return -1;
 
 	fd = stream->fd;
 	if( fd<0 ) {
-		fd = http_send_request( stream->streaming_ctrl->url, 0 ); 
+		fd = http_send_request( stream->streaming_ctrl->url, 0 );
 		if( fd<0 ) return -1;
 		http_hdr = http_read_response( fd );
 		if( http_hdr==NULL ) return -1;
@@ -225,16 +243,14 @@ static int nop_streaming_start( stream_t *stream ) {
 			case 301: // Permanently
 			case 302: // Temporarily
 			case 303: // See Other
+			case 307: // Temporarily (since HTTP/1.1)
 				ret=-1;
 				next_url = http_get_field( http_hdr, "Location" );
 
-				if (next_url != NULL)
-					rd_url=url_new(next_url);
-
-				if (next_url != NULL && rd_url != NULL) {
+				if (next_url != NULL) {
 					mp_msg(MSGT_NETWORK,MSGL_STATUS,"Redirected: Using this url instead %s\n",next_url);
-							stream->streaming_ctrl->url=check4proxies(rd_url);
-					ret=nop_streaming_start(stream); //recursively get streaming started 
+							stream->streaming_ctrl->url=url_new_with_proxy(next_url);
+					ret=nop_streaming_start(stream); //recursively get streaming started
 				} else {
 					mp_msg(MSGT_NETWORK,MSGL_ERR,"Redirection failed\n");
 					closesocket( fd );
@@ -282,9 +298,8 @@ HTTP_header_t *
 http_new_header(void) {
 	HTTP_header_t *http_hdr;
 
-	http_hdr = malloc(sizeof(HTTP_header_t));
+	http_hdr = calloc(1, sizeof(*http_hdr));
 	if( http_hdr==NULL ) return NULL;
-	memset( http_hdr, 0, sizeof(HTTP_header_t) );
 
 	return http_hdr;
 }
@@ -293,17 +308,16 @@ void
 http_free( HTTP_header_t *http_hdr ) {
 	HTTP_field_t *field, *field2free;
 	if( http_hdr==NULL ) return;
-	if( http_hdr->protocol!=NULL ) free( http_hdr->protocol );
-	if( http_hdr->uri!=NULL ) free( http_hdr->uri );
-	if( http_hdr->reason_phrase!=NULL ) free( http_hdr->reason_phrase );
-	if( http_hdr->field_search!=NULL ) free( http_hdr->field_search );
-	if( http_hdr->method!=NULL ) free( http_hdr->method );
-	if( http_hdr->buffer!=NULL ) free( http_hdr->buffer );
+	free(http_hdr->protocol);
+	free(http_hdr->uri);
+	free(http_hdr->reason_phrase);
+	free(http_hdr->field_search);
+	free(http_hdr->method);
+	free(http_hdr->buffer);
 	field = http_hdr->first_field;
 	while( field!=NULL ) {
 		field2free = field;
-		if (field->field_name)
-		  free(field->field_name);
+		free(field->field_name);
 		field = field->next;
 		free( field2free );
 	}
@@ -319,9 +333,9 @@ http_response_append( HTTP_header_t *http_hdr, char *response, int length ) {
 		mp_msg(MSGT_NETWORK,MSGL_FATAL,"Bad size in memory (re)allocation\n");
 		return -1;
 	}
-	http_hdr->buffer = (char*)realloc( http_hdr->buffer, http_hdr->buffer_size+length+1 );
+	http_hdr->buffer = realloc( http_hdr->buffer, http_hdr->buffer_size+length+1 );
 	if( http_hdr->buffer==NULL ) {
-		mp_msg(MSGT_NETWORK,MSGL_FATAL,"Memory (re)allocation failed\n");
+		mp_msg(MSGT_NETWORK,MSGL_FATAL,MSGTR_MemAllocFailed);
 		return -1;
 	}
 	memcpy( http_hdr->buffer+http_hdr->buffer_size, response, length );
@@ -334,7 +348,8 @@ int
 http_is_header_entire( HTTP_header_t *http_hdr ) {
 	if( http_hdr==NULL ) return -1;
 	if( http_hdr->buffer==NULL ) return 0; // empty
-	
+
+	if(http_hdr->buffer_size > 128*1024) return 1;
 	if( strstr(http_hdr->buffer, "\r\n\r\n")==NULL &&
 	    strstr(http_hdr->buffer, "\n\n")==NULL ) return 0;
 	return 1;
@@ -358,7 +373,7 @@ http_response_parse( HTTP_header_t *http_hdr ) {
 	len = hdr_ptr-http_hdr->buffer;
 	http_hdr->protocol = malloc(len+1);
 	if( http_hdr->protocol==NULL ) {
-		mp_msg(MSGT_NETWORK,MSGL_FATAL,"Memory allocation failed\n");
+		mp_msg(MSGT_NETWORK,MSGL_FATAL,MSGTR_MemAllocFailed);
 		return -1;
 	}
 	strncpy( http_hdr->protocol, http_hdr->buffer, len );
@@ -379,14 +394,14 @@ http_response_parse( HTTP_header_t *http_hdr ) {
 
 	// Get the reason phrase
 	ptr = strstr( hdr_ptr, "\n" );
-	if( hdr_ptr==NULL ) {
+	if( ptr==NULL ) {
 		mp_msg(MSGT_NETWORK,MSGL_ERR,"Malformed answer. Unable to get the reason phrase.\n");
 		return -1;
 	}
 	len = ptr-hdr_ptr;
 	http_hdr->reason_phrase = malloc(len+1);
 	if( http_hdr->reason_phrase==NULL ) {
-		mp_msg(MSGT_NETWORK,MSGL_FATAL,"Memory allocation failed\n");
+		mp_msg(MSGT_NETWORK,MSGL_FATAL,MSGTR_MemAllocFailed);
 		return -1;
 	}
 	strncpy( http_hdr->reason_phrase, hdr_ptr, len );
@@ -399,12 +414,12 @@ http_response_parse( HTTP_header_t *http_hdr ) {
 	hdr_sep_len = 4;
 	ptr = strstr( http_hdr->buffer, "\r\n\r\n" );
 	if( ptr==NULL ) {
+		hdr_sep_len = 2;
 		ptr = strstr( http_hdr->buffer, "\n\n" );
 		if( ptr==NULL ) {
 			mp_msg(MSGT_NETWORK,MSGL_ERR,"Header may be incomplete. No CRLF CRLF found.\n");
-			return -1;
+			hdr_sep_len = 0;
 		}
-		hdr_sep_len = 2;
 	}
 	pos_hdr_sep = ptr-http_hdr->buffer;
 
@@ -414,10 +429,21 @@ http_response_parse( HTTP_header_t *http_hdr ) {
 		ptr = hdr_ptr;
 		while( *ptr!='\r' && *ptr!='\n' ) ptr++;
 		len = ptr-hdr_ptr;
-		if( len==0 ) break;
-		field = (char*)realloc(field, len+1);
+		if (len == 0 || !memchr(hdr_ptr, ':', len)) {
+			mp_msg(MSGT_NETWORK, MSGL_ERR, "Broken response header, missing ':'\n");
+			pos_hdr_sep = ptr - http_hdr->buffer;
+			hdr_sep_len = 0;
+			break;
+		}
+		if (len > 16 && !strncasecmp(hdr_ptr + 4, "icy-metaint:", 12))
+		{
+			mp_msg(MSGT_NETWORK, MSGL_WARN, "Server sent a severely broken icy-metaint HTTP header!\n");
+			hdr_ptr += 4;
+			len -= 4;
+		}
+		field = realloc(field, len+1);
 		if( field==NULL ) {
-			mp_msg(MSGT_NETWORK,MSGL_ERR,"Memory allocation failed\n");
+			mp_msg(MSGT_NETWORK,MSGL_ERR,MSGTR_MemAllocFailed);
 			return -1;
 		}
 		strncpy( field, hdr_ptr, len );
@@ -425,8 +451,8 @@ http_response_parse( HTTP_header_t *http_hdr ) {
 		http_set_field( http_hdr, field );
 		hdr_ptr = ptr+((*ptr=='\r')?2:1);
 	} while( hdr_ptr<(http_hdr->buffer+pos_hdr_sep) );
-	
-	if( field!=NULL ) free( field );
+
+	free(field);
 
 	if( pos_hdr_sep+hdr_sep_len<http_hdr->buffer_size ) {
 		// Response has data!
@@ -440,27 +466,21 @@ http_response_parse( HTTP_header_t *http_hdr ) {
 
 char *
 http_build_request( HTTP_header_t *http_hdr ) {
-	char *ptr, *uri=NULL;
+	char *ptr;
 	int len;
 	HTTP_field_t *field;
 	if( http_hdr==NULL ) return NULL;
 
 	if( http_hdr->method==NULL ) http_set_method( http_hdr, "GET");
 	if( http_hdr->uri==NULL ) http_set_uri( http_hdr, "/");
-	else {
-		uri = malloc(strlen(http_hdr->uri) + 1);
-		if( uri==NULL ) {
-			mp_msg(MSGT_NETWORK,MSGL_ERR,"Memory allocation failed\n");
-			return NULL;
-		}
-		strcpy(uri,http_hdr->uri);
-	}
+	if( !http_hdr->uri || !http_hdr->method)
+		return NULL;
 
 	//**** Compute the request length
 	// Add the Method line
-	len = strlen(http_hdr->method)+strlen(uri)+12;
+	len = strlen(http_hdr->method)+strlen(http_hdr->uri)+12;
 	// Add the fields
-	field = http_hdr->first_field; 
+	field = http_hdr->first_field;
 	while( field!=NULL ) {
 		len += strlen(field->field_name)+2;
 		field = field->next;
@@ -478,7 +498,7 @@ http_build_request( HTTP_header_t *http_hdr ) {
 	}
 	http_hdr->buffer = malloc(len+1);
 	if( http_hdr->buffer==NULL ) {
-		mp_msg(MSGT_NETWORK,MSGL_ERR,"Memory allocation failed\n");
+		mp_msg(MSGT_NETWORK,MSGL_ERR,MSGTR_MemAllocFailed);
 		return NULL;
 	}
 	http_hdr->buffer_size = len;
@@ -486,7 +506,7 @@ http_build_request( HTTP_header_t *http_hdr ) {
 	//*** Building the request
 	ptr = http_hdr->buffer;
 	// Add the method line
-	ptr += sprintf( ptr, "%s %s HTTP/1.%d\r\n", http_hdr->method, uri, http_hdr->http_minor_version );
+	ptr += sprintf( ptr, "%s %s HTTP/1.%d\r\n", http_hdr->method, http_hdr->uri, http_hdr->http_minor_version );
 	field = http_hdr->first_field;
 	// Add the field
 	while( field!=NULL ) {
@@ -499,17 +519,16 @@ http_build_request( HTTP_header_t *http_hdr ) {
 		memcpy( ptr, http_hdr->body, http_hdr->body_size );
 	}
 
-	if( uri ) free( uri );
-	return http_hdr->buffer;	
+	return http_hdr->buffer;
 }
 
 char *
 http_get_field( HTTP_header_t *http_hdr, const char *field_name ) {
 	if( http_hdr==NULL || field_name==NULL ) return NULL;
 	http_hdr->field_search_pos = http_hdr->first_field;
-	http_hdr->field_search = (char*)realloc( http_hdr->field_search, strlen(field_name)+1 );
+	http_hdr->field_search = realloc( http_hdr->field_search, strlen(field_name)+1 );
 	if( http_hdr->field_search==NULL ) {
-		mp_msg(MSGT_NETWORK,MSGL_FATAL,"Memory allocation failed\n");
+		mp_msg(MSGT_NETWORK,MSGL_FATAL,MSGTR_MemAllocFailed);
 		return NULL;
 	}
 	strcpy( http_hdr->field_search, field_name );
@@ -523,7 +542,7 @@ http_get_next_field( HTTP_header_t *http_hdr ) {
 	if( http_hdr==NULL ) return NULL;
 
 	field = http_hdr->field_search_pos;
-	while( field!=NULL ) { 
+	while( field!=NULL ) {
 		ptr = strstr( field->field_name, ":" );
 		if( ptr==NULL ) return NULL;
 		if( !strncasecmp( field->field_name, http_hdr->field_search, ptr-(field->field_name) ) ) {
@@ -544,13 +563,14 @@ http_set_field( HTTP_header_t *http_hdr, const char *field_name ) {
 
 	new_field = malloc(sizeof(HTTP_field_t));
 	if( new_field==NULL ) {
-		mp_msg(MSGT_NETWORK,MSGL_FATAL,"Memory allocation failed\n");
+		mp_msg(MSGT_NETWORK,MSGL_FATAL,MSGTR_MemAllocFailed);
 		return;
 	}
 	new_field->next = NULL;
 	new_field->field_name = malloc(strlen(field_name)+1);
 	if( new_field->field_name==NULL ) {
-		mp_msg(MSGT_NETWORK,MSGL_FATAL,"Memory allocation failed\n");
+		mp_msg(MSGT_NETWORK,MSGL_FATAL,MSGTR_MemAllocFailed);
+		free(new_field);
 		return;
 	}
 	strcpy( new_field->field_name, field_name );
@@ -570,7 +590,7 @@ http_set_method( HTTP_header_t *http_hdr, const char *method ) {
 
 	http_hdr->method = malloc(strlen(method)+1);
 	if( http_hdr->method==NULL ) {
-		mp_msg(MSGT_NETWORK,MSGL_FATAL,"Memory allocation failed\n");
+		mp_msg(MSGT_NETWORK,MSGL_FATAL,MSGTR_MemAllocFailed);
 		return;
 	}
 	strcpy( http_hdr->method, method );
@@ -582,63 +602,68 @@ http_set_uri( HTTP_header_t *http_hdr, const char *uri ) {
 
 	http_hdr->uri = malloc(strlen(uri)+1);
 	if( http_hdr->uri==NULL ) {
-		mp_msg(MSGT_NETWORK,MSGL_FATAL,"Memory allocation failed\n");
+		mp_msg(MSGT_NETWORK,MSGL_FATAL,MSGTR_MemAllocFailed);
 		return;
 	}
 	strcpy( http_hdr->uri, uri );
 }
 
-int
-http_add_basic_authentication( HTTP_header_t *http_hdr, const char *username, const char *password ) {
+static int
+http_add_authentication( HTTP_header_t *http_hdr, const char *username, const char *password, const char *auth_str ) {
 	char *auth = NULL, *usr_pass = NULL, *b64_usr_pass = NULL;
-	int encoded_len, pass_len=0, out_len;
+	int encoded_len, pass_len=0;
+	size_t auth_len, usr_pass_len;
 	int res = -1;
 	if( http_hdr==NULL || username==NULL ) return -1;
 
 	if( password!=NULL ) {
 		pass_len = strlen(password);
 	}
-	
-	usr_pass = malloc(strlen(username)+pass_len+2);
+
+	usr_pass_len = strlen(username) + 1 + pass_len;
+	usr_pass = malloc(usr_pass_len + 1);
 	if( usr_pass==NULL ) {
-		mp_msg(MSGT_NETWORK,MSGL_FATAL,"Memory allocation failed\n");
+		mp_msg(MSGT_NETWORK,MSGL_FATAL,MSGTR_MemAllocFailed);
 		goto out;
 	}
 
 	sprintf( usr_pass, "%s:%s", username, (password==NULL)?"":password );
 
-	// Base 64 encode with at least 33% more data than the original size
-	encoded_len = strlen(usr_pass)*2;
+	encoded_len = AV_BASE64_SIZE(usr_pass_len);
 	b64_usr_pass = malloc(encoded_len);
 	if( b64_usr_pass==NULL ) {
-		mp_msg(MSGT_NETWORK,MSGL_FATAL,"Memory allocation failed\n");
+		mp_msg(MSGT_NETWORK,MSGL_FATAL,MSGTR_MemAllocFailed);
 		goto out;
 	}
+	av_base64_encode(b64_usr_pass, encoded_len, usr_pass, usr_pass_len);
 
-	out_len = base64_encode( usr_pass, strlen(usr_pass), b64_usr_pass, encoded_len);
-	if( out_len<0 ) {
-		mp_msg(MSGT_NETWORK,MSGL_FATAL,"Base64 out overflow\n");
-		goto out;
-	}
-
-	b64_usr_pass[out_len]='\0';
-	
-	auth = malloc(encoded_len+22);
+	auth_len = encoded_len + 100;
+	auth = malloc(auth_len);
 	if( auth==NULL ) {
-		mp_msg(MSGT_NETWORK,MSGL_FATAL,"Memory allocation failed\n");
+		mp_msg(MSGT_NETWORK,MSGL_FATAL,MSGTR_MemAllocFailed);
 		goto out;
 	}
-	
-	sprintf( auth, "Authorization: Basic %s", b64_usr_pass);
+
+	snprintf(auth, auth_len, "%s: Basic %s", auth_str, b64_usr_pass);
 	http_set_field( http_hdr, auth );
 	res = 0;
-	
+
 out:
 	free( usr_pass );
 	free( b64_usr_pass );
 	free( auth );
-	
+
 	return res;
+}
+
+int
+http_add_basic_authentication( HTTP_header_t *http_hdr, const char *username, const char *password ) {
+	return http_add_authentication(http_hdr, username, password, "Authorization");
+}
+
+int
+http_add_basic_proxy_authentication( HTTP_header_t *http_hdr, const char *username, const char *password ) {
+	return http_add_authentication(http_hdr, username, password, "Proxy-Authorization");
 }
 
 void
@@ -654,7 +679,7 @@ http_debug_hdr( HTTP_header_t *http_hdr ) {
 	mp_msg(MSGT_NETWORK,MSGL_V,"method:             [%s]\n", http_hdr->method );
 	mp_msg(MSGT_NETWORK,MSGL_V,"status code:        [%d]\n", http_hdr->status_code );
 	mp_msg(MSGT_NETWORK,MSGL_V,"reason phrase:      [%s]\n", http_hdr->reason_phrase );
-	mp_msg(MSGT_NETWORK,MSGL_V,"body size:          [%d]\n", http_hdr->body_size );
+	mp_msg(MSGT_NETWORK,MSGL_V,"body size:          [%zu]\n", http_hdr->body_size );
 
 	mp_msg(MSGT_NETWORK,MSGL_V,"Fields:\n");
 	field = http_hdr->first_field;
@@ -665,74 +690,40 @@ http_debug_hdr( HTTP_header_t *http_hdr ) {
 	mp_msg(MSGT_NETWORK,MSGL_V,"--- HTTP DEBUG HEADER --- END ---\n");
 }
 
-int 
-base64_encode(const void *enc, int encLen, char *out, int outMax) {
-	static const char	b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-	unsigned char		*encBuf;
-	int			outLen;
-	unsigned int		bits;
-	unsigned int		shift;
-
-	encBuf = (unsigned char*)enc;
-	outLen = 0;
-	bits = 0;
-	shift = 0;
-	outMax &= ~3;
-
-	while(1) {
-		if( encLen>0 ) {
-			// Shift in byte
-			bits <<= 8;
-			bits |= *encBuf;
-			shift += 8;
-			// Next byte
-			encBuf++;
-			encLen--;
-		} else if( shift>0 ) {
-			// Pad last bits to 6 bits - will end next loop
-			bits <<= 6 - shift;
-			shift = 6;
-		} else {
-			// As per RFC 2045, section 6.8,
-			// pad output as necessary: 0 to 2 '=' chars.
-			while( outLen & 3 ){
-				*out++ = '=';
-				outLen++;
-			}
-
-			return outLen;
-		}
-
-		// Encode 6 bit segments
-		while( shift>=6 ) {
-			if (outLen >= outMax)
-				return -1;
-			shift -= 6;
-			*out = b64[ (bits >> shift) & 0x3F ];
-			out++;
-			outLen++;
-		}
-	}
+static void print_icy_metadata(HTTP_header_t *http_hdr) {
+	const char *field_data;
+	// note: I skip icy-notice1 and 2, as they contain html <BR>
+	// and are IMHO useless info ::atmos
+	if( (field_data = http_get_field(http_hdr, "icy-name")) != NULL )
+		mp_msg(MSGT_NETWORK,MSGL_INFO,"Name   : %s\n", field_data);
+	if( (field_data = http_get_field(http_hdr, "icy-genre")) != NULL )
+		mp_msg(MSGT_NETWORK,MSGL_INFO,"Genre  : %s\n", field_data);
+	if( (field_data = http_get_field(http_hdr, "icy-url")) != NULL )
+		mp_msg(MSGT_NETWORK,MSGL_INFO,"Website: %s\n", field_data);
+	// XXX: does this really mean public server? ::atmos
+	if( (field_data = http_get_field(http_hdr, "icy-pub")) != NULL )
+		mp_msg(MSGT_NETWORK,MSGL_INFO,"Public : %s\n", atoi(field_data)?"yes":"no");
+	if( (field_data = http_get_field(http_hdr, "icy-br")) != NULL )
+		mp_msg(MSGT_NETWORK,MSGL_INFO,"Bitrate: %skbit/s\n", field_data);
 }
 
 //! If this function succeeds you must closesocket stream->fd
 static int http_streaming_start(stream_t *stream, int* file_format) {
 	HTTP_header_t *http_hdr = NULL;
-	unsigned int i;
 	int fd = stream->fd;
-	int res = 0;
+	int res = STREAM_UNSUPPORTED;
 	int redirect = 0;
 	int auth_retry=0;
 	int seekable=0;
 	char *content_type;
+	const char *content_length;
 	char *next_url;
 	URL_t *url = stream->streaming_ctrl->url;
 
 	do
 	{
 		redirect = 0;
-		if (fd > 0) closesocket(fd);
+		if (fd >= 0) closesocket(fd);
 		fd = http_send_request( url, 0 );
 		if( fd<0 ) {
 			goto err_out;
@@ -747,35 +738,31 @@ static int http_streaming_start(stream_t *stream, int* file_format) {
 		if( mp_msg_test(MSGT_NETWORK,MSGL_V) ) {
 			http_debug_hdr( http_hdr );
 		}
-		
+
 		// Check if we can make partial content requests and thus seek in http-streams
 		if( http_hdr!=NULL && http_hdr->status_code==200 ) {
-		    char *accept_ranges;
-		    if( (accept_ranges = http_get_field(http_hdr,"Accept-Ranges")) != NULL )
+		    const char *accept_ranges = http_get_field(http_hdr,"Accept-Ranges");
+		    const char *server = http_get_field(http_hdr, "Server");
+		    if (accept_ranges)
 			seekable = strncmp(accept_ranges,"bytes",5)==0;
+		    else if (server && (strcmp(server, "gvs 1.0") == 0 ||
+		                        strncmp(server, "MakeMKV", 7) == 0)) {
+			// HACK for youtube and MakeMKV incorrectly claiming not to support seeking
+			mp_msg(MSGT_NETWORK, MSGL_WARN, "Broken webserver, incorrectly claims to not support Accept-Ranges\n");
+			seekable = 1;
+		    }
 		}
 
+		print_icy_metadata(http_hdr);
+
 		// Check if the response is an ICY status_code reason_phrase
-		if( !strcasecmp(http_hdr->protocol, "ICY") ) {
+		if( !strcasecmp(http_hdr->protocol, "ICY") ||
+		     http_get_field(http_hdr, "Icy-MetaInt") ) {
 			switch( http_hdr->status_code ) {
 				case 200: { // OK
-					char *field_data = NULL;
-					// note: I skip icy-notice1 and 2, as they contain html <BR>
-					// and are IMHO useless info ::atmos
-					if( (field_data = http_get_field(http_hdr, "icy-name")) != NULL )
-						mp_msg(MSGT_NETWORK,MSGL_INFO,"Name   : %s\n", field_data); field_data = NULL;
-					if( (field_data = http_get_field(http_hdr, "icy-genre")) != NULL )
-						mp_msg(MSGT_NETWORK,MSGL_INFO,"Genre  : %s\n", field_data); field_data = NULL;
-					if( (field_data = http_get_field(http_hdr, "icy-url")) != NULL )
-						mp_msg(MSGT_NETWORK,MSGL_INFO,"Website: %s\n", field_data); field_data = NULL;
-					// XXX: does this really mean public server? ::atmos
-					if( (field_data = http_get_field(http_hdr, "icy-pub")) != NULL )
-						mp_msg(MSGT_NETWORK,MSGL_INFO,"Public : %s\n", atoi(field_data)?"yes":"no"); field_data = NULL;
-					if( (field_data = http_get_field(http_hdr, "icy-br")) != NULL )
-						mp_msg(MSGT_NETWORK,MSGL_INFO,"Bitrate: %skbit/s\n", field_data); field_data = NULL;
-					
-					// If content-type == video/nsv we most likely have a winamp video stream 
-					// otherwise it should be mp3. if there are more types consider adding mime type 
+					char *field_data;
+					// If content-type == video/nsv we most likely have a winamp video stream
+					// otherwise it should be mp3. if there are more types consider adding mime type
 					// handling like later
 					if ( (field_data = http_get_field(http_hdr, "content-type")) != NULL && (!strcmp(field_data, "video/nsv") || !strcmp(field_data, "misc/ultravox")))
 						*file_format = DEMUXER_TYPE_NSV;
@@ -783,6 +770,7 @@ static int http_streaming_start(stream_t *stream, int* file_format) {
 						*file_format = DEMUXER_TYPE_AAC;
 					else
 						*file_format = DEMUXER_TYPE_AUDIO;
+					res = STREAM_ERROR;
 					goto out;
 				}
 				case 400: // Server Full
@@ -803,25 +791,27 @@ static int http_streaming_start(stream_t *stream, int* file_format) {
 			}
 		}
 
-		// Assume standard http if not ICY			
+		// Assume standard http if not ICY
 		switch( http_hdr->status_code ) {
 			case 200: // OK
+				content_length = http_get_field(http_hdr, "Content-Length");
+				if (content_length) {
+					mp_msg(MSGT_NETWORK,MSGL_V,"Content-Length: [%s]\n", content_length);
+					stream->end_pos = atoll(content_length);
+				}
 				// Look if we can use the Content-Type
 				content_type = http_get_field( http_hdr, "Content-Type" );
 				if( content_type!=NULL ) {
-					char *content_length = NULL;
+					unsigned int i;
+
 					mp_msg(MSGT_NETWORK,MSGL_V,"Content-Type: [%s]\n", content_type );
-					if( (content_length = http_get_field(http_hdr, "Content-Length")) != NULL)
-						mp_msg(MSGT_NETWORK,MSGL_V,"Content-Length: [%s]\n", http_get_field(http_hdr, "Content-Length"));
 					// Check in the mime type table for a demuxer type
-					i = 0;
-					while(mime_type_table[i].mime_type != NULL) {
+					for (i = 0; mime_type_table[i].mime_type != NULL; i++) {
 						if( !strcasecmp( content_type, mime_type_table[i].mime_type ) ) {
 							*file_format = mime_type_table[i].demuxer_type;
 							res = seekable;
 							goto out;
 						}
-						i++;
 					}
 				}
 				// Not found in the mime type table, don't fail,
@@ -832,11 +822,23 @@ static int http_streaming_start(stream_t *stream, int* file_format) {
 			case 301: // Permanently
 			case 302: // Temporarily
 			case 303: // See Other
+			case 307: // Temporarily (since HTTP/1.1)
 				// TODO: RFC 2616, recommand to detect infinite redirection loops
 				next_url = http_get_field( http_hdr, "Location" );
 				if( next_url!=NULL ) {
+					int is_ultravox = strcasecmp(stream->streaming_ctrl->url->protocol, "unsv") == 0;
 					stream->streaming_ctrl->url = url_redirect( &url, next_url );
-					redirect = 1;	
+					if (url_is_protocol(url, "mms")) {
+						res = STREAM_REDIRECTED;
+						goto err_out;
+					}
+					if (!url_is_protocol(url, "http")) {
+						mp_msg(MSGT_NETWORK,MSGL_ERR,"Unsupported http %d redirect to %s protocol\n", http_hdr->status_code, url->protocol);
+						goto err_out;
+					}
+					if (is_ultravox)
+						url_set_protocol(url, "unsv");
+					redirect = 1;
 				}
 				break;
 			case 401: // Authentication required
@@ -851,13 +853,12 @@ static int http_streaming_start(stream_t *stream, int* file_format) {
 	} while( redirect );
 
 err_out:
-	if (fd > 0) closesocket( fd );
+	if (fd >= 0) closesocket( fd );
 	fd = -1;
-	res = STREAM_UNSUPORTED;
 	http_free( http_hdr );
 	http_hdr = NULL;
 out:
-	stream->streaming_ctrl->data = (void*)http_hdr;
+	stream->streaming_ctrl->data = http_hdr;
 	stream->fd = fd;
 	return res;
 }
@@ -870,7 +871,7 @@ static int fixup_open(stream_t *stream,int seekable) {
 	stream->type = STREAMTYPE_STREAM;
 	if(!is_icy && !is_ultravox && seekable)
 	{
-		stream->flags |= STREAM_SEEK;
+		stream->flags |= MP_STREAM_SEEK;
 		stream->seek = http_seek;
 	}
 	stream->streaming_ctrl->bandwidth = network_bandwidth;
@@ -882,7 +883,7 @@ static int fixup_open(stream_t *stream,int seekable) {
 		stream->fd = -1;
 		streaming_ctrl_free(stream->streaming_ctrl);
 		stream->streaming_ctrl = NULL;
-		return STREAM_UNSUPORTED;
+		return STREAM_UNSUPPORTED;
 	}
 
 	fixup_network_stream_cache(stream);
@@ -891,26 +892,25 @@ static int fixup_open(stream_t *stream,int seekable) {
 
 static int open_s1(stream_t *stream,int mode, void* opts, int* file_format) {
 	int seekable=0;
-	URL_t *url;
 
 	stream->streaming_ctrl = streaming_ctrl_new();
 	if( stream->streaming_ctrl==NULL ) {
 		return STREAM_ERROR;
 	}
 	stream->streaming_ctrl->bandwidth = network_bandwidth;
-	url = url_new(stream->url);
-	stream->streaming_ctrl->url = check4proxies(url);
-	url_free(url);
-	
+	stream->streaming_ctrl->url = url_new_with_proxy(stream->url);
+
 	mp_msg(MSGT_OPEN, MSGL_V, "STREAM_HTTP(1), URL: %s\n", stream->url);
 	seekable = http_streaming_start(stream, file_format);
 	if((seekable < 0) || (*file_format == DEMUXER_TYPE_ASF)) {
 		if (stream->fd >= 0)
 			closesocket(stream->fd);
 		stream->fd = -1;
+		if (seekable == STREAM_REDIRECTED)
+			return seekable;
 		streaming_ctrl_free(stream->streaming_ctrl);
 		stream->streaming_ctrl = NULL;
-		return STREAM_UNSUPORTED;
+		return STREAM_UNSUPPORTED;
 	}
 
 	return fixup_open(stream, seekable);
@@ -918,17 +918,14 @@ static int open_s1(stream_t *stream,int mode, void* opts, int* file_format) {
 
 static int open_s2(stream_t *stream,int mode, void* opts, int* file_format) {
 	int seekable=0;
-	URL_t *url;
 
 	stream->streaming_ctrl = streaming_ctrl_new();
 	if( stream->streaming_ctrl==NULL ) {
 		return STREAM_ERROR;
 	}
 	stream->streaming_ctrl->bandwidth = network_bandwidth;
-	url = url_new(stream->url);
-	stream->streaming_ctrl->url = check4proxies(url);
-	url_free(url);
-	
+	stream->streaming_ctrl->url = url_new_with_proxy(stream->url);
+
 	mp_msg(MSGT_OPEN, MSGL_V, "STREAM_HTTP(2), URL: %s\n", stream->url);
 	seekable = http_streaming_start(stream, file_format);
 	if(seekable < 0) {
@@ -937,25 +934,25 @@ static int open_s2(stream_t *stream,int mode, void* opts, int* file_format) {
 		stream->fd = -1;
 		streaming_ctrl_free(stream->streaming_ctrl);
 		stream->streaming_ctrl = NULL;
-		return STREAM_UNSUPORTED;
+		return STREAM_UNSUPPORTED;
 	}
 
 	return fixup_open(stream, seekable);
 }
 
 
-stream_info_t stream_info_http1 = {
+const stream_info_t stream_info_http1 = {
   "http streaming",
   "null",
   "Bertrand, Albeau, Reimar Doeffinger, Arpi?",
   "plain http",
   open_s1,
-  {"http", "http_proxy", "unsv", NULL},
+  {"http", "http_proxy", "unsv", "icyx", "noicyx", NULL},
   NULL,
   0 // Urls are an option string
 };
 
-stream_info_t stream_info_http2 = {
+const stream_info_t stream_info_http2 = {
   "http streaming",
   "null",
   "Bertrand, Albeu, Arpi? who?",

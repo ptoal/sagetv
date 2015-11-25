@@ -1,13 +1,24 @@
 /*
- *
  * X11 DGA Interface
  *
- * Copyright ( C ) 2001, Andreas Ackermann. All Rights Reserved.
- *
- * <acki@acki-netz.de>
- *
+ * Copyright (C) 2001 Andreas Ackermann <acki@acki-netz.de>
  * Sourceforge username: acki2
- * 
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include <stdio.h>
@@ -17,6 +28,7 @@
 
 #include "config.h"
 #include "video_out.h"
+#define NO_DRAW_SLICE
 #include "video_out_internal.h"
 #include "aspect.h"
 #include "x11_common.h"
@@ -26,15 +38,15 @@
 #include <X11/Xlib.h>
 #include <X11/extensions/xf86dga.h>
 
-#ifdef HAVE_XF86VM
+#ifdef CONFIG_XF86VM
 #include <X11/extensions/xf86vmode.h>
 #endif
 
-static vo_info_t info = {
-#ifdef HAVE_DGA2
+static const vo_info_t info = {
+#ifdef CONFIG_DGA2
     "DGA ( Direct Graphic Access V2.0 )",
 #else
-#ifdef HAVE_XF86VM
+#ifdef CONFIG_XF86VM
     "DGA ( Direct Graphic Access V1.0+XF86VidModeExt. )",
 #else
     "DGA ( Direct Graphic Access V1.0 )",
@@ -45,7 +57,7 @@ static vo_info_t info = {
     ""
 };
 
-LIBVO_EXTERN(dga)
+const LIBVO_EXTERN(dga)
 //------------------------------------------------------------------
 //#define BITSPP (vo_dga_modes[vo_dga_active_mode].vdm_bitspp)
 //#define BYTESPP (vo_dga_modes[vo_dga_active_mode].vdm_bytespp)
@@ -70,7 +82,7 @@ struct vd_modes
 static struct vd_modes vo_dga_modes[] = {
     // these entries describe HW modes
     // however, we use the same entries to tell mplayer what we support
-    // so the last two values describe, which HW mode to use and which conversion 
+    // so the last two values describe, which HW mode to use and which conversion
     // function to use for a mode that is not supported by HW
 
     {0, 0, 0, 0, 0, 0, 0, 0, 0,},
@@ -108,11 +120,11 @@ static int vd_EnableMode(int depth, int bitspp,
 static int vd_ModeEqual(int depth, int bitspp,
                         int rmask, int gmask, int bmask, int index)
 {
-    return ((vo_dga_modes[index].vdm_depth == depth &&
+    return  (vo_dga_modes[index].vdm_depth == depth &&
              vo_dga_modes[index].vdm_bitspp == bitspp &&
              vo_dga_modes[index].vdm_rmask == rmask &&
              vo_dga_modes[index].vdm_gmask == gmask &&
-             vo_dga_modes[index].vdm_bmask == bmask) ? 1 : 0);
+             vo_dga_modes[index].vdm_bmask == bmask) ? 1 : 0;
 }
 
 
@@ -175,14 +187,14 @@ static char *vd_GetModeString(int index)
 
 //-----------------------------------------------------------------
 
-#if defined(HAVE_XF86VM) && !defined(HAVE_DGA2)
+#if defined(CONFIG_XF86VM) && !defined(CONFIG_DGA2)
 static XF86VidModeModeInfo **vo_dga_vidmodes = NULL;
 #endif
 
 
 static int vo_dga_src_format;
 static int vo_dga_width;        // bytes per line in framebuffer
-static int vo_dga_vp_width;     // visible pixels per line in 
+static int vo_dga_vp_width;     // visible pixels per line in
 
                                          // framebuffer
 static int vo_dga_vp_height;    // visible lines in framebuffer
@@ -192,17 +204,17 @@ static int vo_dga_src_height;   // height of video in pixels
 static int vo_dga_src_offset = 0;       // offset in src
 static int vo_dga_vp_offset = 0;        // offset in dest
 static int vo_dga_bytes_per_line;       // bytes per line to copy
-static int vo_dga_vp_skip;      // dto. for dest 
-static int vo_dga_lines;        // num of lines to copy                                
+static int vo_dga_vp_skip;      // dto. for dest
+static int vo_dga_lines;        // num of lines to copy
 static int vo_dga_hw_mode = 0;  // index in mode list that is actually
 
                                          // used by framebuffer
-static int vo_dga_src_mode = 0; // index in mode list that is used by 
+static int vo_dga_src_mode = 0; // index in mode list that is used by
 
                                          // codec
 static int vo_dga_XServer_mode = 0;     // index in mode list for resolution
 
-#ifdef HAVE_DGA2
+#ifdef CONFIG_DGA2
 static XDGAMode *vo_modelines;
 static int vo_modecount;
 #endif
@@ -234,31 +246,15 @@ static void draw_alpha(int x0, int y0, int w, int h, unsigned char *src,
     char *d;
     unsigned int offset;
     int buffer_stride;
+    int bpp = pixel_stride(vo_dga_src_format);
+    vo_draw_alpha_func draw = vo_get_draw_alpha(vo_dga_src_format);
 
     offset = vo_dga_width * y0 + x0;
-    buffer_stride = vo_dga_width;
+    buffer_stride = vo_dga_width * bpp;
     d = CURRENT_VIDEO_BUFFER.data + vo_dga_vp_offset;
+    d += bpp * offset;
 
-    switch (HW_MODE.vdm_mplayer_depth)
-    {
-
-        case 32:
-            vo_draw_alpha_rgb32(w, h, src, srca, stride, d + 4 * offset,
-                                4 * buffer_stride);
-            break;
-        case 24:
-            vo_draw_alpha_rgb24(w, h, src, srca, stride, d + 3 * offset,
-                                3 * buffer_stride);
-            break;
-        case 15:
-            vo_draw_alpha_rgb15(w, h, src, srca, stride, d + 2 * offset,
-                                2 * buffer_stride);
-            break;
-        case 16:
-            vo_draw_alpha_rgb16(w, h, src, srca, stride, d + 2 * offset,
-                                2 * buffer_stride);
-            break;
-    }
+    if (draw) draw(w, h, src, srca, stride, d, buffer_stride);
 }
 
 
@@ -267,7 +263,7 @@ static void draw_alpha(int x0, int y0, int w, int h, unsigned char *src,
 
 
 
-// quick & dirty - for debugging only 
+// quick & dirty - for debugging only
 #if 0
 static void fillblock(char *strt, int yoff, int lines, int val)
 {
@@ -322,7 +318,7 @@ static void check_events(void)
 
 //---------------------------------------------------------
 
-#include "sub.h"
+#include "sub/sub.h"
 
 static void draw_osd(void)
 {
@@ -339,7 +335,7 @@ static void flip_page(void)
 {
     if (1 < vo_dga_nr_video_buffers)
     {
-#ifdef HAVE_DGA2
+#ifdef CONFIG_DGA2
         XDGASetViewport(mDisplay, mScreen,
                         0, CURRENT_VIDEO_BUFFER.y, XDGAFlipRetrace);
 #else
@@ -348,14 +344,6 @@ static void flip_page(void)
         switch_video_buffers();
     }
 }
-
-//---------------------------------------------------------
-
-static int draw_slice(uint8_t * src[], int stride[],
-                           int w, int h, int x, int y)
-{
-    return 0;
-};
 
 //---------------------------------------------------------
 
@@ -376,7 +364,7 @@ static int query_format(uint32_t format)
 static void uninit(void)
 {
 
-#ifdef HAVE_DGA2
+#ifdef CONFIG_DGA2
     XDGADevice *dgadevice;
 #endif
 
@@ -390,7 +378,7 @@ static void uninit(void)
         if (vo_grabpointer)
             XUngrabPointer(mDisplay, CurrentTime);
         XUngrabKeyboard(mDisplay, CurrentTime);
-#ifdef HAVE_DGA2
+#ifdef CONFIG_DGA2
         XDGACloseFramebuffer(mDisplay, mScreen);
         dgadevice = XDGASetMode(mDisplay, mScreen, 0);
         if (dgadevice != NULL)
@@ -399,8 +387,8 @@ static void uninit(void)
         }
 #else
         XF86DGADirectVideo(mDisplay, mScreen, 0);
-        // first disable DirectVideo and then switch mode back!     
-#ifdef HAVE_XF86VM
+        // first disable DirectVideo and then switch mode back!
+#ifdef CONFIG_XF86VM
         if (vo_dga_vidmodes != NULL)
         {
             int screen;
@@ -423,7 +411,7 @@ static void uninit(void)
 
 
 //----------------------------------------------------------
-// TODO: check for larger maxy value 
+// TODO: check for larger maxy value
 // (useful for double buffering!!!)
 
 static int check_res(int num, int x, int y, int bpp,
@@ -438,11 +426,11 @@ static int check_res(int num, int x, int y, int bpp,
     if ((new_x >= x) && (new_y >= y) && (
                                             // prefer a better resolution either in X or in Y
                                             // as long as the other dimension is at least the same
-                                            // 
-                                            // hmm ... MAYBE it would be more clever to focus on the 
-                                            // x-resolution; I had 712x400 and 640x480 and the movie 
+                                            //
+                                            // hmm ... MAYBE it would be more clever to focus on the
+                                            // x-resolution; I had 712x400 and 640x480 and the movie
                                             // was 640x360; 640x480 would be the 'right thing' here
-                                            // but since 712x400 was queried first I got this one. 
+                                            // but since 712x400 was queried first I got this one.
                                             // I think there should be a cmd-line switch to let the
                                             // user choose the mode he likes ...   (acki2)
                                             (((new_x < *old_x) &&
@@ -460,8 +448,8 @@ static int check_res(int num, int x, int y, int bpp,
                                                || (*old_vbi >= 50
                                                    && new_vbi < *old_vbi
                                                    && new_vbi >= 50))) ||
-                                             // if everything is equal, then use the mode with the lower 
-                                             // stride 
+                                             // if everything is equal, then use the mode with the lower
+                                             // stride
                                              ((new_x == *old_x) &&
                                               (new_y == *old_y) &&
                                               (new_vbi == *old_vbi) &&
@@ -526,7 +514,7 @@ static int config(uint32_t width, uint32_t height,
     static unsigned char *vo_dga_base;
     static int prev_width, prev_height;
 
-#ifdef HAVE_DGA2
+#ifdef CONFIG_DGA2
     // needed to change DGA video mode
     int mX = VO_DGA_INVALID_RES, mY = VO_DGA_INVALID_RES, mVBI =
         100000, mMaxY = 0, i, j = 0;
@@ -534,7 +522,7 @@ static int config(uint32_t width, uint32_t height,
     XDGAMode *modeline;
     XDGADevice *dgadevice;
 #else
-#ifdef HAVE_XF86VM
+#ifdef CONFIG_XF86VM
     unsigned int vm_event, vm_error;
     unsigned int vm_ver, vm_rev;
     int i, j = 0, have_vm = 0;
@@ -580,7 +568,7 @@ static int config(uint32_t width, uint32_t height,
 
 // choose a suitable mode ...
 
-#ifdef HAVE_DGA2
+#ifdef CONFIG_DGA2
 // Code to change the video mode added by Michael Graffam
 // mgraffam@idsi.net
 
@@ -653,7 +641,7 @@ static int config(uint32_t width, uint32_t height,
 
 #else
 
-#ifdef HAVE_XF86VM
+#ifdef CONFIG_XF86VM
 
     mp_msg(MSGT_VO, MSGL_INFO,
            "vo_dga: DGA 1.0 compatibility code: Using XF86VidMode for mode switching!\n");
@@ -727,8 +715,8 @@ static int config(uint32_t width, uint32_t height,
         mp_msg(MSGT_VO, MSGL_ERR,
                "vo_dga: Sorry, video larger than viewport is not yet supported!\n");
         // ugly, do something nicer in the future ...
-#ifndef HAVE_DGA2
-#ifdef HAVE_XF86VM
+#ifndef CONFIG_DGA2
+#ifdef CONFIG_XF86VM
         if (vo_dga_vidmodes)
         {
             XFree(vo_dga_vidmodes);
@@ -745,8 +733,8 @@ static int config(uint32_t width, uint32_t height,
                "vo_dga: Something is wrong with your DGA. There doesn't seem to be a\n"
                "         single suitable mode!\n"
                "         Please file a bug report (see DOCS/HTML/en/bugreports.html)\n");
-#ifndef HAVE_DGA2
-#ifdef HAVE_XF86VM
+#ifndef CONFIG_DGA2
+#ifdef CONFIG_XF86VM
         if (vo_dga_vidmodes)
         {
             XFree(vo_dga_vidmodes);
@@ -756,11 +744,11 @@ static int config(uint32_t width, uint32_t height,
 #endif
         return 1;
     }
-// now let's start the DGA thing 
+// now let's start the DGA thing
 
     if (!vo_config_count || width != prev_width || height != prev_height)
     {
-#ifdef HAVE_DGA2
+#ifdef CONFIG_DGA2
 
         if (!XDGAOpenFramebuffer(mDisplay, mScreen))
         {
@@ -779,7 +767,7 @@ static int config(uint32_t width, uint32_t height,
 
 #else
 
-#ifdef HAVE_XF86VM
+#ifdef CONFIG_XF86VM
         if (have_vm)
         {
             XF86VidModeLockModeSwitch(mDisplay, mScreen, 0);
@@ -842,7 +830,7 @@ static int config(uint32_t width, uint32_t height,
         init_video_buffers(vo_dga_base,
                            vo_dga_vp_height,
                            vo_dga_width * HW_MODE.vdm_bytespp,
-#ifdef HAVE_DGA2
+#ifdef CONFIG_DGA2
                            modeline->maxViewportY,
 #else
                            vo_dga_vp_height,
@@ -881,18 +869,18 @@ static int preinit(const char *arg)
 
         if (vo_dga_XServer_mode == 0)
         {
-#ifndef HAVE_DGA2
+#ifndef CONFIG_DGA2
             mp_msg(MSGT_VO, MSGL_ERR,
                    "vo_dga: Your X-Server is not running in a ");
             mp_msg(MSGT_VO, MSGL_ERR,
                    "resolution supported by DGA driver!\n");
 #endif
         }                       //else{
-        //  mp_msg(MSGT_VO, MSGL_V, "vo_dga: X running at: %s\n", 
+        //  mp_msg(MSGT_VO, MSGL_V, "vo_dga: X running at: %s\n",
         //            vd_GetModeString(vo_dga_XServer_mode));
-        //}                                
+        //}
 
-#ifdef HAVE_DGA2
+#ifdef CONFIG_DGA2
         vo_modelines = XDGAQueryModes(mDisplay, mScreen, &vo_modecount);
         if (vo_modelines)
         {
@@ -953,7 +941,7 @@ static uint32_t get_image(mp_image_t * mpi)
         || (mpi->type == MP_IMGTYPE_STATIC && vo_dga_nr_video_buffers > 1)
         || (mpi->type == MP_IMGTYPE_IP && vo_dga_nr_video_buffers < 2)
         || (mpi->type == MP_IMGTYPE_IPB))
-        return (VO_FALSE);
+        return VO_FALSE;
 
     if ((mpi->flags & MP_IMGFLAG_ACCEPT_STRIDE) ||
         (mpi->flags & MP_IMGFLAG_ACCEPT_WIDTH &&
@@ -967,13 +955,13 @@ static uint32_t get_image(mp_image_t * mpi)
         mpi->width =
             (vo_dga_bytes_per_line + vo_dga_vp_skip) / (mpi->bpp / 8);
         mpi->flags |= MP_IMGFLAG_DIRECT;
-        return (VO_TRUE);
+        return VO_TRUE;
     }
 
-    return (VO_FALSE);
+    return VO_FALSE;
 }
 
-static int control(uint32_t request, void *data, ...)
+static int control(uint32_t request, void *data)
 {
     switch (request)
     {

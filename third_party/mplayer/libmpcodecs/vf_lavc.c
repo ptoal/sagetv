@@ -1,25 +1,36 @@
-#include "config.h"
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
 
+#include "config.h"
 #include "mp_msg.h"
 #include "help_mp.h"
 
 #include "img_format.h"
 #include "mp_image.h"
 #include "vf.h"
-
-//#include "libvo/fastmemcpy.h"
-
-#ifdef USE_LIBAVCODEC_SO
-#include <ffmpeg/avcodec.h>
-#else
+#include "av_helpers.h"
 #include "libavcodec/avcodec.h"
-#endif
 
-extern int avcodec_inited;
 
 struct vf_priv_s {
     unsigned char* outbuf;
@@ -34,14 +45,14 @@ struct vf_priv_s {
 
 //===========================================================================//
 
-static int config(struct vf_instance_s* vf,
+static int config(struct vf_instance *vf,
         int width, int height, int d_width, int d_height,
 	unsigned int flags, unsigned int outfmt){
     if(vf_next_query_format(vf,IMGFMT_MPEGPES)<=0) return 0;
 
     lavc_venc_context.width = width;
     lavc_venc_context.height = height;
-    
+
     if(!lavc_venc_context.time_base.num || !lavc_venc_context.time_base.den){
 	// guess FPS:
 	switch(height){
@@ -58,28 +69,25 @@ static int config(struct vf_instance_s* vf,
 	}
     }
 
-    if(vf->priv->outbuf) free(vf->priv->outbuf);
+    free(vf->priv->outbuf);
 
     vf->priv->outbuf_size=10000+width*height;  // must be enough!
     vf->priv->outbuf = malloc(vf->priv->outbuf_size);
 
-    if (avcodec_open(&lavc_venc_context, vf->priv->codec) != 0) {
+    if (avcodec_open2(&lavc_venc_context, vf->priv->codec, NULL) != 0) {
 	mp_msg(MSGT_MENCODER,MSGL_ERR,MSGTR_CantOpenCodec);
-	return 0;
-    }
-
-    if (lavc_venc_context.codec->encode == NULL) {
-	mp_msg(MSGT_MENCODER,MSGL_ERR,"avcodec init failed (ctx->codec->encode == NULL)!\n");
 	return 0;
     }
 
     return vf_next_config(vf,width,height,d_width,d_height,flags,IMGFMT_MPEGPES);
 }
 
-static int put_image(struct vf_instance_s* vf, mp_image_t *mpi, double pts){
+static int put_image(struct vf_instance *vf, mp_image_t *mpi, double pts){
     mp_image_t* dmpi;
     int out_size;
     AVFrame *pic= vf->priv->pic;
+    int ret, got_pkt;
+    AVPacket pkt;
 
     pic->data[0]=mpi->planes[0];
     pic->data[1]=mpi->planes[1];
@@ -88,61 +96,61 @@ static int put_image(struct vf_instance_s* vf, mp_image_t *mpi, double pts){
     pic->linesize[1]=mpi->stride[1];
     pic->linesize[2]=mpi->stride[2];
 
-    out_size = avcodec_encode_video(&lavc_venc_context, 
-	vf->priv->outbuf, vf->priv->outbuf_size, pic);
+    av_init_packet(&pkt);
+    pkt.data = vf->priv->outbuf;
+    pkt.size = vf->priv->outbuf_size;
+    ret = avcodec_encode_video2(&lavc_venc_context, &pkt, pic, &got_pkt);
 
-    if(out_size<=0) return 1;
+    if(ret<=0) return 1;
+    if(!got_pkt) return 1;
+    out_size =  pkt.size;
 
     dmpi=vf_get_image(vf->next,IMGFMT_MPEGPES,
 	MP_IMGTYPE_EXPORT, 0,
 	mpi->w, mpi->h);
-    
+
     vf->priv->pes.data=vf->priv->outbuf;
     vf->priv->pes.size=out_size;
     vf->priv->pes.id=0x1E0;
     vf->priv->pes.timestamp=-1; // dunno
-    
+
     dmpi->planes[0]=(unsigned char*)&vf->priv->pes;
-    
-    return vf_next_put_image(vf,dmpi, MP_NOPTS_VALUE);
+
+    return vf_next_put_image(vf,dmpi, pts);
 }
 
 //===========================================================================//
 
-static int query_format(struct vf_instance_s* vf, unsigned int fmt){
+static int query_format(struct vf_instance *vf, unsigned int fmt){
     switch(fmt){
     case IMGFMT_YV12:
     case IMGFMT_I420:
     case IMGFMT_IYUV:
-	return (vf_next_query_format(vf,IMGFMT_MPEGPES) & (~(VFCAP_CSP_SUPPORTED_BY_HW|VFCAP_ACCEPT_STRIDE)));
+	return vf_next_query_format(vf, IMGFMT_MPEGPES) & (~(VFCAP_CSP_SUPPORTED_BY_HW | VFCAP_ACCEPT_STRIDE));
     }
     return 0;
 }
 
-static int open(vf_instance_t *vf, char* args){
+static int vf_open(vf_instance_t *vf, char *args){
     int p_quality=0;
     float p_fps=0;
-    
+
     vf->config=config;
     vf->put_image=put_image;
     vf->query_format=query_format;
     vf->priv=malloc(sizeof(struct vf_priv_s));
     memset(vf->priv,0,sizeof(struct vf_priv_s));
 
-    if (!avcodec_inited){
-	avcodec_init();
-	avcodec_register_all();
-	avcodec_inited=1;
-    }
+    init_avcodec();
 
-    vf->priv->codec = (AVCodec *)avcodec_find_encoder_by_name("mpeg1video");
+    vf->priv->codec = avcodec_find_encoder_by_name("mpeg1video");
     if (!vf->priv->codec) {
 	mp_msg(MSGT_MENCODER,MSGL_ERR,MSGTR_MissingLAVCcodec, "mpeg1video");
 	return 0;
     }
-    
-    vf->priv->context=avcodec_alloc_context();
-    vf->priv->pic = avcodec_alloc_frame();
+
+    vf->priv->context=avcodec_alloc_context3(vf->priv->codec);
+    vf->priv->pic = av_frame_alloc();
 
     // TODO: parse args ->
     if(args) sscanf(args, "%d:%f", &p_quality, &p_fps);
@@ -159,17 +167,17 @@ static int open(vf_instance_t *vf, char* args){
     lavc_venc_context.time_base.num = 1000*1001;
     lavc_venc_context.time_base.den = (p_fps<1.0) ? 1000*1001*25 : (p_fps * lavc_venc_context.time_base.num);
     lavc_venc_context.gop_size = 0; // I-only
-    lavc_venc_context.pix_fmt= PIX_FMT_YUV420P;
+    lavc_venc_context.pix_fmt= AV_PIX_FMT_YUV420P;
 
     return 1;
 }
 
-vf_info_t vf_info_lavc = {
+const vf_info_t vf_info_lavc = {
     "realtime mpeg1 encoding with libavcodec",
     "lavc",
     "A'rpi",
     "",
-    open,
+    vf_open,
     NULL
 };
 

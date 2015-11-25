@@ -1347,6 +1347,15 @@ public class MiniPlayer implements DVDMediaPlayer
           int ac3indexOffset = (af != null && usingRemuxer) ? af.getOrderIndex() : 0;
           // If we're transcoding then the original audio stream doesn't matter, just use 0xc0
           // unless we're using the remuxer....
+          if (Sage.DBG) {
+            System.out.println("AudioFormat: " + af);
+            System.out.println("audioStreamType: 0x" + Integer.toString(audioStreamType, 16) + " ac3indexOffset: " + ac3indexOffset);
+            System.out.println("useOriginalAudioTrack: " + useOriginalAudioTrack + " serverSideTranscoding: "
+                    + serverSideTranscoding + " transcoded: " + transcoded);
+            System.out.println("streamID: " + af.getId());
+          }
+
+
           if (af != null && (useOriginalAudioTrack || ((!serverSideTranscoding && !transcoded))/* || (mpegSrc != null && mpegSrc.getTranscoder() instanceof RemuxTranscodeEngine)*/))
           {
             String streamID = af.getId();

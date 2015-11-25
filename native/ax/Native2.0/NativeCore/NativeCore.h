@@ -77,7 +77,7 @@ typedef LONGLONG REFERENCE_TIME;
 #define inline __inline__
 #endif
 
-#if defined(Linux) || defined(FreeBSD)   //
+#if defined(Linux) //
 #include <stdio.h>
 #include <sys/ioctl.h>
 #include <sys/types.h>
@@ -115,7 +115,7 @@ extern off64_t tell64( int filedes );
 #endif
 
 // added define for Apple OS/X, added OSByteOrder in comparison to Linux
-#ifdef __APPLE__
+#ifdef __APPLE__ 
 #include <stdio.h>
 #include <sys/ioctl.h>
 #include <sys/types.h>
@@ -157,6 +157,43 @@ extern off64_t tell64( int filedes );
 #define ASSERT   assert
 
 #endif // _APPLE_
+
+#ifdef FreeBSD
+#include <stdio.h>
+#include <sys/ioctl.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/errno.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <unistd.h>
+#include <memory.h>
+#include <stdlib.h>
+
+#define lseek64 lseek
+#define open64 open
+
+#define TEXT( x )       x
+#define snprintf snprintf
+#define vnprintf vnprintf
+#define lstrlen strlen
+#define lstrcat strcat
+
+#define STRNICMP   strncasecmp
+#define STRICMP    strcasecmp
+
+//#define FOPEN open64
+#define FCLOSE  close
+#define FSEEK   lseek64
+#define FTELL(x)        lseek64(x, 0, SEEK_END)
+
+//typedef                        long long  LONGLONG;
+//typedef unsigned long long ULONGLONG;
+//typedef ULONGLONG REFERENCE_TIME;
+#define ASSERT   assert
+
+#endif // FreeBSD
+
 
 #define _MIN(x,y) ((x)>(y)? (y):(x))
 #define _MAX(x,y) ((x)>(y)? (x):(y))

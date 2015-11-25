@@ -1,24 +1,27 @@
 /*
- *  Copyright (C) 2006 Benjamin Zores
- *   Video output for WinTV PVR-150/250/350 (a.k.a IVTV) cards.
- *   TV-Out through hardware MPEG decoder.
- *   Based on some old code from ivtv driver authors.
- *   See http://ivtvdriver.org/index.php/Main_Page for more details on the
- *    cards supported by the ivtv driver.
+ * video output for WinTV PVR-150/250/350 (a.k.a IVTV) cards
+ * TV-Out through hardware MPEG decoder
+ * Based on some old code from ivtv driver authors.
+ * See http://ivtvdriver.org/index.php/Main_Page for more details on the
+ * cards supported by the ivtv driver.
  *
- *   This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
+ * Copyright (C) 2006 Benjamin Zores
  *
- *   This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
+ * This file is part of MPlayer.
  *
- *   You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software Foundation,
- *  Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include "config.h"
@@ -42,7 +45,9 @@
 #include "mp_msg.h"
 #include "subopt-helper.h"
 #include "video_out.h"
+#define NO_DRAW_SLICE
 #include "video_out_internal.h"
+#include "vo_ivtv.h"
 #include "libmpdemux/mpeg_packetizer.h"
 
 #define DEFAULT_MPEG_DECODER "/dev/video16"
@@ -56,20 +61,20 @@ static vo_mpegpes_t *pes;
 static int output = -1;
 static char *device = NULL;
 
-static opt_t subopts[] = {
-  {"output",   OPT_ARG_INT,       &output,       (opt_test_f)int_non_neg},
+static const opt_t subopts[] = {
+  {"output",   OPT_ARG_INT,       &output,       int_non_neg},
   {"device",   OPT_ARG_MSTRZ,     &device,       NULL},
   {NULL}
 };
 
-static vo_info_t info = 
+static const vo_info_t info =
 {
   "IVTV MPEG Video Decoder TV-Out",
   "ivtv",
   "Benjamin Zores",
   ""
 };
-LIBVO_EXTERN (ivtv)
+const LIBVO_EXTERN (ivtv)
 
 /* ivtv internals */
 
@@ -83,17 +88,17 @@ ivtv_reset (int blank_screen)
   if (blank_screen)
     flags |= IVTV_STOP_FL_HIDE_FRAME;
   sd.flags = flags;
- 
+
   if (ioctl (ivtv_fd, IVTV_IOC_STOP_DECODE, &sd) < 0)
   {
     mp_msg (MSGT_VO, MSGL_ERR,
             "IVTV_IOC_STOP_DECODE: %s\n", strerror (errno));
     return 1;
   }
-  
+
   sd1.gop_offset = 0;
   sd1.muted_audio_frames = 0;
-  
+
   if (ioctl (ivtv_fd, IVTV_IOC_START_DECODE, &sd1) < 0)
   {
     mp_msg (MSGT_VO, MSGL_ERR,
@@ -105,11 +110,11 @@ ivtv_reset (int blank_screen)
 }
 
 int
-ivtv_write (unsigned char *data, int len)
+ivtv_write (const unsigned char *data, int len)
 {
   if (ivtv_fd < 0)
     return 0;
-  
+
   return write (ivtv_fd, data, len);
 }
 
@@ -142,13 +147,13 @@ preinit (const char *arg)
             "\n" );
     return -1;
   }
-  
+
   if (!device)
-    device = strdup (DEFAULT_MPEG_DECODER);    
-  
+    device = strdup (DEFAULT_MPEG_DECODER);
+
   ivtv_fd = open (device, O_RDWR);
   if (ivtv_fd < 0)
-  {  
+  {
     free (device);
     mp_msg (MSGT_VO, MSGL_FATAL, "%s %s\n", IVTV_VO_HDR, strerror (errno));
     return -1;
@@ -209,7 +214,7 @@ preinit (const char *arg)
             "%s can't get output (%s).\n", IVTV_VO_HDR, strerror (errno));
     return -1;
   }
-  
+
   /* clear output */
   ivtv_reset (1);
 
@@ -246,12 +251,6 @@ flip_page (void)
   pes = NULL;
 }
 
-static int
-draw_slice (uint8_t *image[], int stride[], int w, int h, int x, int y)
-{
-  return 0;
-}
-
 static void
 uninit (void)
 {
@@ -277,25 +276,25 @@ query_format (uint32_t format)
 {
   if (format != IMGFMT_MPEGPES)
     return 0;
-    
+
   return VFCAP_CSP_SUPPORTED | VFCAP_CSP_SUPPORTED_BY_HW | VFCAP_TIMER;
 }
 
 static int
-control (uint32_t request, void *data, ...)
+control (uint32_t request, void *data)
 {
   switch (request)
   {
-  case VOCTRL_PAUSE: 
-  case VOCTRL_RESUME: 
+  case VOCTRL_PAUSE:
+  case VOCTRL_RESUME:
     return ivtv_reset (0);
 
-  case VOCTRL_RESET: 
+  case VOCTRL_RESET:
     return ivtv_reset (1);
 
   case VOCTRL_QUERY_FORMAT:
     return query_format (*((uint32_t*) data));
   }
-  
+
   return VO_NOTIMPL;
 }

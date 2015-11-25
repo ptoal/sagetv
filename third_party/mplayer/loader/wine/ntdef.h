@@ -1,16 +1,12 @@
-#ifndef __WINE_NTDEF_H
-#define __WINE_NTDEF_H
+#ifndef MPLAYER_NTDEF_H
+#define MPLAYER_NTDEF_H
 
 #include "basetsd.h"
 #include "windef.h"
 
 #include "pshpack1.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-#define NTAPI   __stdcall 
+#define NTAPI   __stdcall
 
 #ifndef IN
 #define IN
@@ -32,7 +28,7 @@ typedef LONG NTSTATUS;
 typedef NTSTATUS *PNTSTATUS;
 
 typedef short CSHORT;
-typedef CSHORT *PCSHORT;  
+typedef CSHORT *PCSHORT;
 
 typedef WCHAR * PWCHAR;
 
@@ -40,19 +36,19 @@ typedef WCHAR * PWCHAR;
  * If they are zero terminated, Length does not include the terminating 0.
  */
 
-typedef struct _STRING {
+typedef struct STRING {
 	USHORT	Length;
 	USHORT	MaximumLength;
 	PSTR	Buffer;
 } STRING,*PSTRING,ANSI_STRING,*PANSI_STRING;
 
-typedef struct _CSTRING {
+typedef struct CSTRING {
 	USHORT	Length;
 	USHORT	MaximumLength;
 	PCSTR	Buffer;
 } CSTRING,*PCSTRING;
 
-typedef struct _UNICODE_STRING {
+typedef struct UNICODE_STRING {
 	USHORT	Length;		/* bytes */
 	USHORT	MaximumLength;	/* bytes */
 	PWSTR	Buffer;
@@ -71,7 +67,7 @@ typedef struct _UNICODE_STRING {
 #define OBJ_KERNEL_HANDLE       0x00000200L
 #define OBJ_VALID_ATTRIBUTES    0x000003F2L
 
-typedef struct _OBJECT_ATTRIBUTES 
+typedef struct OBJECT_ATTRIBUTES
 {   ULONG Length;
     HANDLE RootDirectory;
     PUNICODE_STRING ObjectName;
@@ -92,10 +88,6 @@ typedef OBJECT_ATTRIBUTES *POBJECT_ATTRIBUTES;
 }
 
 
-#ifdef __cplusplus
-}
-#endif
-
 #include "poppack.h"
 
-#endif
+#endif /* MPLAYER_NTDEF_H */

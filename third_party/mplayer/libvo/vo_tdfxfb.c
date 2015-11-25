@@ -1,6 +1,24 @@
-/* Copyright (C) Mark Zealey, 2002, <mark@zealos.org>. Released under the terms
- * and conditions of the GPL.
+/*
+ * copyright (C) 2002 Mark Zealey <mark@zealos.org>
  *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
+/*
  * 30/03/02: An almost total rewrite, added DR support and support for modes
  * other than 16bpp. Fixed the crash when playing multiple files
  * 07/04/02: Fixed DR support, added YUY2 support, fixed OSD stuff.
@@ -45,9 +63,9 @@
 #include "video_out_internal.h"
 #include "drivers/3dfx.h"
 #include "aspect.h"
-#include "sub.h"
+#include "sub/sub.h"
 
-static vo_info_t info =
+static const vo_info_t info =
 {
 	"3Dfx Banshee/Voodoo3/Voodoo5",
 	"tdfxfb",
@@ -55,7 +73,7 @@ static vo_info_t info =
 	""
 };
 
-LIBVO_EXTERN(tdfxfb)
+const LIBVO_EXTERN(tdfxfb)
 
 /* Some registers on the card */
 #define S2S_STRECH_BLT		2			// BLT + Strech
@@ -81,7 +99,8 @@ static volatile voodoo_io_reg *reg_IO;
 static volatile voodoo_2d_reg *reg_2d;
 static voodoo_yuv_reg *reg_YUV;
 static struct YUV_plane *YUV;
-static void (*alpha_func)(), (*alpha_func_double)();
+static void (*alpha_func)(int, int, unsigned char*, unsigned char*, int, unsigned char*, int),
+    (*alpha_func_double)(int, int, unsigned char*, unsigned char*, int, unsigned char*, int);
 
 static int preinit(const char *arg)
 {
@@ -184,7 +203,7 @@ static void uninit(void)
 	}
 }
 
-static void clear_screen()
+static void clear_screen(void)
 {
 	/* There needs to be some sort of delay here or else things seriously
 	 * screw up.  Causes the image to not be the right size on screen if
@@ -478,7 +497,7 @@ static uint32_t get_image(mp_image_t *mpi)
 	return VO_TRUE;
 }
 
-static int control(uint32_t request, void *data, ...)
+static int control(uint32_t request, void *data)
 {
 	switch(request) {
 	case VOCTRL_GET_IMAGE:

@@ -2,10 +2,26 @@
  * x86 MMX and MMX2 packed byte operations in portable C.
  * Extra instructions: pdiffub, pcmpzb, psumbw, pcmpgtub
  * Author: Zoltan Hidvegi
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#ifndef __CMMX_H
-#define __CMMX_H
+#ifndef MPLAYER_CMMX_H
+#define MPLAYER_CMMX_H
 
 typedef unsigned long cmmx_t;
 
@@ -125,7 +141,7 @@ p31avgb(cmmx_t a, cmmx_t b)
     cmmx_t ao = a & (3*ONE_BYTES);
     cmmx_t bo = b & (3*ONE_BYTES);
     return 3*((a^ao)>>2) + ((b^bo)>>2) +
-	(((3*ao+bo+2*ONE_BYTES)>>2) & (3*ONE_BYTES));
+        (((3*ao+bo+2*ONE_BYTES)>>2) & (3*ONE_BYTES));
 }
 
 static inline cmmx_t
@@ -140,9 +156,9 @@ psumbw(cmmx_t a)
 {
     cmmx_t t = (a & LOWBW_MASK) + ((a>>8) & LOWBW_MASK);
     unsigned long ret =
-	(unsigned long)t + (unsigned long)(t >> (4*sizeof(cmmx_t)));
+        (unsigned long)t + (unsigned long)(t >> (4*sizeof(cmmx_t)));
     if (sizeof(cmmx_t) > 4)
-	ret += ret >> 16;
+        ret += ret >> 16;
     return ret & 0xffff;
 }
 
@@ -150,9 +166,9 @@ static inline unsigned long
 psumbw_s(cmmx_t a)
 {
     unsigned long ret =
-	(unsigned long)a + (unsigned long)(a >> (4*sizeof(cmmx_t)));
+        (unsigned long)a + (unsigned long)(a >> (4*sizeof(cmmx_t)));
     if (sizeof(cmmx_t) <= 4)
-	return (ret & 0xff) + ((ret>>8) & 0xff);
+        return (ret & 0xff) + ((ret>>8) & 0xff);
     ret = (ret & 0xff00ff) + ((ret>>8) & 0xff00ff);
     ret += ret >> 16;
     return ret & 0xffff;
@@ -183,4 +199,4 @@ pcmpeqb(cmmx_t a, cmmx_t b)
     return pcmpzb(a ^ b);
 }
 
-#endif
+#endif /* MPLAYER_CMMX_H */

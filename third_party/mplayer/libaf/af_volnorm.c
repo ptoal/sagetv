@@ -1,22 +1,32 @@
-#include "config.h"
-/*=============================================================================
-//	
-//  This software has been released under the terms of the GNU General Public
-//  license. See http://www.gnu.org/copyleft/gpl.html for details.
-//
-//  Copyright 2004 Alex Beregszaszi & Pierre Lombard
-//
-//=============================================================================
-*/
+/*
+ * Copyright (C) 2004 Alex Beregszaszi & Pierre Lombard
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h> 
+#include <string.h>
 
 #include <inttypes.h>
 #include <math.h>
 #include <limits.h>
 
+#include "libavutil/common.h"
 #include "af.h"
 
 // Methods:
@@ -42,7 +52,7 @@
 // Silence level
 // FIXME: should be relative to the level of the samples
 #define SIL_S16 (SHRT_MAX * 0.01)
-#define SIL_FLOAT (INT_MAX * 0.01) // FIXME
+#define SIL_FLOAT (0.01) // FIXME
 
 // smooth must be in ]0.0, 1.0[
 #define SMOOTH_MUL 0.06
@@ -71,16 +81,16 @@ typedef struct af_volume_s
 // Initialization and runtime control
 static int control(struct af_instance_s* af, int cmd, void* arg)
 {
-  af_volnorm_t* s   = (af_volnorm_t*)af->setup; 
+  af_volnorm_t* s   = (af_volnorm_t*)af->setup;
 
   switch(cmd){
   case AF_CONTROL_REINIT:
     // Sanity check
     if(!arg) return AF_ERROR;
-    
+
     af->data->rate   = ((af_data_t*)arg)->rate;
     af->data->nch    = ((af_data_t*)arg)->nch;
-    
+
     if(((af_data_t*)arg)->format == (AF_FORMAT_S16_NE)){
       af->data->format = AF_FORMAT_S16_NE;
       af->data->bps    = 2;
@@ -97,19 +107,17 @@ static int control(struct af_instance_s* af, int cmd, void* arg)
 	return AF_ERROR;
     s->method = i-1;
     s->mid_s16 = ((float)SHRT_MAX) * target;
-    s->mid_float = ((float)INT_MAX) * target;
+    s->mid_float = target;
     return AF_OK;
   }
   }
   return AF_UNKNOWN;
 }
 
-// Deallocate memory 
+// Deallocate memory
 static void uninit(struct af_instance_s* af)
 {
-  if(af->data)
     free(af->data);
-  if(af->setup)
     free(af->setup);
 }
 
@@ -120,37 +128,37 @@ static void method1_int16(af_volnorm_t *s, af_data_t *c)
   int len = c->len/2;		// Number of samples
   float curavg = 0.0, newavg, neededmul;
   int tmp;
-  
+
   for (i = 0; i < len; i++)
   {
     tmp = data[i];
     curavg += tmp * tmp;
   }
   curavg = sqrt(curavg / (float) len);
-  
+
   // Evaluate an adequate 'mul' coefficient based on previous state, current
   // samples level, etc
-  
+
   if (curavg > SIL_S16)
   {
     neededmul = s->mid_s16 / (curavg * s->mul);
     s->mul = (1.0 - SMOOTH_MUL) * s->mul + SMOOTH_MUL * neededmul;
-    
+
     // clamp the mul coefficient
-    s->mul = clamp(s->mul, MUL_MIN, MUL_MAX);
+    s->mul = av_clipf(s->mul, MUL_MIN, MUL_MAX);
   }
-  
+
   // Scale & clamp the samples
   for (i = 0; i < len; i++)
   {
     tmp = s->mul * data[i];
-    tmp = clamp(tmp, SHRT_MIN, SHRT_MAX);
+    tmp = av_clip_int16(tmp);
     data[i] = tmp;
   }
-  
+
   // Evaulation of newavg (not 100% accurate because of values clamping)
   newavg = s->mul * curavg;
-  
+
   // Stores computed values for future smoothing
   s->lastavg = (1.0 - SMOOTH_LASTAVG) * s->lastavg + SMOOTH_LASTAVG * newavg;
 }
@@ -161,33 +169,33 @@ static void method1_float(af_volnorm_t *s, af_data_t *c)
   float *data = (float*)c->audio;	// Audio data
   int len = c->len/4;		// Number of samples
   float curavg = 0.0, newavg, neededmul, tmp;
-  
+
   for (i = 0; i < len; i++)
   {
     tmp = data[i];
     curavg += tmp * tmp;
   }
   curavg = sqrt(curavg / (float) len);
-  
+
   // Evaluate an adequate 'mul' coefficient based on previous state, current
   // samples level, etc
-  
+
   if (curavg > SIL_FLOAT) // FIXME
   {
     neededmul = s->mid_float / (curavg * s->mul);
     s->mul = (1.0 - SMOOTH_MUL) * s->mul + SMOOTH_MUL * neededmul;
-    
+
     // clamp the mul coefficient
-    s->mul = clamp(s->mul, MUL_MIN, MUL_MAX);
+    s->mul = av_clipf(s->mul, MUL_MIN, MUL_MAX);
   }
-  
+
   // Scale & clamp the samples
   for (i = 0; i < len; i++)
     data[i] *= s->mul;
-  
+
   // Evaulation of newavg (not 100% accurate because of values clamping)
   newavg = s->mul * curavg;
-  
+
   // Stores computed values for future smoothing
   s->lastavg = (1.0 - SMOOTH_LASTAVG) * s->lastavg + SMOOTH_LASTAVG * newavg;
 }
@@ -199,14 +207,14 @@ static void method2_int16(af_volnorm_t *s, af_data_t *c)
   int len = c->len/2;		// Number of samples
   float curavg = 0.0, newavg, avg = 0.0;
   int tmp, totallen = 0;
-  
+
   for (i = 0; i < len; i++)
   {
     tmp = data[i];
     curavg += tmp * tmp;
   }
   curavg = sqrt(curavg / (float) len);
-  
+
   // Evaluate an adequate 'mul' coefficient based on previous state, current
   // samples level, etc
   for (i = 0; i < NSAMPLES; i++)
@@ -214,28 +222,28 @@ static void method2_int16(af_volnorm_t *s, af_data_t *c)
     avg += s->mem[i].avg * (float)s->mem[i].len;
     totallen += s->mem[i].len;
   }
-  
+
   if (totallen > MIN_SAMPLE_SIZE)
   {
     avg /= (float)totallen;
     if (avg >= SIL_S16)
     {
 	s->mul = s->mid_s16 / avg;
-	s->mul = clamp(s->mul, MUL_MIN, MUL_MAX);
+	s->mul = av_clipf(s->mul, MUL_MIN, MUL_MAX);
     }
   }
-  
+
   // Scale & clamp the samples
   for (i = 0; i < len; i++)
   {
     tmp = s->mul * data[i];
-    tmp = clamp(tmp, SHRT_MIN, SHRT_MAX);
+    tmp = av_clip_int16(tmp);
     data[i] = tmp;
   }
-  
+
   // Evaulation of newavg (not 100% accurate because of values clamping)
   newavg = s->mul * curavg;
-  
+
   // Stores computed values for future smoothing
   s->mem[s->idx].len = len;
   s->mem[s->idx].avg = newavg;
@@ -249,14 +257,14 @@ static void method2_float(af_volnorm_t *s, af_data_t *c)
   int len = c->len/4;		// Number of samples
   float curavg = 0.0, newavg, avg = 0.0, tmp;
   int totallen = 0;
-  
+
   for (i = 0; i < len; i++)
   {
     tmp = data[i];
     curavg += tmp * tmp;
   }
   curavg = sqrt(curavg / (float) len);
-  
+
   // Evaluate an adequate 'mul' coefficient based on previous state, current
   // samples level, etc
   for (i = 0; i < NSAMPLES; i++)
@@ -264,24 +272,24 @@ static void method2_float(af_volnorm_t *s, af_data_t *c)
     avg += s->mem[i].avg * (float)s->mem[i].len;
     totallen += s->mem[i].len;
   }
-  
+
   if (totallen > MIN_SAMPLE_SIZE)
   {
     avg /= (float)totallen;
     if (avg >= SIL_FLOAT)
     {
 	s->mul = s->mid_float / avg;
-	s->mul = clamp(s->mul, MUL_MIN, MUL_MAX);
+	s->mul = av_clipf(s->mul, MUL_MIN, MUL_MAX);
     }
   }
-  
+
   // Scale & clamp the samples
   for (i = 0; i < len; i++)
     data[i] *= s->mul;
-  
+
   // Evaulation of newavg (not 100% accurate because of values clamping)
   newavg = s->mul * curavg;
-  
+
   // Stores computed values for future smoothing
   s->mem[s->idx].len = len;
   s->mem[s->idx].avg = newavg;
@@ -301,7 +309,7 @@ static af_data_t* play(struct af_instance_s* af, af_data_t* data)
 	method1_int16(s, data);
   }
   else if(af->data->format == (AF_FORMAT_FLOAT_NE))
-  { 
+  {
     if (s->method)
 	method2_float(s, data);
     else
@@ -316,8 +324,7 @@ static int af_open(af_instance_t* af){
   af->control=control;
   af->uninit=uninit;
   af->play=play;
-  af->mul.n=1;
-  af->mul.d=1;
+  af->mul=1;
   af->data=calloc(1,sizeof(af_data_t));
   af->setup=calloc(1,sizeof(af_volnorm_t));
   if(af->data == NULL || af->setup == NULL)
@@ -327,7 +334,7 @@ static int af_open(af_instance_t* af){
   ((af_volnorm_t*)af->setup)->lastavg = ((float)SHRT_MAX) * DEFAULT_TARGET;
   ((af_volnorm_t*)af->setup)->idx = 0;
   ((af_volnorm_t*)af->setup)->mid_s16 = ((float)SHRT_MAX) * DEFAULT_TARGET;
-  ((af_volnorm_t*)af->setup)->mid_float = ((float)INT_MAX) * DEFAULT_TARGET;
+  ((af_volnorm_t*)af->setup)->mid_float = DEFAULT_TARGET;
   for (i = 0; i < NSAMPLES; i++)
   {
      ((af_volnorm_t*)af->setup)->mem[i].len = 0;

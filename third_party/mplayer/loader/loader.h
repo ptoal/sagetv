@@ -9,33 +9,28 @@
 /*
  * Modified for use with MPlayer, detailed changelog at
  * http://svn.mplayerhq.hu/mplayer/trunk/
- * $Id: loader.h,v 1.3 2007-04-10 19:33:29 Narflex Exp $
  */
 
-#ifndef _LOADER_H
-#define _LOADER_H
-
-#ifdef __cplusplus
-extern "C" {
-#endif
+#ifndef MPLAYER_LOADER_H
+#define MPLAYER_LOADER_H
 
 #include "wine/windef.h"
 #include "wine/driver.h"
 #include "wine/mmreg.h"
 #include "wine/vfw.h"
 #include "wine/msacm.h"
+#include "wine/module.h"
 
-unsigned int _GetPrivateProfileIntA(const char* appname, const char* keyname, int default_value, const char* filename);
-int _GetPrivateProfileStringA(const char* appname, const char* keyname,
+
+extern modref_list* local_wm;
+
+unsigned int GetPrivateProfileIntA_(const char* appname, const char* keyname, int default_value, const char* filename);
+int GetPrivateProfileStringA_(const char* appname, const char* keyname,
 	const char* def_val, char* dest, unsigned int len, const char* filename);
-int _WritePrivateProfileStringA(const char* appname, const char* keyname,
+int WritePrivateProfileStringA_(const char* appname, const char* keyname,
 	const char* string, const char* filename);
 
 INT WINAPI LoadStringA( HINSTANCE instance, UINT resource_id,
                             LPSTR buffer, INT buflen );
 
-#ifdef __cplusplus
-}
-#endif
-#endif /* __LOADER_H */
-
+#endif /* MPLAYER_LOADER_H */

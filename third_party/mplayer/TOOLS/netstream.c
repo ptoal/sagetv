@@ -1,23 +1,21 @@
 /*
- *  netstream.c
+ * Copyright (C) Alban Bedel - 04/2003
  *
- *	Copyright (C) Alban Bedel - 04/2003
+ * This file is part of MPlayer.
  *
- *  This file is part of MPlayer, a free movie player.
- *	
- *  MPlayer is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2, or (at your option)
- *  any later version.
- *   
- *  MPlayer is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *   
- *  You should have received a copy of the GNU General Public License
- *  along with MPlayer; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include <stdlib.h>
@@ -30,7 +28,7 @@
 
 #include "config.h"
 
-#ifndef HAVE_WINSOCK2
+#if !HAVE_WINSOCK2_H
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -46,23 +44,20 @@
 #include "mpbswap.h"
 
 /// Netstream packets def and some helpers
-#include "stream/netstream.h"
+#include "stream/stream_netstream.h"
 
+// linking hacks
+char *info_name;
+char *info_artist;
+char *info_genre;
+char *info_subject;
+char *info_copyright;
+char *info_sourceform;
+char *info_comment;
 
-//Set some standard variables
-char* dvdsub_lang=NULL;
-char* audio_lang=NULL;
-int sub_justify=0;
-int identify=0;
-int dvdsub_id=0;
-int audio_id=0;
-int video_id=0;
-void af_fmt2str() {};
-
-#ifdef __MINGW32__
-#define usleep sleep
-void strsep() {};
-#endif
+char* out_filename = NULL;
+char* force_fourcc=NULL;
+char* passtmpfile="divx2pass.log";
 
 static unsigned short int port = 10000;
 
@@ -113,14 +108,14 @@ static int net_stream_open(client_t* cl,char* url) {
 static int net_stream_fill_buffer(client_t* cl,uint16_t max_len) {
   int r;
   mp_net_stream_packet_t *pack;
-  
+
   if(!cl->stream) {
     if(!write_error(cl->fd,"No stream is currently opened\n"))
       return 0;
     return 1;
   }
   if(max_len == 0) {
-    if(!write_error(cl->fd,"Fill buffer called with 0 lenght\n"))
+    if(!write_error(cl->fd,"Fill buffer called with 0 length\n"))
       return 0;
     return 1;
   }
@@ -137,14 +132,14 @@ static int net_stream_fill_buffer(client_t* cl,uint16_t max_len) {
 }
 
 static int net_stream_seek(client_t* cl, uint64_t pos) {
-  
+
   if(!cl->stream) {
     if(!write_error(cl->fd,"No stream is currently opened\n"))
       return 0;
     return 1;
   }
 
-  if(!stream_seek(cl->stream,(off_t)pos)) {
+  if(!stream_seek(cl->stream,pos)) {
     if(!write_error(cl->fd,"Seek failed\n"))
       return 0;
     return 1;
@@ -181,11 +176,11 @@ static int net_stream_close(client_t* cl) {
   return 1;
 }
 
-int handle_client(client_t* cl,mp_net_stream_packet_t* pack) {
+static int handle_client(client_t* cl,mp_net_stream_packet_t* pack) {
 
   if(!pack)
     return 0;
- 
+
   switch(pack->cmd) {
   case NET_STREAM_OPEN:
     if(((char*)pack)[pack->len-1] != '\0') {
@@ -244,7 +239,7 @@ static int make_fd_set(fd_set* fds, client_t** _cl, int listen) {
       if(cl->stream) free_stream(cl->stream);
       if(!cl->prev) // Remove the head
 	*_cl = cl->next;
-      cl = cl->next;  
+      cl = cl->next;
       free(f);
       continue;
     }
@@ -258,7 +253,7 @@ static int make_fd_set(fd_set* fds, client_t** _cl, int listen) {
 /// Hack to 'cleanly' exit
 static int run_server = 1;
 
-void exit_sig(int sig) {
+static void exit_sig(int sig) {
   static int count = 0;
   sig++; // gcc warning
   count++;
@@ -281,7 +276,7 @@ static int main_loop(int listen_fd) {
   signal(SIGHUP,exit_sig);  // kill -HUP  /  xterm closed
   signal(SIGINT,exit_sig);  // Interrupt from keyboard
   signal(SIGQUIT,exit_sig); // Quit from keyboard
-#endif 
+#endif
 
   while(run_server) {
     int sel_n = make_fd_set(&fds,&clients,listen_fd);
@@ -337,13 +332,13 @@ static int main_loop(int listen_fd) {
   return 0;
 }
 
-int main(int argc, char** argv) {
+int main(void) {
   int listen_fd;
   struct sockaddr_in addr;
 
   mp_msg_init();
   //  mp_msg_set_level(verbose+MSGL_STATUS);
-  
+
 #ifdef __MINGW32__
   WSADATA wsaData;
   WSAStartup(MAKEWORD(1,1), &wsaData);
@@ -361,7 +356,7 @@ int main(int argc, char** argv) {
     mp_msg(MSGT_NETST,MSGL_FATAL,"Failed to bind listen socket: %s\n",strerror(errno));
     return -1;
   }
-  
+
 
   if(listen(listen_fd,1)) {
     mp_msg(MSGT_NETST,MSGL_FATAL,"Failed to turn the socket in listen state: %s\n",strerror(errno));
@@ -369,44 +364,3 @@ int main(int argc, char** argv) {
   }
   return main_loop(listen_fd);
 }
-
-
-
-//---- For libmpdemux
-
-float stream_cache_seek_min_percent=50.0;
-float stream_cache_min_percent=20.0;
-
-#include <libmpdemux/demuxer.h>
-#include <libmpdemux/stheader.h>
-
-// audio stream skip/resync functions requires only for seeking.
-// (they should be implemented in the audio codec layer)
-void skip_audio_frame(sh_audio_t *sh_audio){
-  sh_audio=NULL;
-}
-void resync_audio_stream(sh_audio_t *sh_audio){
-  sh_audio=NULL;
-}
-
-int mp_input_check_interrupt(int time){
-    if(time) usleep(time);
-    return 0;
-}
-
-// for libdvdread:
-#include "get_path.c"
-
-int stream_cache_size=0;
-
-// for demux_ogg:
-void* vo_sub=NULL;
-int vo_osd_changed(int new_value){ new_value++; return 0;}
-int   subcc_enabled=0;
-
-float sub_fps=0;
-int sub_utf8=0;
-int   suboverlap_enabled = 1;
-float sub_delay=0;
-
-//---------------

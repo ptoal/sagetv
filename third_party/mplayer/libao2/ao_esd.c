@@ -1,10 +1,26 @@
 /*
- * ao_esd - EsounD audio output driver for MPlayer
+ * EsounD audio output driver for MPlayer
  *
- * Juergen Keil <jk@tools.de>
+ * copyright (c) 2002 Juergen Keil <jk@tools.de>
  *
- * This driver is distributed under the terms of the GPL
+ * This file is part of MPlayer.
  *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
+ /*
  * TODO / known problems:
  * - does not work well when the esd daemon has autostandby disabled
  *   (workaround: run esd with option "-as 2" - fortunatelly this is
@@ -36,9 +52,11 @@
 #include "libaf/af_format.h"
 #include "mp_msg.h"
 #include "help_mp.h"
+#include "mplayer.h"
 
 
-#undef	ESD_DEBUG
+#define ESD_RESAMPLES 0
+#define ESD_DEBUG 0
 
 #if	ESD_DEBUG
 #define	dprintf(...)	printf(__VA_ARGS__)
@@ -50,7 +68,7 @@
 #define	ESD_CLIENT_NAME	"MPlayer"
 #define	ESD_MAX_DELAY	(1.0f)	/* max amount of data buffered in esd (#sec) */
 
-static ao_info_t info =
+static const ao_info_t info =
 {
     "EsounD audio output",
     "esd",
@@ -67,7 +85,6 @@ static int esd_latency;
 static int esd_bytes_per_sample;
 static unsigned long esd_samples_written;
 static struct timeval esd_play_start;
-extern float audio_delay;
 
 /*
  * to set/get/query special features/parameters
@@ -105,7 +122,7 @@ static int control(int cmd, void *arg)
 	    vol_cache_time = now;
 	}
 	esd_free_all_info(esd_i);
-	
+
 	return CONTROL_OK;
 
     case AOCONTROL_SET_VOLUME:
@@ -148,7 +165,6 @@ static int init(int rate_hz, int channels, int format, int flags)
     float lag_seconds, lag_net, lag_serv;
     struct timeval proto_start, proto_end;
 
-    if (esd_fd < 0) {
 	esd_fd = esd_open_sound(server);
 	if (esd_fd < 0) {
 	    mp_msg(MSGT_AO, MSGL_ERR, MSGTR_AO_ESD_CantOpenSound,
@@ -173,7 +189,6 @@ static int init(int rate_hz, int channels, int format, int flags)
 	    esd_print_server_info(esd_svinfo);
 	}
 	*/
-    }
 
     esd_fmt = ESD_STREAM | ESD_PLAY;
 
@@ -216,22 +231,22 @@ static int init(int rate_hz, int channels, int format, int flags)
      * latency is number of samples @ 44.1khz stereo 16 bit
      * adjust according to rate_hz & bytes_per_sample
      */
-#ifdef HAVE_ESD_LATENCY
+#ifdef CONFIG_ESD_LATENCY
     esd_latency = esd_get_latency(esd_fd);
 #else
-    esd_latency = ((channels == 1 ? 2 : 1) * ESD_DEFAULT_RATE * 
+    esd_latency = ((channels == 1 ? 2 : 1) * ESD_DEFAULT_RATE *
 		   (ESD_BUF_SIZE + 64 * (4.0f / bytes_per_sample))
-		   ) / rate_hz;  
-    esd_latency += ESD_BUF_SIZE * 2; 
+		   ) / rate_hz;
+    esd_latency += ESD_BUF_SIZE * 2;
 #endif
     if(esd_latency > 0) {
 	lag_serv = (esd_latency * 4.0f) / (bytes_per_sample * rate_hz);
 	lag_seconds = lag_net + lag_serv;
 	audio_delay += lag_seconds;
-	mp_msg(MSGT_AO, MSGL_INFO,MSGTR_AO_ESD_LatencyInfo, 
+	mp_msg(MSGT_AO, MSGL_INFO,MSGTR_AO_ESD_LatencyInfo,
 	       lag_serv, lag_net, lag_seconds);
     }
-    
+
     esd_play_fd = esd_play_stream_fallback(esd_fmt, rate_hz,
 					   server, ESD_CLIENT_NAME);
     if (esd_play_fd < 0) {
@@ -316,7 +331,7 @@ static int play(void* data, int len, int flags)
 	 */
 	n = write(esd_play_fd, (char*)data + offs, ESD_BUF_SIZE);
 	if ( n < 0 ) {
-	    if ( errno != EAGAIN ) 
+	    if ( errno != EAGAIN )
 		dprintf("esd play: write failed: %s\n", strerror(errno));
 	    break;
 	} else if ( n != ESD_BUF_SIZE ) {
@@ -326,13 +341,13 @@ static int play(void* data, int len, int flags)
 	    nwritten += n;
     }
 #endif
-	
+
     if (nwritten > 0) {
 	if (!esd_play_start.tv_sec)
 	    gettimeofday(&esd_play_start, NULL);
 	nsamples = nwritten / esd_bytes_per_sample;
 	esd_samples_written += nsamples;
- 
+
 	dprintf("esd play: %d %lu\n", nsamples, esd_samples_written);
     } else {
 	dprintf("esd play: blocked / %lu\n", esd_samples_written);
@@ -378,7 +393,7 @@ static void reset(void)
 {
 #ifdef	__svr4__
     /* throw away data buffered in the esd connection */
-    if (ioctl(esd_play_fd, I_FLUSH, FLUSHW)) 
+    if (ioctl(esd_play_fd, I_FLUSH, FLUSHW))
 	perror("I_FLUSH");
 #endif
 }
@@ -394,7 +409,7 @@ static int get_space(void)
     float current_delay;
     int space;
 
-    /* 
+    /*
      * Don't buffer too much data in the esd daemon.
      *
      * If we send too much, esd will block in write()s to the sound
@@ -444,7 +459,7 @@ static float get_delay(void)
     gettimeofday(&now, NULL);
     play_time  =  now.tv_sec  - esd_play_start.tv_sec;
     play_time += (now.tv_usec - esd_play_start.tv_usec) / 1000000.;
-    
+
     /* dprintf("esd delay: %f %f\n", play_time, buffered_samples_time); */
 
     if (play_time > buffered_samples_time) {

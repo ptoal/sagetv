@@ -25,12 +25,12 @@
  * sdp/sdpplin parser.
  *
  */
- 
-#ifndef HAVE_SDPPLIN_H
-#define HAVE_SDPPLIN_H
+
+#ifndef MPLAYER_SDPPLIN_H
+#define MPLAYER_SDPPLIN_H
 
 #include "rmff.h"
-#include "../librtsp/rtsp.h"
+#include "stream/librtsp/rtsp.h"
 
 typedef struct {
 
@@ -98,12 +98,11 @@ typedef struct {
   int duration;
 
   sdpplin_stream_t **stream;
-  
+
 } sdpplin_t;
 
 sdpplin_t *sdpplin_parse(char *data);
 
 void sdpplin_free(sdpplin_t *description);
 
-#endif
-
+#endif /* MPLAYER_SDPPLIN_H */

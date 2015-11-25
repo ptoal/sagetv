@@ -1,12 +1,11 @@
 /*
  * Modified for use with MPlayer, detailed changelog at
  * http://svn.mplayerhq.hu/mplayer/trunk/
- * $Id: inputpin.c,v 1.3 2007-04-10 19:33:30 Narflex Exp $
  */
 
 #include "inputpin.h"
 #include "mediatype.h"
-#include "wine/winerror.h"
+#include "loader/wine/winerror.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -168,7 +167,7 @@ IMPLEMENT_IUNKNOWN(CEnumPins)
  */
 static CEnumPins* CEnumPinsCreate(IPin* p, IPin* pp)
 {
-    CEnumPins* This = (CEnumPins*) malloc(sizeof(CEnumPins));
+    CEnumPins* This = malloc(sizeof(CEnumPins));
 
     if (!This)
         return NULL;
@@ -178,7 +177,7 @@ static CEnumPins* CEnumPinsCreate(IPin* p, IPin* pp)
     This->pin2 = pp;
     This->counter = 0;
 
-    This->vt = (IEnumPins_vt*) malloc(sizeof(IEnumPins_vt));
+    This->vt = malloc(sizeof(IEnumPins_vt));
     if (!This->vt)
     {
 	free(This);
@@ -446,9 +445,9 @@ static long STDCALL CInputPin_QueryInternalConnections(IPin* This,
  * \return S_OK - success
  * \return E_UNEXPECTED - The pin is output pin
  *
- * \note 
- * IMemoryInputPin::Receive,IMemoryInputPin::ReceiveMultiple, IMemoryInputPin::EndOfStream, 
- * IMemAllocator::GetBuffer runs in different (streaming) thread then other 
+ * \note
+ * IMemoryInputPin::Receive,IMemoryInputPin::ReceiveMultiple, IMemoryInputPin::EndOfStream,
+ * IMemAllocator::GetBuffer runs in different (streaming) thread then other
  * methods (application thread).
  * IMemoryInputPin::NewSegment runs either in streaming or application thread.
  * Developer must use critical sections for thread-safing work.
@@ -540,7 +539,7 @@ IMPLEMENT_IUNKNOWN(CInputPin)
  */
 CInputPin* CInputPinCreate(CBaseFilter* p, const AM_MEDIA_TYPE* amt)
 {
-    CInputPin* This = (CInputPin*) malloc(sizeof(CInputPin));
+    CInputPin* This = malloc(sizeof(CInputPin));
 
     if (!This)
         return NULL;
@@ -549,7 +548,7 @@ CInputPin* CInputPinCreate(CBaseFilter* p, const AM_MEDIA_TYPE* amt)
     This->parent = p;
     CopyMediaType(&(This->type),amt);
 
-    This->vt= (IPin_vt*) malloc(sizeof(IPin_vt));
+    This->vt= malloc(sizeof(IPin_vt));
 
     if (!This->vt)
     {
@@ -603,7 +602,7 @@ static long STDCALL CBaseFilter_GetClassID(IBaseFilter * This,
  *
  * \remarks
  * When filter is stopped it does onot deliver or process any samples and rejects any samples
- * from upstream filter. 
+ * from upstream filter.
  * Transition may be asynchronous. In this case method should return S_FALSE.
  * Method always sets filter's state to State_Stopped even if error occured.
  *
@@ -701,8 +700,8 @@ static long STDCALL CBaseFilter_SetSyncSource(IBaseFilter* This,
  * \brief IMediafilter::GetSyncSource (gets current reference clock)
  *
  * \param[in] This pointer to IBaseFilter interface
- * \param[out] pClock address of variable that receives pointer to clock's 
- *  IReferenceClock interface 
+ * \param[out] pClock address of variable that receives pointer to clock's
+ *  IReferenceClock interface
  *
  * \return S_OK success
  * \return E_POINTER Null pointer
@@ -791,7 +790,7 @@ static long STDCALL CBaseFilter_QueryFilterInfo(IBaseFilter* This,
  *
  * \remarks
  * Filter should not call to graph's AddRef method.
- * The IFilterGraph is guaranteed to be valid until graph manager calls this method again with 
+ * The IFilterGraph is guaranteed to be valid until graph manager calls this method again with
  * the value NULL.
  *
  */
@@ -858,8 +857,7 @@ static IPin* CBaseFilter_GetUnusedPin(CBaseFilter* This)
  */
 static void CBaseFilter_Destroy(CBaseFilter* This)
 {
-    if (This->vt)
-	free(This->vt);
+    free(This->vt);
     if (This->pin)
 	This->pin->vt->Release((IUnknown*)This->pin);
     if (This->unused_pin)
@@ -880,7 +878,7 @@ IMPLEMENT_IUNKNOWN(CBaseFilter)
  */
 CBaseFilter* CBaseFilterCreate(const AM_MEDIA_TYPE* type, CBaseFilter2* parent)
 {
-    CBaseFilter* This = (CBaseFilter*) malloc(sizeof(CBaseFilter));
+    CBaseFilter* This = malloc(sizeof(CBaseFilter));
     if (!This)
 	return NULL;
 
@@ -889,7 +887,7 @@ CBaseFilter* CBaseFilterCreate(const AM_MEDIA_TYPE* type, CBaseFilter2* parent)
     This->pin = (IPin*) CInputPinCreate(This, type);
     This->unused_pin = (IPin*) CRemotePinCreate(This, parent->GetPin(parent));
 
-    This->vt = (IBaseFilter_vt*) malloc(sizeof(IBaseFilter_vt));
+    This->vt = malloc(sizeof(IBaseFilter_vt));
     if (!This->vt || !This->pin || !This->unused_pin)
     {
         CBaseFilter_Destroy(This);
@@ -944,7 +942,7 @@ static long STDCALL CBaseFilter2_GetClassID(IBaseFilter* This,
  *
  * \remarks
  * When filter is stopped it does onot deliver or process any samples and rejects any samples
- * from upstream filter. 
+ * from upstream filter.
  * Transition may be asynchronous. In this case method should return S_FALSE.
  * Method always sets filter's state to State_Stopped even if error occured.
  *
@@ -1043,8 +1041,8 @@ static long STDCALL CBaseFilter2_SetSyncSource(IBaseFilter* This,
  * \brief IMediafilter::GetSyncSource (gets current reference clock)
  *
  * \param[in] This pointer to IBaseFilter interface
- * \param[out] pClock address of variable that receives pointer to clock's 
- *  IReferenceClock interface 
+ * \param[out] pClock address of variable that receives pointer to clock's
+ *  IReferenceClock interface
  *
  * \return S_OK success
  * \return E_POINTER Null pointer
@@ -1132,7 +1130,7 @@ static long STDCALL CBaseFilter2_QueryFilterInfo(IBaseFilter* This,
  *
  * \remarks
  * Filter should not call to graph's AddRef method.
- * The IFilterGraph is guaranteed to be valid until graph manager calls this method again with 
+ * The IFilterGraph is guaranteed to be valid until graph manager calls this method again with
  * the value NULL.
  *
  */
@@ -1191,8 +1189,7 @@ static void CBaseFilter2_Destroy(CBaseFilter2* This)
     Debug printf("CBaseFilter2_Destroy(%p) called\n", This);
     if (This->pin)
 	This->pin->vt->Release((IUnknown*) This->pin);
-    if (This->vt)
-	free(This->vt);
+    free(This->vt);
     free(This);
 }
 
@@ -1215,7 +1212,7 @@ static GUID CBaseFilter2_interf3 =
  */
 CBaseFilter2* CBaseFilter2Create()
 {
-    CBaseFilter2* This = (CBaseFilter2*) malloc(sizeof(CBaseFilter2));
+    CBaseFilter2* This = malloc(sizeof(CBaseFilter2));
 
     if (!This)
 	return NULL;
@@ -1223,7 +1220,7 @@ CBaseFilter2* CBaseFilter2Create()
     This->refcount = 1;
     This->pin = (IPin*) CRemotePin2Create(This);
 
-    This->vt = (IBaseFilter_vt*) malloc(sizeof(IBaseFilter_vt));
+    This->vt = malloc(sizeof(IBaseFilter_vt));
 
     if (!This->pin || !This->vt)
     {
@@ -1375,7 +1372,7 @@ IMPLEMENT_IUNKNOWN(CRemotePin)
  */
 CRemotePin* CRemotePinCreate(CBaseFilter* pt, IPin* rpin)
 {
-    CRemotePin* This = (CRemotePin*) malloc(sizeof(CRemotePin));
+    CRemotePin* This = malloc(sizeof(CRemotePin));
 
     if (!This)
         return NULL;
@@ -1386,7 +1383,7 @@ CRemotePin* CRemotePinCreate(CBaseFilter* pt, IPin* rpin)
     This->remote_pin = rpin;
     This->refcount = 1;
 
-    This->vt = (IPin_vt*) malloc(sizeof(IPin_vt));
+    This->vt = malloc(sizeof(IPin_vt));
 
     if (!This->vt)
     {
@@ -1465,7 +1462,7 @@ IMPLEMENT_IUNKNOWN(CRemotePin2)
  */
 CRemotePin2* CRemotePin2Create(CBaseFilter2* p)
 {
-    CRemotePin2* This = (CRemotePin2*) malloc(sizeof(CRemotePin2));
+    CRemotePin2* This = malloc(sizeof(CRemotePin2));
 
     if (!This)
         return NULL;
@@ -1475,7 +1472,7 @@ CRemotePin2* CRemotePin2Create(CBaseFilter2* p)
     This->parent = p;
     This->refcount = 1;
 
-    This->vt = (IPin_vt*) malloc(sizeof(IPin_vt));
+    This->vt = malloc(sizeof(IPin_vt));
 
     if (!This->vt)
     {

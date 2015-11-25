@@ -1,12 +1,28 @@
 /*
-    VIDIX accelerated overlay in a X window
-    
-    (C) Alex Beregszaszi & Zoltan Ponekker & Nick Kurshev
-    
-    WS window manager by Pontscho/Fresh!
-
-    Based on vo_gl.c and vo_vesa.c and vo_xmga.c (.so mastah! ;))
-*/
+ * VIDIX-accelerated overlay in an X window
+ *
+ * copyright (C) Alex Beregszaszi & Zoltan Ponekker & Nick Kurshev
+ *
+ * WS window manager by Pontscho/Fresh!
+ *
+ * based on vo_gl.c and vo_vesa.c and vo_xmga.c (.so mastah! ;))
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,13 +32,14 @@
 
 #include "config.h"
 #include "video_out.h"
+#define NO_DRAW_FRAME
 #include "video_out_internal.h"
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 //#include <X11/keysym.h>
 
-#ifdef HAVE_XINERAMA
+#ifdef CONFIG_XINERAMA
 #include <X11/extensions/Xinerama.h>
 #endif
 
@@ -31,14 +48,9 @@
 #include "mp_msg.h"
 
 #include "vosub_vidix.h"
-#include "vidix/vidixlib.h"
+#include "vidix/vidix.h"
 
-#ifdef HAVE_NEW_GUI
-#include "Gui/interface.h"
-#endif
-
-
-static vo_info_t info = {
+static const vo_info_t info = {
     "X11 (VIDIX)",
     "xvidix",
     "Alex Beregszaszi",
@@ -46,10 +58,9 @@ static vo_info_t info = {
 };
 
 LIBVO_EXTERN(xvidix)
-#define UNUSED(x) ((void)(x))   /* Removes warning about unused arguments */
+
 /* X11 related variables */
 /* Colorkey handling */
-static XGCValues mGCV;
 static int colorkey;
 static vidix_grkey_t gr_key;
 
@@ -69,11 +80,8 @@ static uint32_t window_width, window_height;
 static uint32_t drwX, drwY, drwWidth, drwHeight, drwBorderWidth,
     drwDepth, drwcX, drwcY, dwidth, dheight;
 
-extern void set_video_eq(int cap);
+void set_video_eq(int cap);
 
-#ifdef HAVE_XINERAMA
-extern int xinerama_screen;
-#endif
 
 static void set_window(int force_update)
 {
@@ -103,7 +111,6 @@ static void set_window(int force_update)
         drwHeight = vo_dheight;
     }
 
-#if X11_FULLSCREEN
     if (vo_fs)
     {
         aspect(&dwidth, &dheight, A_ZOOM);
@@ -122,49 +129,13 @@ static void set_window(int force_update)
                "[xvidix-fs] dcx: %d dcy: %d dx: %d dy: %d dw: %d dh: %d\n",
                drwcX, drwcY, drwX, drwY, drwWidth, drwHeight);
     }
-#endif
 
     vo_dwidth = drwWidth;
     vo_dheight = drwHeight;
 
-#ifdef HAVE_XINERAMA
-    if (XineramaIsActive(mDisplay))
-    {
-        XineramaScreenInfo *screens;
-        int num_screens;
-        int i = 0;
-
-        screens = XineramaQueryScreens(mDisplay, &num_screens);
-
-        /* find the screen we are on */
-        while (i < num_screens &&
-               ((screens[i].x_org < drwcX) || (screens[i].y_org < drwcY) ||
-                (screens[i].x_org + screens[i].width >= drwcX) ||
-                (screens[i].y_org + screens[i].height >= drwcY)))
-        {
-            i++;
-        }
-
-        if (i < num_screens)
-        {
-            /* save the screen we are on */
-            xinerama_screen = i;
-        } else
-        {
-            /* oops.. couldnt find the screen we are on
-             * because the upper left corner left the
-             * visual range. assume we are still on the
-             * same screen
-             */
-            i = xinerama_screen;
-        }
-
-        /* set drwcX and drwcY to the right values */
-        drwcX = drwcX - screens[i].x_org;
-        drwcY = drwcY - screens[i].y_org;
-        XFree(screens);
-    }
-#endif
+    update_xinerama_info();
+    drwcX -= xinerama_x;
+    drwcY -= xinerama_y;
 
     if (vo_panscan > 0.0f && vo_fs)
     {
@@ -243,7 +214,6 @@ static int config(uint32_t width, uint32_t height, uint32_t d_width,
     image_height = height;
     image_width = width;
     image_format = format;
-    vo_mouse_autohide = 1;
 
     window_width = d_width;
     window_height = d_height;
@@ -276,17 +246,8 @@ static int config(uint32_t width, uint32_t height, uint32_t d_width,
     }
     mp_msg(MSGT_VO, MSGL_V, "Using colorkey: %x\n", colorkey);
 
-#ifdef HAVE_NEW_GUI
-    if (use_gui)
-        guiGetEvent(guiSetShVideo, 0);  // the GUI will set up / resize the window
-    else
-    {
-#endif
-
-#ifdef X11_FULLSCREEN
         if ((flags & VOFLAG_FULLSCREEN) || (flags & VOFLAG_SWSCALE))
             aspect(&d_width, &d_height, A_ZOOM);
-#endif
         dwidth = d_width;
         dheight = d_height;
         /* Make the window */
@@ -306,65 +267,12 @@ static int config(uint32_t width, uint32_t height, uint32_t d_width,
         xswa.colormap =
             XCreateColormap(mDisplay, RootWindow(mDisplay, mScreen),
                             vinfo.visual, AllocNone);
-        xswa.event_mask =
-            StructureNotifyMask | ExposureMask | KeyPressMask |
-            PropertyChangeMask | ((WinID == 0) ? 0
-                                  : (ButtonPressMask | ButtonReleaseMask |
-                                     PointerMotionMask));
-        xswamask = CWBackPixel | CWBorderPixel | CWColormap | CWEventMask;
+        xswamask = CWBackPixel | CWBorderPixel | CWColormap;
 
-        if (WinID >= 0)
-        {
-            vo_window =
-                WinID ? ((Window) WinID) : RootWindow(mDisplay, mScreen);
-            if (WinID)
-            {
-                XUnmapWindow(mDisplay, vo_window);
-                XChangeWindowAttributes(mDisplay, vo_window, xswamask,
-                                        &xswa);
-                vo_x11_selectinput_witherr(mDisplay, vo_window,
-                                           StructureNotifyMask |
-                                           KeyPressMask |
-                                           PropertyChangeMask |
-                                           PointerMotionMask |
-                                           ButtonPressMask |
-                                           ButtonReleaseMask |
-                                           ExposureMask);
-                XMapWindow(mDisplay, vo_window);
-            } else
-                XSelectInput(mDisplay, vo_window, ExposureMask);
-        } else
-        {
-            if (vo_window == None)
-            {
-                vo_window =
-                    XCreateWindow(mDisplay, RootWindow(mDisplay, mScreen),
-                                  vo_dx, vo_dy, window_width,
-                                  window_height, xswa.border_pixel,
-                                  vinfo.depth, InputOutput, vinfo.visual,
-                                  xswamask, &xswa);
-
-                vo_x11_classhint(mDisplay, vo_window, "xvidix");
-                vo_hidecursor(mDisplay, vo_window);
-                vo_x11_sizehint(vo_dx, vo_dy, vo_dwidth, vo_dheight, 0);
-
-                XStoreName(mDisplay, vo_window, title);
-                XMapWindow(mDisplay, vo_window);
-                vo_x11_nofs_sizepos(vo_dx, vo_dy, vo_dwidth, vo_dheight);
-
-                if (flags & VOFLAG_FULLSCREEN)
-                    vo_x11_fullscreen();
-
-            } else
-                vo_x11_nofs_sizepos(vo_dx, vo_dy, vo_dwidth, vo_dheight);
-        }
-
-        if (vo_gc != None)
-            XFreeGC(mDisplay, vo_gc);
-        vo_gc = XCreateGC(mDisplay, vo_window, GCForeground, &mGCV);
-#ifdef HAVE_NEW_GUI
-    }
-#endif
+            vo_x11_create_vo_window(&vinfo, vo_dx, vo_dy,
+                    window_width, window_height, flags,
+                    CopyFromParent, "xvidix", title);
+            XChangeWindowAttributes(mDisplay, vo_window, xswamask, &xswa);
 
     if ((!WinID) && (flags & VOFLAG_FULLSCREEN))
     {
@@ -396,23 +304,20 @@ static int config(uint32_t width, uint32_t height, uint32_t d_width,
 
     panscan_calc();
 
-    if (vo_ontop)
-        vo_x11_setlayer(mDisplay, vo_window, vo_ontop);
-
-    return (0);
+    return 0;
 }
 
 static void check_events(void)
 {
     const int event = vo_x11_check_events(mDisplay);
 
-    if ((event & VO_EVENT_RESIZE) || (event & VO_EVENT_EXPOSE))
+    if (event & (VO_EVENT_RESIZE | VO_EVENT_MOVE | VO_EVENT_EXPOSE))
         set_window(0);
 
     return;
 }
 
-/* draw_osd, flip_page, draw_slice, draw_frame should be
+/* draw_osd, flip_page, draw_slice should be
    overwritten with vidix functions (vosub_vidix.c) */
 static void draw_osd(void)
 {
@@ -431,28 +336,14 @@ static void flip_page(void)
 static int draw_slice(uint8_t * src[], int stride[],
                            int w, int h, int x, int y)
 {
-    UNUSED(src);
-    UNUSED(stride);
-    UNUSED(w);
-    UNUSED(h);
-    UNUSED(x);
-    UNUSED(y);
     mp_msg(MSGT_VO, MSGL_FATAL,
            "[xvidix] error: didn't used vidix draw_slice!\n");
-    return (-1);
-}
-
-static int draw_frame(uint8_t * src[])
-{
-    UNUSED(src);
-    mp_msg(MSGT_VO, MSGL_FATAL,
-           "[xvidix] error: didn't used vidix draw_frame!\n");
-    return (-1);
+    return -1;
 }
 
 static int query_format(uint32_t format)
 {
-    return (vidix_query_fourcc(format));
+    return vidix_query_fourcc(format);
 }
 
 static void uninit(void)
@@ -461,11 +352,8 @@ static void uninit(void)
         return;
     vidix_term();
 
-    if (vidix_name)
-    {
-        free(vidix_name);
-        vidix_name = NULL;
-    }
+    free(vidix_name);
+    vidix_name = NULL;
 
     vo_x11_uninit();
 }
@@ -483,15 +371,15 @@ static int preinit(const char *arg)
     }
 
     if (!vo_init())
-        return (-1);
+        return -1;
 
     if (vidix_preinit(vidix_name, &video_out_xvidix) != 0)
-        return (1);
+        return 1;
 
-    return (0);
+    return 0;
 }
 
-static int control(uint32_t request, void *data, ...)
+static int control(uint32_t request, void *data)
 {
     switch (request)
     {
@@ -508,6 +396,7 @@ static int control(uint32_t request, void *data, ...)
             return VO_TRUE;
         case VOCTRL_FULLSCREEN:
             vo_x11_fullscreen();
+            /* Fallthrough to reconfigure panscan */
         case VOCTRL_SET_PANSCAN:
             if (vo_fs && (vo_panscan != vo_panscan_amount))
             {
@@ -515,30 +404,6 @@ static int control(uint32_t request, void *data, ...)
                 set_window(0);
             }
             return VO_TRUE;
-        case VOCTRL_SET_EQUALIZER:
-            {
-                va_list ap;
-                int value;
-
-                va_start(ap, data);
-                value = va_arg(ap, int);
-
-                va_end(ap);
-
-                return vidix_control(request, data, value);
-            }
-        case VOCTRL_GET_EQUALIZER:
-            {
-                va_list ap;
-                int *value;
-
-                va_start(ap, data);
-                value = va_arg(ap, int *);
-
-                va_end(ap);
-
-                return vidix_control(request, data, value);
-            }
         case VOCTRL_UPDATE_SCREENINFO:
             aspect_save_screenres(vo_screenwidth, vo_screenheight);
             return VO_TRUE;

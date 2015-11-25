@@ -1,17 +1,36 @@
 /*
- * fourcc.h
- * This file is part of VIDIX
- * Copyright 2002 Nick Kurshev
- * Licence: GPL
+ * VIDIX FourCC.
+ *
  * This interface is based on v4l2, fbvid.h, mga_vid.h projects
  * and personally my ideas.
-*/
-#ifndef FOURCC_H
-#define FOURCC_H
+ *
+ * Copyright (C) 2002 Nick Kurshev
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
+#ifndef MPLAYER_FOURCC_H
+#define MPLAYER_FOURCC_H
 
 /*  Four-character-code (FOURCC) */
 #define vid_fourcc(a,b,c,d)\
         (((unsigned)(a)<<0)|((unsigned)(b)<<8)|((unsigned)(c)<<16)|((unsigned)(d)<<24))
+
+#define IMGFMT_IS_RGB(f) ((f & vid_fourcc(0xff,0xff,0xff, 0)) == vid_fourcc('R','G','B', 0))
 
 /* RGB fourcc */
 #define IMGFMT_RGB332  vid_fourcc('R','G','B','1') /*  8  RGB-3-3-2     */
@@ -34,6 +53,7 @@
 #define IMGFMT_YV12    vid_fourcc('Y','V','1','2') /* 12  YVU 4:2:0 */
 #define IMGFMT_I420    vid_fourcc('I','4','2','0') /* 12  YUV 4:2:0 */
 #define IMGFMT_IYUV    vid_fourcc('I','Y','U','V') /* 12  YUV 4:2:0 */
+#define IMGFMT_NV12    vid_fourcc('N','V','1','2')
 #define IMGFMT_CLPL    vid_fourcc('C','L','P','L') /* 12            */
 #define IMGFMT_Y800    vid_fourcc('Y','8','0','0') /* 8   Y   Grayscale */
 #define IMGFMT_Y8      vid_fourcc('Y','8',' ',' ') /* 8   Y   Grayscale */
@@ -63,4 +83,4 @@
 /*  Vendor-specific formats   */
 #define IMGFMT_WNVA    vid_fourcc('W','N','V','A') /* Winnov hw compress */
 
-#endif
+#endif /* MPLAYER_FOURCC_H */

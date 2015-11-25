@@ -1,15 +1,11 @@
-#ifndef __WINE_WINBASE_H
-#define __WINE_WINBASE_H
+#ifndef MPLAYER_WINBASE_H
+#define MPLAYER_WINBASE_H
 
 #include "basetsd.h"
 #include "winnt.h"
 #include "winestring.h"
 #include "pshpack1.h"
 
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 typedef struct tagCOORD {
     INT16 x;
@@ -33,18 +29,18 @@ typedef DWORD CALLBACK (*LPTHREAD_START_ROUTINE)(LPVOID);
 #define OUTPUT_DEBUG_STRING_EVENT   8
 #define RIP_EVENT                   9
 
-typedef struct _EXCEPTION_DEBUG_INFO {
+typedef struct EXCEPTION_DEBUG_INFO {
     EXCEPTION_RECORD ExceptionRecord;
     DWORD dwFirstChance;
 } EXCEPTION_DEBUG_INFO;
 
-typedef struct _CREATE_THREAD_DEBUG_INFO {
+typedef struct CREATE_THREAD_DEBUG_INFO {
     HANDLE hThread;
     LPVOID lpThreadLocalBase;
     LPTHREAD_START_ROUTINE lpStartAddress;
 } CREATE_THREAD_DEBUG_INFO;
 
-typedef struct _CREATE_PROCESS_DEBUG_INFO {
+typedef struct CREATE_PROCESS_DEBUG_INFO {
     HANDLE hFile;
     HANDLE hProcess;
     HANDLE hThread;
@@ -57,15 +53,15 @@ typedef struct _CREATE_PROCESS_DEBUG_INFO {
     WORD fUnicode;
 } CREATE_PROCESS_DEBUG_INFO;
 
-typedef struct _EXIT_THREAD_DEBUG_INFO {
+typedef struct EXIT_THREAD_DEBUG_INFO {
     DWORD dwExitCode;
 } EXIT_THREAD_DEBUG_INFO;
 
-typedef struct _EXIT_PROCESS_DEBUG_INFO {
+typedef struct EXIT_PROCESS_DEBUG_INFO {
     DWORD dwExitCode;
 } EXIT_PROCESS_DEBUG_INFO;
 
-typedef struct _LOAD_DLL_DEBUG_INFO {
+typedef struct LOAD_DLL_DEBUG_INFO {
     HANDLE hFile;
     LPVOID   lpBaseOfDll;
     DWORD    dwDebugInfoFileOffset;
@@ -74,22 +70,22 @@ typedef struct _LOAD_DLL_DEBUG_INFO {
     WORD     fUnicode;
 } LOAD_DLL_DEBUG_INFO;
 
-typedef struct _UNLOAD_DLL_DEBUG_INFO {
+typedef struct UNLOAD_DLL_DEBUG_INFO {
     LPVOID lpBaseOfDll;
 } UNLOAD_DLL_DEBUG_INFO;
 
-typedef struct _OUTPUT_DEBUG_STRING_INFO {
+typedef struct OUTPUT_DEBUG_STRING_INFO {
     LPSTR lpDebugStringData;
     WORD  fUnicode;
     WORD  nDebugStringLength;
 } OUTPUT_DEBUG_STRING_INFO;
 
-typedef struct _RIP_INFO {
+typedef struct RIP_INFO {
     DWORD dwError;
     DWORD dwType;
 } RIP_INFO;
 
-typedef struct _DEBUG_EVENT {
+typedef struct DEBUG_EVENT {
     DWORD dwDebugEventCode;
     DWORD dwProcessId;
     DWORD dwThreadId;
@@ -158,7 +154,7 @@ typedef struct
 #define DRIVE_RAMDISK              6
 
 /* The security attributes structure */
-typedef struct _SECURITY_ATTRIBUTES
+typedef struct SECURITY_ATTRIBUTES
 {
     DWORD   nLength;
     LPVOID  lpSecurityDescriptor;
@@ -321,9 +317,9 @@ typedef struct
 #define GETBASEIRQ	10
 
 /* Purge functions for Comm Port */
-#define PURGE_TXABORT       0x0001  /* Kill the pending/current writes to the 
+#define PURGE_TXABORT       0x0001  /* Kill the pending/current writes to the
 				       comm port */
-#define PURGE_RXABORT       0x0002  /*Kill the pending/current reads to 
+#define PURGE_RXABORT       0x0002  /*Kill the pending/current reads to
 				     the comm port */
 #define PURGE_TXCLEAR       0x0004  /* Kill the transmit queue if there*/
 #define PURGE_RXCLEAR       0x0008  /* Kill the typeahead buffer if there*/
@@ -398,7 +394,7 @@ typedef struct
 #define RT_GROUP_ICON        WINELIB_NAME_AW(RT_GROUP_ICON)
 
 
-#define LMEM_FIXED          0   
+#define LMEM_FIXED          0
 #define LMEM_MOVEABLE       0x0002
 #define LMEM_NOCOMPACT      0x0010
 #define LMEM_NODISCARD      0x0020
@@ -541,7 +537,7 @@ typedef struct
     UINT16  flags;
     DWORD   dwOptions WINE_PACKED;
     DWORD   dwFilter WINE_PACKED;
-    CHAR    achAllocModule[8] WINE_PACKED;
+    CHAR    achAllocModule[8];
     DWORD   dwAllocBreak WINE_PACKED;
     DWORD   dwAllocCount WINE_PACKED;
 } WINDEBUGINFO, *LPWINDEBUGINFO;
@@ -754,7 +750,7 @@ typedef struct
 } BY_HANDLE_FILE_INFORMATION ;
 
 
-typedef struct _SYSTEM_POWER_STATUS
+typedef struct SYSTEM_POWER_STATUS
 {
   WIN_BOOL16  ACLineStatus;
   BYTE    BatteryFlag;
@@ -764,7 +760,7 @@ typedef struct _SYSTEM_POWER_STATUS
   DWORD   BatteryFullLifeTime;
 } SYSTEM_POWER_STATUS, *LPSYSTEM_POWER_STATUS;
 
-typedef struct _MEMORY_BASIC_INFORMATION
+typedef struct MEMORY_BASIC_INFORMATION
 {
     LPVOID   BaseAddress;
     LPVOID   AllocationBase;
@@ -826,17 +822,17 @@ DECL_WINELIB_TYPE_AW(ENUMRESLANGPROC)
 #define	LOAD_WITH_ALTERED_SEARCH_PATH	0x00000008
 
 /* ifdef _x86_ ... */
-typedef struct _LDT_ENTRY {
+typedef struct LDT_ENTRY {
     WORD	LimitLow;
     WORD	BaseLow;
     union {
 	struct {
 	    BYTE	BaseMid;
 	    BYTE	Flags1;/*Declare as bytes to avoid alignment problems */
-	    BYTE	Flags2; 
+	    BYTE	Flags2;
 	    BYTE	BaseHi;
 	} Bytes;
-	struct {	    
+	struct {
 	    unsigned	BaseMid		: 8;
 	    unsigned	Type		: 5;
 	    unsigned	Dpl		: 2;
@@ -852,11 +848,11 @@ typedef struct _LDT_ENTRY {
 } LDT_ENTRY, *LPLDT_ENTRY;
 
 
-typedef enum _GET_FILEEX_INFO_LEVELS {
+typedef enum GET_FILEEX_INFO_LEVELS {
     GetFileExInfoStandard
 } GET_FILEEX_INFO_LEVELS;
 
-typedef struct _WIN32_FILE_ATTRIBUTES_DATA {
+typedef struct WIN32_FILE_ATTRIBUTES_DATA {
     DWORD    dwFileAttributes;
     FILETIME ftCreationTime;
     FILETIME ftLastAccessTime;
@@ -865,7 +861,7 @@ typedef struct _WIN32_FILE_ATTRIBUTES_DATA {
     DWORD    nFileSizeLow;
 } WIN32_FILE_ATTRIBUTE_DATA, *LPWIN32_FILE_ATTRIBUTE_DATA;
 
-typedef struct _DllVersionInfo {
+typedef struct DllVersionInfo {
     DWORD cbSize;
     DWORD dwMajorVersion;
     DWORD dwMinorVersion;
@@ -877,7 +873,7 @@ typedef struct _DllVersionInfo {
  * This one seems to be a Win32 only definition. It also is defined with
  * WINAPI instead of CALLBACK in the windows headers.
  */
-typedef DWORD WINAPI (*LPPROGRESS_ROUTINE)(LARGE_INTEGER, LARGE_INTEGER, LARGE_INTEGER, 
+typedef DWORD WINAPI (*LPPROGRESS_ROUTINE)(LARGE_INTEGER, LARGE_INTEGER, LARGE_INTEGER,
                                            LARGE_INTEGER, DWORD, DWORD, HANDLE,
                                            HANDLE, LPVOID);
 
@@ -909,9 +905,7 @@ typedef DWORD WINAPI (*LPPROGRESS_ROUTINE)(LARGE_INTEGER, LARGE_INTEGER, LARGE_I
 #define MEM_PRIVATE             0x00020000
 #define MEM_MAPPED              0x00040000
 #define MEM_TOP_DOWN            0x00100000
-#ifdef __WINE__
 #define MEM_SYSTEM              0x80000000
-#endif
 
 #define SEC_FILE                0x00800000
 #define SEC_IMAGE               0x01000000
@@ -995,9 +989,7 @@ typedef struct {
 	DWORD Reserved;
 }CRITICAL_SECTION;
 
-#ifdef __WINE__
 #define CRITICAL_SECTION_INIT { 0, -1, 0, 0, 0, 0 }
-#endif
 
 typedef struct {
         DWORD dwOSVersionInfoSize;
@@ -1079,7 +1071,7 @@ typedef struct tagCOMMTIMEOUTS {
 	DWORD	WriteTotalTimeoutMultiplier;
 	DWORD	WriteTotalTimeoutConstant;
 } COMMTIMEOUTS,*LPCOMMTIMEOUTS;
-  
+
 #include "poppack.h"
 
 typedef void CALLBACK (*PAPCFUNC)(ULONG_PTR);
@@ -1099,7 +1091,7 @@ WIN_BOOL      WINAPI SetCommState(INT,LPDCB);
 WIN_BOOL      WINAPI TransmitCommChar(INT,CHAR);
 WIN_BOOL      WINAPI SetupComm(HANDLE, DWORD, DWORD);
 WIN_BOOL      WINAPI GetCommProperties(HANDLE, LPDCB *);
-  
+
 /*DWORD WINAPI GetVersion( void );*/
 WIN_BOOL16 WINAPI GetVersionEx16(OSVERSIONINFO16*);
 WIN_BOOL WINAPI GetVersionExA(OSVERSIONINFOA*);
@@ -1120,7 +1112,7 @@ void      WINAPI RaiseException(DWORD,DWORD,DWORD,const LPDWORD);
 WIN_BOOL    WINAPI SetProcessWorkingSetSize(HANDLE,DWORD,DWORD);
 WIN_BOOL    WINAPI TerminateProcess(HANDLE,DWORD);
 WIN_BOOL    WINAPI TerminateThread(HANDLE,DWORD);
-WIN_BOOL    WINAPI GetExitCodeThread(HANDLE,LPDWORD); 
+WIN_BOOL    WINAPI GetExitCodeThread(HANDLE,LPDWORD);
 
 /* GetBinaryType return values.
  */
@@ -1372,7 +1364,7 @@ WIN_BOOL        WINAPI LookupAccountSidW(LPCWSTR,PSID,LPWSTR,LPDWORD,LPWSTR,LPDW
 #define     LookupAccountSid WINELIB_NAME_AW(LookupAccountSidW)
 WIN_BOOL        WINAPI LocalFileTimeToFileTime(const FILETIME*,LPFILETIME);
 WIN_BOOL        WINAPI LockFile(HANDLE,DWORD,DWORD,DWORD,DWORD);
-WIN_BOOL        WINAPI LockFileEx(HANDLE, DWORD, DWORD, DWORD, DWORD, LPOVERLAPPED);    
+WIN_BOOL        WINAPI LockFileEx(HANDLE, DWORD, DWORD, DWORD, DWORD, LPOVERLAPPED);
 WIN_BOOL        WINAPI LookupPrivilegeValueA(LPCSTR,LPCSTR,LPVOID);
 WIN_BOOL        WINAPI LookupPrivilegeValueW(LPCWSTR,LPCWSTR,LPVOID);
 #define     LookupPrivilegeValue WINELIB_NAME_AW(LookupPrivilegeValue)
@@ -1779,13 +1771,7 @@ LONG        WINAPI InterlockedExchangeAdd(PLONG,LONG);
 LONG        WINAPI InterlockedIncrement(PLONG);
 VOID        WINAPI SetLastError(DWORD);
 
-#ifdef __WINE__
 #define GetCurrentProcess() ((HANDLE)0xffffffff)
 #define GetCurrentThread()  ((HANDLE)0xfffffffe)
-#endif
 
-#ifdef __cplusplus
-}
-#endif
-
-#endif  /* __WINE_WINBASE_H */
+#endif /* MPLAYER_WINBASE_H */

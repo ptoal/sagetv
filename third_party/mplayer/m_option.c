@@ -1,3 +1,20 @@
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 /// \file
 /// \ingroup Options
@@ -6,6 +23,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdarg.h>
@@ -15,14 +33,17 @@
 #include "m_option.h"
 //#include "m_config.h"
 #include "mp_msg.h"
+#include "mp_global.h"
 #include "stream/url.h"
+#include "libavutil/avstring.h"
+#include "libavutil/attributes.h"
 
 // Don't free for 'production' atm
 #ifndef MP_DEBUG
 //#define NO_FREE
 #endif
 
-m_option_t* m_option_list_find(m_option_t* list,const char* name) {
+const m_option_t* m_option_list_find(const m_option_t* list,const char* name) {
   int i;
 
   for(i = 0 ; list[i].name ; i++) {
@@ -39,13 +60,13 @@ m_option_t* m_option_list_find(m_option_t* list,const char* name) {
 
 // Default function that just does a memcpy
 
-static void copy_opt(m_option_t* opt,void* dst,void* src) {
+static void copy_opt(const m_option_t* opt,void* dst,const void* src) {
   if(dst && src)
     memcpy(dst,src,opt->type->size);
 }
 
 // Helper for the print funcs (from man printf)
-static char* dup_printf(const char *fmt, ...) {       
+static char* dup_printf(const char *fmt, ...) {
   /* Guess we need no more than 50 bytes. */
   int n, size = 50;
   char *p;
@@ -58,7 +79,7 @@ static char* dup_printf(const char *fmt, ...) {
     n = vsnprintf (p, size, fmt, ap);
     va_end(ap);
     /* If that worked, return the string. */
-    if (n > -1 && n < size)      
+    if (n > -1 && n < size)
       return p;
     /* Else try again with more space. */
     if (n > -1)    /* glibc 2.1 */
@@ -75,7 +96,7 @@ static char* dup_printf(const char *fmt, ...) {
 
 #define VAL(x) (*(int*)(x))
 
-static int parse_flag(m_option_t* opt,char *name, char *param, void* dst, int src) {
+static int parse_flag(const m_option_t* opt,const char *name, const char *param, void* dst, int src) {
   if (src == M_CONFIG_FILE) {
     if(!param) return M_OPT_MISSING_PARAM;
     if (!strcasecmp(param, "yes") ||	/* any other language? */
@@ -113,14 +134,14 @@ static int parse_flag(m_option_t* opt,char *name, char *param, void* dst, int sr
   }
 }
 
-static char* print_flag(m_option_t* opt,  void* val) {
+static char* print_flag(const m_option_t* opt,  const void* val) {
   if(VAL(val) == opt->min)
     return strdup("no");
   else
     return strdup("yes");
 }
 
-m_option_type_t m_option_type_flag = {
+const m_option_type_t m_option_type_flag = {
   "Flag",
   "need yes or no in config files",
   sizeof(int),
@@ -135,17 +156,16 @@ m_option_type_t m_option_type_flag = {
 
 // Integer
 
-static int parse_int(m_option_t* opt,char *name, char *param, void* dst, int src) {
-  long tmp_int;
+static int parse_int(const m_option_t* opt,const char *name, const char *param, void* dst, int av_unused src) {
+  long long tmp_int;
   char *endptr;
-  src = 0;
 
   if (param == NULL)
     return M_OPT_MISSING_PARAM;
 
-  tmp_int = strtol(param, &endptr, 10);
+  tmp_int = strtoll(param, &endptr, 10);
   if (*endptr)
-  tmp_int = strtol(param, &endptr, 0);
+    tmp_int = strtoll(param, &endptr, 0);
   if (*endptr) {
     mp_msg(MSGT_CFGPARSER, MSGL_ERR, "The %s option must be an integer: %s\n",name, param);
     return M_OPT_INVALID;
@@ -161,20 +181,39 @@ static int parse_int(m_option_t* opt,char *name, char *param, void* dst, int src
     return M_OPT_OUT_OF_RANGE;
   }
 
-  if(dst) VAL(dst) = tmp_int;
+  if(dst) {
+    if (opt->type->size == sizeof(int64_t))
+      *(int64_t *)dst = tmp_int;
+    else
+      VAL(dst) = tmp_int;
+  }
 
   return 1;
 }
 
-static char* print_int(m_option_t* opt,  void* val) {
-  opt = NULL;
+static char* print_int(const m_option_t* opt,  const void* val) {
+  if (opt->type->size == sizeof(int64_t))
+    return dup_printf("%"PRId64, *(const int64_t *)val);
   return dup_printf("%d",VAL(val));
 }
 
-m_option_type_t m_option_type_int = {
+const m_option_type_t m_option_type_int = {
   "Integer",
   "",
   sizeof(int),
+  0,
+  parse_int,
+  print_int,
+  copy_opt,
+  copy_opt,
+  NULL,
+  NULL
+};
+
+const m_option_type_t m_option_type_int64 = {
+  "Integer64",
+  "",
+  sizeof(int64_t),
   0,
   parse_int,
   print_int,
@@ -189,10 +228,9 @@ m_option_type_t m_option_type_int = {
 #undef VAL
 #define VAL(x) (*(double*)(x))
 
-static int parse_double(m_option_t* opt,char *name, char *param, void* dst, int src) {
+static int parse_double(const m_option_t* opt,const char *name, const char *param, void* dst, int av_unused src) {
   double tmp_float;
   char* endptr;
-  src = 0;
 
   if (param == NULL)
     return M_OPT_MISSING_PARAM;
@@ -238,14 +276,13 @@ static int parse_double(m_option_t* opt,char *name, char *param, void* dst, int 
   return 1;
 }
 
-static char* print_double(m_option_t* opt,  void* val) {
-  opt = NULL;
+static char* print_double(const m_option_t* av_unused opt,  const void* val) {
   return dup_printf("%f",VAL(val));
 }
 
-m_option_type_t m_option_type_double = {
+const m_option_type_t m_option_type_double = {
   "Double",
-  "double precission floating point number or ratio (numerator[:/]denominator)",
+  "double precision floating point number or ratio (numerator[:/]denominator)",
   sizeof(double),
   0,
   parse_double,
@@ -259,19 +296,18 @@ m_option_type_t m_option_type_double = {
 #undef VAL
 #define VAL(x) (*(float*)(x))
 
-static int parse_float(m_option_t* opt,char *name, char *param, void* dst, int src) {
+static int parse_float(const m_option_t* opt,const char *name, const char *param, void* dst, int src) {
     double tmp;
     int r= parse_double(opt, name, param, &tmp, src);
     if(r==1 && dst) VAL(dst) = tmp;
     return r;
 }
 
-static char* print_float(m_option_t* opt,  void* val) {
-  opt = NULL;
+static char* print_float(const m_option_t* av_unused opt,  const void* val) {
   return dup_printf("%f",VAL(val));
 }
 
-m_option_type_t m_option_type_float = {
+const m_option_type_t m_option_type_float = {
   "Float",
   "floating point number or ratio (numerator[:/]denominator)",
   sizeof(float),
@@ -288,7 +324,7 @@ m_option_type_t m_option_type_float = {
 #undef VAL
 #define VAL(x) (*(off_t*)(x))
 
-static int parse_position(m_option_t* opt,char *name, char *param, void* dst, int src) {
+static int parse_position(const m_option_t* opt,const char *name, const char *param, void* dst, int src) {
   off_t tmp_off;
   char dummy;
 
@@ -321,11 +357,11 @@ static int parse_position(m_option_t* opt,char *name, char *param, void* dst, in
   return 1;
 }
 
-static char* print_position(m_option_t* opt,  void* val) {
+static char* print_position(const m_option_t* opt,  const void* val) {
   return dup_printf("%"PRId64,(int64_t)VAL(val));
 }
 
-m_option_type_t m_option_type_position = {
+const m_option_type_t m_option_type_position = {
   "Position",
   "Integer (off_t)",
   sizeof(off_t),
@@ -344,8 +380,8 @@ m_option_type_t m_option_type_position = {
 #undef VAL
 #define VAL(x) (*(char**)(x))
 
-static int parse_str(m_option_t* opt,char *name, char *param, void* dst, int src) {
-  
+static int parse_str(const m_option_t* opt,const char *name, const char *param, void* dst, int src) {
+
 
   if (param == NULL)
       return M_OPT_MISSING_PARAM;
@@ -363,8 +399,7 @@ static int parse_str(m_option_t* opt,char *name, char *param, void* dst, int src
   }
 
   if(dst) {
-    if(VAL(dst))
-      free(VAL(dst));
+    free(VAL(dst));
     VAL(dst) = strdup(param);
   }
 
@@ -372,19 +407,19 @@ static int parse_str(m_option_t* opt,char *name, char *param, void* dst, int src
 
 }
 
-static char* print_str(m_option_t* opt,  void* val) {
+static char* print_str(const m_option_t* opt,  const void* val) {
   return (val && VAL(val) && strlen(VAL(val)) > 0) ? strdup(VAL(val)) : NULL;
 }
 
-static void copy_str(m_option_t* opt,void* dst, void* src) {
+static void copy_str(const m_option_t* opt,void* dst, const void* src) {
   if(dst && src) {
 #ifndef NO_FREE
-    if(VAL(dst)) free(VAL(dst)); //FIXME!!!
+    free(VAL(dst)); //FIXME!!!
 #endif
     VAL(dst) = VAL(src) ? strdup(VAL(src)) : NULL;
   }
 }
-  
+
 static void free_str(void* src) {
   if(src && VAL(src)){
 #ifndef NO_FREE
@@ -394,7 +429,7 @@ static void free_str(void* src) {
   }
 }
 
-m_option_type_t m_option_type_string = {
+const m_option_type_t m_option_type_string = {
   "String",
   "",
   sizeof(char*),
@@ -406,7 +441,7 @@ m_option_type_t m_option_type_string = {
   copy_str,
   free_str
 };
-  
+
 //////////// String list
 
 #define LIST_SEPARATOR ','
@@ -436,7 +471,7 @@ static void free_str_list(void* dst) {
 }
 
 static int str_list_add(char** add, int n,void* dst,int pre) {
-  char** lst = VAL(dst);
+  char** lst;
   int ln;
 
   if(!dst) return M_OPT_PARSER_ERR;
@@ -446,17 +481,19 @@ static int str_list_add(char** add, int n,void* dst,int pre) {
     /**/;
 
   lst = realloc(lst,(n+ln+1)*sizeof(char*));
-  
+
   if(pre) {
-    memmove(&lst[n],lst,(ln+1)*sizeof(char*));
+    memmove(&lst[n],lst,ln*sizeof(char*));
     memcpy(lst,add,n*sizeof(char*));
-  } else 
-    memcpy(&lst[ln],add,(n+1)*sizeof(char*));
+  } else
+    memcpy(&lst[ln],add,n*sizeof(char*));
+  // (re-)add NULL-termination
+  lst[ln+n] = NULL;
 
   free(add);
 
   VAL(dst) = lst;
-  
+
   return 1;
 }
 
@@ -464,7 +501,7 @@ static int str_list_del(char** del, int n,void* dst) {
   char **lst,*ep,**d;
   int i,ln,s;
   long idx;
-  
+
   if(!dst) return M_OPT_PARSER_ERR;
   lst = VAL(dst);
 
@@ -492,7 +529,7 @@ static int str_list_del(char** del, int n,void* dst) {
   free(del);
 
   if(s == 0) {
-    if(lst) free(lst);
+    free(lst);
     VAL(dst) = NULL;
     return 1;
   }
@@ -505,12 +542,12 @@ static int str_list_del(char** del, int n,void* dst) {
   }
   d[s] = NULL;
 
-  if(lst) free(lst);
+  free(lst);
   VAL(dst) = d;
 
   return 1;
 }
-  
+
 static char *get_nextsep(char *ptr, char sep, int modify) {
     char *last_ptr = ptr;
     for(;;){
@@ -524,14 +561,14 @@ static char *get_nextsep(char *ptr, char sep, int modify) {
     return ptr;
 }
 
-static int parse_str_list(m_option_t* opt,char *name, char *param, void* dst, int src) {
+static int parse_str_list(const m_option_t* opt,const char *name, const char *param, void* dst, int src) {
   int n = 0,len = strlen(opt->name);
   char *str;
-  char *ptr = param, *last_ptr, **res;
+  char *ptr = (char *)param, *last_ptr, **res;
   int op = OP_NONE;
 
   if(opt->name[len-1] == '*' && ((int)strlen(name) > len - 1)) {
-    char* n = &name[len-1];
+    const char* n = &name[len-1];
     if(strcasecmp(n,"-add") == 0)
       op = OP_ADD;
     else if(strcasecmp(n,"-pre") == 0)
@@ -567,7 +604,7 @@ static int parse_str_list(m_option_t* opt,char *name, char *param, void* dst, in
   }
   if(n == 0)
     return M_OPT_INVALID;
-  if( ((opt->flags & M_OPT_MIN) && (n < opt->min)) || 
+  if( ((opt->flags & M_OPT_MIN) && (n < opt->min)) ||
       ((opt->flags & M_OPT_MAX) && (n > opt->max)) )
     return M_OPT_OUT_OF_RANGE;
 
@@ -610,8 +647,8 @@ static int parse_str_list(m_option_t* opt,char *name, char *param, void* dst, in
 
   return 1;
 }
-  
-static void copy_str_list(m_option_t* opt,void* dst, void* src) {
+
+static void copy_str_list(const m_option_t* opt,void* dst, const void* src) {
   int n;
   char **d,**s;
 
@@ -635,11 +672,11 @@ static void copy_str_list(m_option_t* opt,void* dst, void* src) {
   VAL(dst) = d;
 }
 
-static char* print_str_list(m_option_t* opt, void* src) {
+static char* print_str_list(const m_option_t* opt, const void* src) {
   char **lst = NULL;
   char *ret = NULL,*last = NULL;
   int i;
-  
+
   if(!(src && VAL(src))) return NULL;
   lst = VAL(src);
 
@@ -655,15 +692,15 @@ static char* print_str_list(m_option_t* opt, void* src) {
   return ret;
 }
 
-m_option_type_t m_option_type_string_list = {
+const m_option_type_t m_option_type_string_list = {
   "String list",
   "A list of strings separated by ','\n"
   "Option with a name ending in an * permits using the following suffix: \n"
   "\t-add: Add the given parameters at the end of the list.\n"
-  "\t-pre: Add the given parameters at the begining of the list.\n"
+  "\t-pre: Add the given parameters at the beginning of the list.\n"
   "\t-del: Remove the entry at the given indices.\n"
   "\t-clr: Clear the list.\n"
-  "e.g: -vf-add flip,mirror -vf-del 2,5\n",  
+  "e.g: -vf-add flip,mirror -vf-del 2,5\n",
   sizeof(char**),
   M_OPT_TYPE_DYNAMIC | M_OPT_TYPE_ALLOW_WILDCARD,
   parse_str_list,
@@ -673,9 +710,31 @@ m_option_type_t m_option_type_string_list = {
   copy_str_list,
   free_str_list
 };
- 
- 
+
+
 ///////////////////  Func based options
+
+static int parse_call_func(const m_option_t* opt,const char *name, const char *param, void* dst, int src) {
+  int res = ((m_opt_func_param_t) opt->p)(opt,param);
+  if (res < 0)
+    return res;
+  return 1;
+}
+
+// special variant, will not have a history/be able to
+// be used as per-file option etc.
+const m_option_type_t m_option_type_func_param_immediate = {
+  "Func param once",
+  "",
+  0,
+  M_OPT_TYPE_INDIRECT,
+  parse_call_func,
+  NULL,
+  NULL, // Nothing to do on save
+  NULL,
+  NULL,
+  NULL
+};
 
 // A chained list to save the various calls for func_param and func_full
 typedef struct m_func_save m_func_save_t;
@@ -694,11 +753,11 @@ static void free_func_pf(void* src) {
   if(!src) return;
 
   s = VAL(src);
-  
+
   while(s) {
     n = s->next;
     free(s->name);
-    if(s->param) free(s->param);
+    free(s->param);
     free(s);
     s = n;
   }
@@ -706,7 +765,7 @@ static void free_func_pf(void* src) {
 }
 
 // Parser for func_param and func_full
-static int parse_func_pf(m_option_t* opt,char *name, char *param, void* dst, int src) {
+static int parse_func_pf(const m_option_t* opt,const char *name, const char *param, void* dst, int src) {
   m_func_save_t *s,*p;
 
   if(!dst)
@@ -727,7 +786,7 @@ static int parse_func_pf(m_option_t* opt,char *name, char *param, void* dst, int
   return 1;
 }
 
-static void copy_func_pf(m_option_t* opt,void* dst, void* src) {
+static void copy_func_pf(const m_option_t* opt,void* dst, const void* src) {
   m_func_save_t *d = NULL, *s,* last = NULL;
 
   if(!(dst && src)) return;
@@ -747,18 +806,18 @@ static void copy_func_pf(m_option_t* opt,void* dst, void* src) {
     last = d;
     s = s->next;
   }
-  
-    
+
+
 }
 
 /////////////////// Func_param
 
-static void set_func_param(m_option_t* opt, void* dst, void* src) {
+static void set_func_param(const m_option_t* opt, void* dst, const void* src) {
   m_func_save_t* s;
 
   if(!src) return;
   s = VAL(src);
-  
+
   if(!s) return;
 
   // Revert if needed
@@ -767,7 +826,7 @@ static void set_func_param(m_option_t* opt, void* dst, void* src) {
     ((m_opt_func_param_t) opt->p)(opt,s->param);
 }
 
-m_option_type_t m_option_type_func_param = {
+const m_option_type_t m_option_type_func_param = {
   "Func param",
   "",
   sizeof(m_func_save_t*),
@@ -782,7 +841,7 @@ m_option_type_t m_option_type_func_param = {
 
 /////////////////// Func_full
 
-static void set_func_full(m_option_t* opt, void* dst, void* src) {
+static void set_func_full(const m_option_t* opt, void* dst, const void* src) {
   m_func_save_t* s;
 
   if(!src) return;
@@ -794,7 +853,7 @@ static void set_func_full(m_option_t* opt, void* dst, void* src) {
   }
 }
 
-m_option_type_t m_option_type_func_full = {
+const m_option_type_t m_option_type_func_full = {
   "Func full",
   "",
   sizeof(m_func_save_t*),
@@ -812,20 +871,20 @@ m_option_type_t m_option_type_func_full = {
 #undef VAL
 #define VAL(x) (*(int*)(x))
 
-static int parse_func(m_option_t* opt,char *name, char *param, void* dst, int src) {
+static int parse_func(const m_option_t* opt,const char *name, const char *param, void* dst, int src) {
   if(dst)
     VAL(dst) += 1;
   return 0;
 }
 
-static void set_func(m_option_t* opt,void* dst, void* src) {
+static void set_func(const m_option_t* opt,void* dst, const void* src) {
   int i;
   if(opt->priv) ((m_opt_default_func_t)opt->priv)(opt,opt->name);
   for(i = 0 ; i < VAL(src) ; i++)
     ((m_opt_func_t) opt->p)(opt);
 }
 
-m_option_type_t m_option_type_func = {
+const m_option_type_t m_option_type_func = {
   "Func",
   "",
   sizeof(int),
@@ -840,8 +899,8 @@ m_option_type_t m_option_type_func = {
 
 /////////////////// Print
 
-static int parse_print(m_option_t* opt,char *name, char *param, void* dst, int src) {
-  if(opt->type == CONF_TYPE_PRINT_INDIRECT) 
+static int parse_print(const m_option_t* opt,const char *name, const char *param, void* dst, int src) {
+  if(opt->type == CONF_TYPE_PRINT_INDIRECT)
     mp_msg(MSGT_CFGPARSER, MSGL_INFO, "%s", *(char **) opt->p);
   else if(opt->type == CONF_TYPE_PRINT_FUNC)
     return ((m_opt_func_full_t) opt->p)(opt,name,param);
@@ -850,10 +909,12 @@ static int parse_print(m_option_t* opt,char *name, char *param, void* dst, int s
 
   if(opt->priv == NULL)
     return M_OPT_EXIT;
+  if(opt->priv == PRIV_NO_EXIT)
+    return 0;
   return 1;
 }
 
-m_option_type_t m_option_type_print = {
+const m_option_type_t m_option_type_print = {
   "Print",
   "",
   0,
@@ -866,7 +927,7 @@ m_option_type_t m_option_type_print = {
   NULL
 };
 
-m_option_type_t m_option_type_print_indirect = {
+const m_option_type_t m_option_type_print_indirect = {
   "Print",
   "",
   0,
@@ -879,7 +940,7 @@ m_option_type_t m_option_type_print_indirect = {
   NULL
 };
 
-m_option_type_t m_option_type_print_func = {
+const m_option_type_t m_option_type_print_func = {
   "Print",
   "",
   0,
@@ -897,12 +958,12 @@ m_option_type_t m_option_type_print_func = {
 #undef VAL
 #define VAL(x) (*(char***)(x))
 
-static int parse_subconf(m_option_t* opt,char *name, char *param, void* dst, int src) {
+static int parse_subconf(const m_option_t* opt,const char *name, const char *param, void* dst, int src) {
   char *subparam;
   char *subopt;
-  int nr = 0,i,r;
-  m_option_t *subopts;
-  char *p;
+  int nr = 0,i,r = 1;
+  const m_option_t *subopts;
+  const char *p;
   char** lst = NULL;
 
   if (param == NULL || strlen(param) == 0)
@@ -916,38 +977,38 @@ static int parse_subconf(m_option_t* opt,char *name, char *param, void* dst, int
 
   while(p[0])
     {
-      int sscanf_ret = 1;
       int optlen = strcspn(p, ":=");
       /* clear out */
       subopt[0] = subparam[0] = 0;
-      strlcpy(subopt, p, optlen + 1);
+      av_strlcpy(subopt, p, optlen + 1);
       p = &p[optlen];
       if (p[0] == '=') {
-        sscanf_ret = 2;
         p = &p[1];
         if (p[0] == '"') {
           p = &p[1];
           optlen = strcspn(p, "\"");
-          strlcpy(subparam, p, optlen + 1);
+          av_strlcpy(subparam, p, optlen + 1);
           p = &p[optlen];
           if (p[0] != '"') {
             mp_msg(MSGT_CFGPARSER, MSGL_ERR, "Terminating '\"' missing for '%s'\n", subopt);
-            return M_OPT_INVALID;
+            r = M_OPT_INVALID;
+            goto out;
           }
           p = &p[1];
         } else if (p[0] == '%') {
           p = &p[1];
-          optlen = (int)strtol(p, &p, 0);
+          optlen = (int)strtol(p, (char**)&p, 0);
           if (!p || p[0] != '%' || (optlen > strlen(p) - 1)) {
             mp_msg(MSGT_CFGPARSER, MSGL_ERR, "Invalid length %i for '%s'\n", optlen, subopt);
-            return M_OPT_INVALID;
+            r = M_OPT_INVALID;
+            goto out;
           }
           p = &p[1];
-          strlcpy(subparam, p, optlen + 1);
+          av_strlcpy(subparam, p, optlen + 1);
           p = &p[optlen];
         } else {
           optlen = strcspn(p, ":");
-          strlcpy(subparam, p, optlen + 1);
+          av_strlcpy(subparam, p, optlen + 1);
           p = &p[optlen];
         }
       }
@@ -955,44 +1016,42 @@ static int parse_subconf(m_option_t* opt,char *name, char *param, void* dst, int
         p = &p[1];
       else if (p[0]) {
         mp_msg(MSGT_CFGPARSER, MSGL_ERR, "Incorrect termination for '%s'\n", subopt);
-        return M_OPT_INVALID;
+        r = M_OPT_INVALID;
+        goto out;
       }
-			    
-      switch(sscanf_ret)
-	{
-	case 1:
-	  subparam[0] = 0;
-	case 2:
-	  for(i = 0 ; subopts[i].name ; i++) {
-	    if(!strcmp(subopts[i].name,subopt)) break;
-	  }
-	  if(!subopts[i].name) {
-	    mp_msg(MSGT_CFGPARSER, MSGL_ERR, "Option %s: Unknown suboption %s\n",name,subopt);
-	    return M_OPT_UNKNOWN;
-	  }
-	  r = m_option_parse(&subopts[i],subopt,
-			     subparam[0] == 0 ? NULL : subparam,NULL,src);
-	  if(r < 0) return r;
-	  if(dst) {
-	    lst = (char**)realloc(lst,2 * (nr+2) * sizeof(char*));
-	    lst[2*nr] = strdup(subopt);
-	    lst[2*nr+1] = subparam[0] == 0 ? NULL : strdup(subparam);
-	    memset(&lst[2*(nr+1)],0,2*sizeof(char*));
-	    nr++;
-	  }
-	  break;
-	}
+
+      for(i = 0 ; subopts[i].name ; i++) {
+        if(!strcmp(subopts[i].name,subopt)) break;
+      }
+      if(!subopts[i].name) {
+        mp_msg(MSGT_CFGPARSER, MSGL_ERR, "Option %s: Unknown suboption %s\n",name,subopt);
+        r = M_OPT_UNKNOWN;
+        goto out;
+      }
+      r = m_option_parse(&subopts[i],subopt,
+                         subparam[0] == 0 ? NULL : subparam,NULL,src);
+      if(r < 0) goto out;
+      if(dst) {
+        lst = realloc(lst,2 * (nr+2) * sizeof(char*));
+        lst[2*nr] = strdup(subopt);
+        lst[2*nr+1] = subparam[0] == 0 ? NULL : strdup(subparam);
+        memset(&lst[2*(nr+1)],0,2*sizeof(char*));
+        nr++;
+      }
     }
 
-  free(subparam);
-  free(subopt);
   if(dst)
     VAL(dst) = lst;
+  r = 1;
 
-  return 1;
+out:
+  free(subparam);
+  free(subopt);
+
+  return r;
 }
 
-m_option_type_t m_option_type_subconfig = {
+const m_option_type_t m_option_type_subconfig = {
   "Subconfig",
   "The syntax is -option opt1=foo:flag:opt2=blah",
   sizeof(int),
@@ -1012,10 +1071,47 @@ static struct {
   const char* name;
   unsigned int fmt;
 } mp_imgfmt_list[] = {
+  {"444p16le", IMGFMT_444P16_LE},
+  {"444p16be", IMGFMT_444P16_BE},
+  {"444p14le", IMGFMT_444P14_LE},
+  {"444p14be", IMGFMT_444P14_BE},
+  {"444p12le", IMGFMT_444P12_LE},
+  {"444p12be", IMGFMT_444P12_BE},
+  {"444p10le", IMGFMT_444P10_LE},
+  {"444p10be", IMGFMT_444P10_BE},
+  {"444p9le",  IMGFMT_444P9_LE},
+  {"444p9be",  IMGFMT_444P9_BE},
+  {"422p16le", IMGFMT_422P16_LE},
+  {"422p16be", IMGFMT_422P16_BE},
+  {"422p14le", IMGFMT_422P14_LE},
+  {"422p14be", IMGFMT_422P14_BE},
+  {"422p12le", IMGFMT_422P12_LE},
+  {"422p12be", IMGFMT_422P12_BE},
+  {"422p10le", IMGFMT_422P10_LE},
+  {"422p10be", IMGFMT_422P10_BE},
+  {"422p9le",  IMGFMT_422P9_LE},
+  {"422p9be",  IMGFMT_422P9_BE},
+  {"420p16le", IMGFMT_420P16_LE},
+  {"420p16be", IMGFMT_420P16_BE},
+  {"420p10le", IMGFMT_420P10_LE},
+  {"420p10be", IMGFMT_420P10_BE},
+  {"420p9le",  IMGFMT_420P9_LE},
+  {"420p9be",  IMGFMT_420P9_BE},
+  {"444p16",   IMGFMT_444P16},
+  {"422p16",   IMGFMT_422P16},
+  {"422p10",   IMGFMT_422P10},
+  {"420p16",   IMGFMT_420P16},
+  {"420p10",   IMGFMT_420P10},
+  {"420p9",    IMGFMT_420P9},
+  {"444a", IMGFMT_444A},
+  {"422a", IMGFMT_422A},
+  {"420a", IMGFMT_420A},
   {"444p", IMGFMT_444P},
   {"422p", IMGFMT_422P},
   {"411p", IMGFMT_411P},
+  {"440p", IMGFMT_440P},
   {"yuy2", IMGFMT_YUY2},
+  {"yvyu", IMGFMT_YVYU},
   {"uyvy", IMGFMT_UYVY},
   {"yvu9", IMGFMT_YVU9},
   {"if09", IMGFMT_IF09},
@@ -1025,21 +1121,33 @@ static struct {
   {"clpl", IMGFMT_CLPL},
   {"hm12", IMGFMT_HM12},
   {"y800", IMGFMT_Y800},
-  {"y8", IMGFMT_Y8},
+  {"y8",   IMGFMT_Y8},
+  {"y8a",  IMGFMT_Y8A},
+  {"y16be", IMGFMT_Y16_BE},
+  {"y16le", IMGFMT_Y16_LE},
   {"nv12", IMGFMT_NV12},
   {"nv21", IMGFMT_NV21},
+  {"bgr48le", IMGFMT_BGR48LE},
+  {"bgr48be", IMGFMT_BGR48BE},
   {"bgr24", IMGFMT_BGR24},
   {"bgr32", IMGFMT_BGR32},
   {"bgr16", IMGFMT_BGR16},
   {"bgr15", IMGFMT_BGR15},
+  {"bgr12", IMGFMT_BGR12},
   {"bgr8", IMGFMT_BGR8},
   {"bgr4", IMGFMT_BGR4},
   {"bg4b", IMGFMT_BG4B},
   {"bgr1", IMGFMT_BGR1},
+  {"rgb64be", IMGFMT_RGB64BE},
+  {"rgb64le", IMGFMT_RGB64LE},
+  {"rgb48be", IMGFMT_RGB48BE},
+  {"rgb48le", IMGFMT_RGB48LE},
+  {"rgb48ne", IMGFMT_RGB48NE},
   {"rgb24", IMGFMT_RGB24},
   {"rgb32", IMGFMT_RGB32},
   {"rgb16", IMGFMT_RGB16},
   {"rgb15", IMGFMT_RGB15},
+  {"rgb12", IMGFMT_RGB12},
   {"rgb8", IMGFMT_RGB8},
   {"rgb4", IMGFMT_RGB4},
   {"rg4b", IMGFMT_RG4B},
@@ -1048,10 +1156,19 @@ static struct {
   {"argb", IMGFMT_ARGB},
   {"bgra", IMGFMT_BGRA},
   {"abgr", IMGFMT_ABGR},
+  {"xyz12be",  IMGFMT_XYZ12LE},
+  {"xyz12le",  IMGFMT_XYZ12BE},
+  {"gbr14pbe", IMGFMT_GBR14PLE},
+  {"gbr14ple", IMGFMT_GBR14PBE},
+  {"gbr12pbe", IMGFMT_GBR12PLE},
+  {"gbr12ple", IMGFMT_GBR12PBE},
+  {"gbr24p", IMGFMT_GBR24P},
+  {"mjpeg", IMGFMT_MJPEG},
+  {"mjpg", IMGFMT_MJPEG},
   { NULL, 0 }
 };
 
-static int parse_imgfmt(m_option_t* opt,char *name, char *param, void* dst, int src) {
+static int parse_imgfmt(const m_option_t* opt,const char *name, const char *param, void* dst, int src) {
   uint32_t fmt = 0;
   int i;
 
@@ -1065,7 +1182,7 @@ static int parse_imgfmt(m_option_t* opt,char *name, char *param, void* dst, int 
     mp_msg(MSGT_CFGPARSER, MSGL_INFO, "\n");
     return M_OPT_EXIT - 1;
   }
-  
+
   if (sscanf(param, "0x%x", &fmt) != 1)
   {
   for(i = 0 ; mp_imgfmt_list[i].name ; i++) {
@@ -1086,7 +1203,7 @@ static int parse_imgfmt(m_option_t* opt,char *name, char *param, void* dst, int 
   return 1;
 }
 
-m_option_type_t m_option_type_imgfmt = {
+const m_option_type_t m_option_type_imgfmt = {
   "Image format",
   "Please report any missing colorspaces.",
   sizeof(uint32_t),
@@ -1110,7 +1227,9 @@ static struct {
   {"mulaw", AF_FORMAT_MU_LAW},
   {"alaw", AF_FORMAT_A_LAW},
   {"mpeg2", AF_FORMAT_MPEG2},
-  {"ac3", AF_FORMAT_AC3},
+  {"ac3le", AF_FORMAT_AC3_LE},
+  {"ac3be", AF_FORMAT_AC3_BE},
+  {"ac3ne", AF_FORMAT_AC3_NE},
   {"imaadpcm", AF_FORMAT_IMA_ADPCM},
   // ORIDNARY
   {"u8", AF_FORMAT_U8},
@@ -1139,7 +1258,7 @@ static struct {
   { NULL, 0 }
 };
 
-static int parse_afmt(m_option_t* opt,char *name, char *param, void* dst, int src) {
+static int parse_afmt(const m_option_t* opt,const char *name, const char *param, void* dst, int src) {
   uint32_t fmt = 0;
   int i;
 
@@ -1153,7 +1272,7 @@ static int parse_afmt(m_option_t* opt,char *name, char *param, void* dst, int sr
     mp_msg(MSGT_CFGPARSER, MSGL_INFO, "\n");
     return M_OPT_EXIT - 1;
   }
-  
+
   if (sscanf(param, "0x%x", &fmt) != 1)
   {
   for(i = 0 ; mp_afmt_list[i].name ; i++) {
@@ -1174,7 +1293,7 @@ static int parse_afmt(m_option_t* opt,char *name, char *param, void* dst, int sr
   return 1;
 }
 
-m_option_type_t m_option_type_afmt = {
+const m_option_type_t m_option_type_afmt = {
   "Audio format",
   "Please report any missing formats.",
   sizeof(uint32_t),
@@ -1188,46 +1307,53 @@ m_option_type_t m_option_type_afmt = {
 };
 
 
-static double parse_timestring(char *str)
+int parse_timestring(const char *str, double *time, char endchar)
 {
-  int a, b;
+  int a, b, len;
   double d;
-  if (sscanf(str, "%d:%d:%lf", &a, &b, &d) == 3)
-    return 3600*a + 60*b + d;
-  else if (sscanf(str, "%d:%lf", &a, &d) == 2)
-    return 60*a + d;
-  else if (sscanf(str, "%lf", &d) == 1)
-    return d;
-  return -1e100;
+  *time = 0; /* ensure initialization for error cases */
+  if (sscanf(str, "%d:%d:%lf%n", &a, &b, &d, &len) >= 3)
+    *time = 3600*a + 60*b + d;
+  else if (sscanf(str, "%d:%lf%n", &a, &d, &len) >= 2)
+    *time = 60*a + d;
+  else if (sscanf(str, "%lf%n", &d, &len) >= 1)
+    *time = d;
+  else if (strncasecmp(str, "nopts", 5) == 0) {
+    *time = MP_NOPTS_VALUE;
+    len = 5;
+  } else
+    return 0; /* unsupported time format */
+  if (str[len] && str[len] != endchar)
+    return 0; /* invalid extra characters at the end */
+  return len;
 }
-    
 
-static int parse_time(m_option_t* opt,char *name, char *param, void* dst, int src)
+
+static int parse_time(const m_option_t* opt,const char *name, const char *param, void* dst, int src)
 {
   double time;
 
   if (param == NULL || strlen(param) == 0)
     return M_OPT_MISSING_PARAM;
-  
-  time = parse_timestring(param);
-  if (time == -1e100) {
+
+  if (!parse_timestring(param, &time, 0)) {
     mp_msg(MSGT_CFGPARSER, MSGL_ERR, "Option %s: invalid time: '%s'\n",
            name,param);
     return M_OPT_INVALID;
   }
-  
+
   if (dst)
     *(double *)dst = time;
   return 1;
 }
 
-m_option_type_t m_option_type_time = {
+const m_option_type_t m_option_type_time = {
   "Time",
   "",
   sizeof(double),
   0,
   parse_time,
-  NULL,
+  print_double,
   copy_opt,
   copy_opt,
   NULL,
@@ -1237,14 +1363,14 @@ m_option_type_t m_option_type_time = {
 
 // Time or size (-endpos)
 
-static int parse_time_size(m_option_t* opt,char *name, char *param, void* dst, int src) {
+static int parse_time_size(const m_option_t* opt,const char *name, const char *param, void* dst, int src) {
   m_time_size_t ts;
   char unit[4];
   double end_at;
 
   if (param == NULL || strlen(param) == 0)
     return M_OPT_MISSING_PARAM;
-  
+
   ts.pos=0;
   /* End at size parsing */
   if(sscanf(param, "%lf%3s", &end_at, unit) == 2) {
@@ -1268,12 +1394,12 @@ static int parse_time_size(m_option_t* opt,char *name, char *param, void* dst, i
 
   /* End at time parsing. This has to be last because the parsing accepts
    * even a number followed by garbage */
-  if ((end_at = parse_timestring(param)) == -1e100) {
+  if (!parse_timestring(param, &end_at, 0)) {
     mp_msg(MSGT_CFGPARSER, MSGL_ERR, "Option %s: invalid time or size: '%s'\n",
            name,param);
     return M_OPT_INVALID;
   }
-  
+
   ts.type = END_AT_TIME;
   ts.pos  = end_at;
 out:
@@ -1282,7 +1408,7 @@ out:
   return 1;
 }
 
-m_option_type_t m_option_type_time_size = {
+const m_option_type_t m_option_type_time_size = {
   "Time or size",
   "",
   sizeof(m_time_size_t),
@@ -1295,7 +1421,7 @@ m_option_type_t m_option_type_time_size = {
   NULL
 };
 
- 
+
 //// Objects (i.e. filters, etc) settings
 
 #include "m_struct.h"
@@ -1303,7 +1429,7 @@ m_option_type_t m_option_type_time_size = {
 #undef VAL
 #define VAL(x) (*(m_obj_settings_t**)(x))
 
-static int find_obj_desc(char* name,m_obj_list_t* l,m_struct_t** ret) {
+static int find_obj_desc(const char* name,const m_obj_list_t* l,const m_struct_t** ret) {
   int i;
   char* n;
 
@@ -1317,10 +1443,10 @@ static int find_obj_desc(char* name,m_obj_list_t* l,m_struct_t** ret) {
   return 0;
 }
 
-static int get_obj_param(const char* opt_name,const char* obj_name, m_struct_t* desc,
+static int get_obj_param(const char* opt_name,const char* obj_name, const m_struct_t* desc,
 			 char* str,int* nold,int oldmax,char** dst) {
   char* eq;
-  m_option_t* opt;
+  const m_option_t* opt;
   int r;
 
   eq = strchr(str,'=');
@@ -1371,7 +1497,7 @@ static int get_obj_param(const char* opt_name,const char* obj_name, m_struct_t* 
 }
 
 static int get_obj_params(const char* opt_name, const char* name,char* params,
-			  m_struct_t* desc,char separator, char*** _ret) {
+			  const m_struct_t* desc,char separator, char*** _ret) {
   int n = 0,nold = 0, nopts,r;
   char* ptr,*last_ptr = params;
   char** ret;
@@ -1384,7 +1510,7 @@ static int get_obj_params(const char* opt_name, const char* name,char* params,
     }
     printf("\n Name                 Type            Min        Max\n\n");
     for(n = 0 ; desc->fields[n].name ; n++) {
-      m_option_t* opt = &desc->fields[n];
+      const m_option_t* opt = &desc->fields[n];
       if(opt->type->flags & M_OPT_TYPE_HAS_CHILD) continue;
       if(opt->flags & M_OPT_MIN)
 	sprintf(min,"%-8.0f",opt->min);
@@ -1443,7 +1569,7 @@ static int get_obj_params(const char* opt_name, const char* name,char* params,
   ret = malloc((n+2)*2*sizeof(char*));
   n = nold = 0;
   last_ptr = params;
-  
+
   while(last_ptr && last_ptr[0] != '\0') {
     ptr = strchr(last_ptr,separator);
     if(!ptr) {
@@ -1461,25 +1587,26 @@ static int get_obj_params(const char* opt_name, const char* name,char* params,
     n++;
     last_ptr = ptr+1;
   }
-  ret[n*2] = ret[n*2+1] = NULL;  
+  ret[n*2] = ret[n*2+1] = NULL;
   *_ret = ret;
-  
+
   return 1;
 }
 
-static int parse_obj_params(m_option_t* opt,char *name,
-			    char *param, void* dst, int src) {
+static int parse_obj_params(const m_option_t* opt,const char *name,
+			    const char *param, void* dst, int src) {
   char** opts;
   int r;
   m_obj_params_t* p = opt->priv;
-  m_struct_t* desc;
-  char* cpy = strdup(param);
-  
+  const m_struct_t* desc;
+  char* cpy;
+
   // We need the object desc
   if(!p)
     return M_OPT_INVALID;
-  
+
   desc = p->desc;
+  cpy = strdup(param);
   r = get_obj_params(name,desc->name,cpy,desc,p->separator,dst ? &opts : NULL);
   free(cpy);
   if(r < 0)
@@ -1492,11 +1619,11 @@ static int parse_obj_params(m_option_t* opt,char *name,
   for(r = 0 ; opts[r] ; r += 2)
     m_struct_set(desc,dst,opts[r],opts[r+1]);
 
-  return 1;     
+  return 1;
 }
 
 
-m_option_type_t m_option_type_obj_params = {
+const m_option_type_t m_option_type_obj_params = {
   "Object params",
   "",
   0,
@@ -1512,30 +1639,30 @@ m_option_type_t m_option_type_obj_params = {
 /// Some predefined types as a definition would be quite lengthy
 
 /// Span arguments
-static m_span_t m_span_params_dflts = { -1, -1 };
-static m_option_t m_span_params_fields[] = {
+static const m_span_t m_span_params_dflts = { -1, -1 };
+static const m_option_t m_span_params_fields[] = {
   {"start", M_ST_OFF(m_span_t,start), CONF_TYPE_INT, M_OPT_MIN, 1 ,0, NULL},
   {"end", M_ST_OFF(m_span_t,end), CONF_TYPE_INT, M_OPT_MIN , 1 ,0, NULL},
   { NULL, NULL, 0, 0, 0, 0,  NULL }
 };
-static struct m_struct_st m_span_opts = {
+static const struct m_struct_st m_span_opts = {
   "m_span",
   sizeof(m_span_t),
   &m_span_params_dflts,
   m_span_params_fields
 };
-m_obj_params_t m_span_params_def = {
+const m_obj_params_t m_span_params_def = {
   &m_span_opts,
   '-'
 };
 
-static int parse_obj_settings(char* opt,char* str,m_obj_list_t* list,
+static int parse_obj_settings(const char* opt,char* str,const m_obj_list_t* list,
 			      m_obj_settings_t **_ret, int ret_n) {
   int r;
   char *param,**plist = NULL;
-  m_struct_t* desc;
+  const m_struct_t* desc;
   m_obj_settings_t *ret = _ret ? *_ret : NULL;
-  
+
 
   // Now check that the object exists
   param = strchr(str,'=');
@@ -1579,13 +1706,11 @@ static int parse_obj_settings(char* opt,char* str,m_obj_list_t* list,
   return 1;
 }
 
-static void free_obj_settings_list(void* dst);
-
-static int obj_settings_list_del(char *opt_name,char *param,void* dst, int src) {
+static int obj_settings_list_del(const char *opt_name,const char *param,void* dst, int src) {
   char** str_list = NULL;
   int r,i,idx_max = 0;
   char* rem_id = "_removed_marker_";
-  m_option_t list_opt = {opt_name , NULL, CONF_TYPE_STRING_LIST,
+  const m_option_t list_opt = {opt_name , NULL, CONF_TYPE_STRING_LIST,
 			   0, 0, 0, NULL };
   m_obj_settings_t* obj_list = dst ? VAL(dst) : NULL;
 
@@ -1639,8 +1764,25 @@ static int obj_settings_list_del(char *opt_name,char *param,void* dst, int src) 
   return 1;
 }
 
-static int parse_obj_settings_list(m_option_t* opt,char *name,
-				   char *param, void* dst, int src) {
+static void free_obj_settings_list(void* dst) {
+  int n;
+  m_obj_settings_t *d;
+
+  if (!dst || !VAL(dst)) return;
+
+  d = VAL(dst);
+#ifndef NO_FREE
+  for (n = 0 ; d[n].name ; n++) {
+    free(d[n].name);
+    free_str_list(&(d[n].attribs));
+  }
+  free(d);
+#endif
+  VAL(dst) = NULL;
+}
+
+static int parse_obj_settings_list(const m_option_t* opt,const char *name,
+				   const char *param, void* dst, int src) {
   int n = 0,r,len = strlen(opt->name);
   char *str;
   char *ptr, *last_ptr;
@@ -1652,7 +1794,7 @@ static int parse_obj_settings_list(m_option_t* opt,char *name,
     return M_OPT_INVALID;
 
   if(opt->name[len-1] == '*' && ((int)strlen(name) > len - 1)) {
-    char* n = &name[len-1];
+    const char* n = &name[len-1];
     if(strcasecmp(n,"-add") == 0)
       op = OP_ADD;
     else if(strcasecmp(n,"-pre") == 0)
@@ -1676,7 +1818,7 @@ static int parse_obj_settings_list(m_option_t* opt,char *name,
 	     " Negative index can be used (i.e. -1 is the last element)\n\n"
 	     "  %s-clr\n"
 	     " Clear the current list.\n",name,n,prefix,prefix,prefix,prefix);
-      
+
       return M_OPT_UNKNOWN;
     }
   }
@@ -1748,10 +1890,10 @@ static int parse_obj_settings_list(m_option_t* opt,char *name,
   if(n == 0)
     return M_OPT_INVALID;
 
-  if( ((opt->flags & M_OPT_MIN) && (n < opt->min)) || 
+  if( ((opt->flags & M_OPT_MIN) && (n < opt->min)) ||
       ((opt->flags & M_OPT_MAX) && (n > opt->max)) )
     return M_OPT_OUT_OF_RANGE;
-  
+
   if(dst) {
     if(queue) {
       int qsize;
@@ -1770,30 +1912,13 @@ static int parse_obj_settings_list(m_option_t* opt,char *name,
       memcpy(&head[hsize],res,(n+1)*sizeof(m_obj_settings_t));
       free(res);
       res = head;
-    }      
+    }
     VAL(dst) = res;
   }
   return 1;
 }
 
-static void free_obj_settings_list(void* dst) {
-  int n;
-  m_obj_settings_t *d;
-
-  if(!dst || !VAL(dst)) return;
-
-  d = VAL(dst);
-#ifndef NO_FREE
-  for(n = 0 ; d[n].name ; n++) {
-    free(d[n].name);
-    free_str_list(&(d[n].attribs));
-  }
-  free(d);
-#endif
-  VAL(dst) = NULL;
-}
-
-static void copy_obj_settings_list(m_option_t* opt,void* dst, void* src) {
+static void copy_obj_settings_list(const m_option_t* opt,void* dst, const void* src) {
   m_obj_settings_t *d,*s;
   int n;
 
@@ -1805,9 +1930,9 @@ static void copy_obj_settings_list(m_option_t* opt,void* dst, void* src) {
   if(VAL(dst))
     free_obj_settings_list(dst);
   if(!s) return;
-    
-    
-  
+
+
+
   for(n = 0 ; s[n].name ; n++)
     /* NOP */;
   d = malloc((n+1)*sizeof(m_obj_settings_t));
@@ -1821,7 +1946,7 @@ static void copy_obj_settings_list(m_option_t* opt,void* dst, void* src) {
   VAL(dst) = d;
 }
 
-m_option_type_t m_option_type_obj_settings_list = {
+const m_option_type_t m_option_type_obj_settings_list = {
   "Object settings list",
   "",
   sizeof(m_obj_settings_t*),
@@ -1836,12 +1961,12 @@ m_option_type_t m_option_type_obj_settings_list = {
 
 
 
-static int parse_obj_presets(m_option_t* opt,char *name,
-			    char *param, void* dst, int src) {
+static int parse_obj_presets(const m_option_t* opt,const char *name,
+			    const char *param, void* dst, int src) {
   m_obj_presets_t* obj_p = (m_obj_presets_t*)opt->priv;
-  m_struct_t *in_desc,*out_desc;
+  const m_struct_t *in_desc,*out_desc;
   int s,i;
-  unsigned char* pre;
+  const unsigned char* pre;
   char* pre_name = NULL;
 
   if(!obj_p) {
@@ -1859,8 +1984,8 @@ static int parse_obj_presets(m_option_t* opt,char *name,
 
   if(!strcmp(param,"help")) {
     mp_msg(MSGT_CFGPARSER, MSGL_INFO, "Available presets for %s->%s:",out_desc->name,name);
-    for(pre = obj_p->presets;(pre_name = M_ST_MB(char*,pre,obj_p->name_off)) ; 
-	pre +=  s) 
+    for(pre = obj_p->presets;(pre_name = M_ST_MB(char*,pre,obj_p->name_off)) ;
+	pre +=  s)
       mp_msg(MSGT_CFGPARSER, MSGL_ERR, " %s",pre_name);
     mp_msg(MSGT_CFGPARSER, MSGL_ERR, "\n");
     return M_OPT_EXIT - 1;
@@ -1873,17 +1998,17 @@ static int parse_obj_presets(m_option_t* opt,char *name,
   if(!pre_name) {
     mp_msg(MSGT_CFGPARSER, MSGL_ERR, "Option %s: There is no preset named %s\n"
 	   "Available presets are:",name,param);
-    for(pre = obj_p->presets;(pre_name = M_ST_MB(char*,pre,obj_p->name_off)) ; 
-	pre +=  s) 
+    for(pre = obj_p->presets;(pre_name = M_ST_MB(char*,pre,obj_p->name_off)) ;
+	pre +=  s)
       mp_msg(MSGT_CFGPARSER, MSGL_ERR, " %s",pre_name);
     mp_msg(MSGT_CFGPARSER, MSGL_ERR, "\n");
     return M_OPT_INVALID;
   }
 
   if(!dst) return 1;
-  
+
   for(i = 0 ; in_desc->fields[i].name ; i++) {
-    m_option_t* out_opt = m_option_list_find(out_desc->fields,
+    const m_option_t* out_opt = m_option_list_find(out_desc->fields,
 					     in_desc->fields[i].name);
     if(!out_opt) {
       mp_msg(MSGT_CFGPARSER, MSGL_ERR, "Option %s: Unable to find the target option for field %s.\nPlease report this to the developers.\n",name,in_desc->fields[i].name);
@@ -1895,7 +2020,7 @@ static int parse_obj_presets(m_option_t* opt,char *name,
 }
 
 
-m_option_type_t m_option_type_obj_presets = {
+const m_option_type_t m_option_type_obj_presets = {
   "Object presets",
   "",
   0,
@@ -1908,12 +2033,12 @@ m_option_type_t m_option_type_obj_presets = {
   NULL
 };
 
-static int parse_custom_url(m_option_t* opt,char *name,
-			    char *url, void* dst, int src) {
+static int parse_custom_url(const m_option_t* opt,const char *name,
+			    const char *url, void* dst, int src) {
   int pos1, pos2, r, v6addr = 0;
   char *ptr1=NULL, *ptr2=NULL, *ptr3=NULL, *ptr4=NULL;
   m_struct_t* desc = opt->priv;
-  
+
   if(!desc) {
     mp_msg(MSGT_CFGPARSER, MSGL_ERR, "Option %s: Custom URL needs a pointer to a m_struct_t in the priv field.\n",name);
     return M_OPT_PARSER_ERR;
@@ -1959,7 +2084,7 @@ static int parse_custom_url(m_option_t* opt,char *name,
     ptr2 = NULL;
   }
   if( ptr2!=NULL ) {
-    
+
     // We got something, at least a username...
     if(!m_option_list_find(desc->fields,"username")) {
       mp_msg(MSGT_CFGPARSER, MSGL_WARN, "Option %s: This URL doesn't have a username part.\n",name);
@@ -1971,7 +2096,7 @@ static int parse_custom_url(m_option_t* opt,char *name,
 	if(!m_option_list_find(desc->fields,"password")) {
 	  mp_msg(MSGT_CFGPARSER, MSGL_WARN, "Option %s: This URL doesn't have a password part.\n",name);
 	  // skip
-	} else { // Username and password   
+	} else { // Username and password
 	  if(dst) {
 	    ptr3[0] = '\0';
 	    r = m_struct_set(desc,dst,"username",ptr1);
@@ -2016,7 +2141,7 @@ static int parse_custom_url(m_option_t* opt,char *name,
     ptr2 = ptr3;
     v6addr = 1;
   } else {
-    ptr2 = ptr1;  
+    ptr2 = ptr1;
   }
 
   // look if the port is given
@@ -2105,7 +2230,7 @@ static int parse_custom_url(m_option_t* opt,char *name,
 }
 
 /// TODO : Write the other needed funcs for 'normal' options
-m_option_type_t m_option_type_custom_url = {
+const m_option_type_t m_option_type_custom_url = {
   "Custom URL",
   "",
   0,
@@ -2116,4 +2241,4 @@ m_option_type_t m_option_type_custom_url = {
   NULL,
   NULL,
   NULL
-};	
+};

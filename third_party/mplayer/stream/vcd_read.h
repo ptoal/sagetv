@@ -1,24 +1,54 @@
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
+#ifndef MPLAYER_VCD_READ_H
+#define MPLAYER_VCD_READ_H
+
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#include <sys/ioctl.h>
+#include "mp_msg.h"
+#include "stream.h"
+#include "libavutil/intreadwrite.h"
 //=================== VideoCD ==========================
-#if	defined(linux) || defined(sun) || defined(__bsdi__)
 
 typedef struct mp_vcd_priv_st mp_vcd_priv_t;
 
-#if	defined(linux)
-#include <linux/cdrom.h>
-#elif	defined(sun)
+#ifdef sun
 #include <sys/cdio.h>
 static int sun_vcd_read(mp_vcd_priv_t*, int*);
-#elif	defined(__bsdi__)
+#elif defined(__bsdi__)
 #include <dvd.h>
+#else
+#include <linux/cdrom.h>
 #endif
 
 struct mp_vcd_priv_st {
   int fd;
   struct cdrom_tocentry entry;
   char buf[VCD_SECTOR_SIZE];
+  struct cdrom_tochdr tochdr;
+  unsigned int track;
 };
 
 static inline void vcd_set_msf(mp_vcd_priv_t* vcd, unsigned int sect){
+  sect += 150;
   vcd->entry.cdte_addr.msf.frame=sect%75;
   sect=sect/75;
   vcd->entry.cdte_addr.msf.second=sect%60;
@@ -29,10 +59,10 @@ static inline void vcd_set_msf(mp_vcd_priv_t* vcd, unsigned int sect){
 static inline unsigned int vcd_get_msf(mp_vcd_priv_t* vcd){
   return vcd->entry.cdte_addr.msf.frame +
         (vcd->entry.cdte_addr.msf.second+
-         vcd->entry.cdte_addr.msf.minute*60)*75;
+         vcd->entry.cdte_addr.msf.minute*60)*75 - 150;
 }
 
-int vcd_seek_to_track(mp_vcd_priv_t* vcd,int track){
+static int vcd_seek_to_track(mp_vcd_priv_t* vcd,int track){
   vcd->entry.cdte_format = CDROM_MSF;
   vcd->entry.cdte_track  = track;
   if (ioctl(vcd->fd, CDROMREADTOCENTRY, &vcd->entry)) {
@@ -42,14 +72,9 @@ int vcd_seek_to_track(mp_vcd_priv_t* vcd,int track){
   return VCD_SECTOR_DATA*vcd_get_msf(vcd);
 }
 
-int vcd_get_track_end(mp_vcd_priv_t* vcd,int track){
-  struct cdrom_tochdr tochdr;
-  if (ioctl(vcd->fd,CDROMREADTOCHDR,&tochdr)==-1) {
-    mp_msg(MSGT_STREAM,MSGL_ERR,"read CDROM toc header: %s\n",strerror(errno));
-    return -1;
-  }
+static int vcd_get_track_end(mp_vcd_priv_t* vcd,int track){
   vcd->entry.cdte_format = CDROM_MSF;
-  vcd->entry.cdte_track  = track<tochdr.cdth_trk1?(track+1):CDROM_LEADOUT;
+  vcd->entry.cdte_track  = track<vcd->tochdr.cdth_trk1?(track+1):CDROM_LEADOUT;
   if (ioctl(vcd->fd, CDROMREADTOCENTRY, &vcd->entry)) {
     mp_msg(MSGT_STREAM,MSGL_ERR,"ioctl dif2: %s\n",strerror(errno));
     return -1;
@@ -57,7 +82,7 @@ int vcd_get_track_end(mp_vcd_priv_t* vcd,int track){
   return VCD_SECTOR_DATA*vcd_get_msf(vcd);
 }
 
-mp_vcd_priv_t* vcd_read_toc(int fd){
+static mp_vcd_priv_t* vcd_read_toc(int fd){
   struct cdrom_tochdr tochdr;
   mp_vcd_priv_t* vcd;
   int i, min = 0, sec = 0, frame = 0;
@@ -77,7 +102,7 @@ mp_vcd_priv_t* vcd_read_toc(int fd){
 	mp_msg(MSGT_OPEN,MSGL_ERR,"read CDROM toc entry: %s\n",strerror(errno));
 	return NULL;
       }
-        
+
       if (i<=tochdr.cdth_trk1)
       mp_msg(MSGT_OPEN,MSGL_INFO,"track %02d:  adr=%d  ctrl=%d  format=%d  %02d:%02d:%02d  mode: %d\n",
           (int)tocentry.cdte_track,
@@ -116,18 +141,24 @@ mp_vcd_priv_t* vcd_read_toc(int fd){
     }
   vcd = malloc(sizeof(mp_vcd_priv_t));
   vcd->fd = fd;
+  vcd->tochdr = tochdr;
   return vcd;
 }
 
+static int vcd_end_track(mp_vcd_priv_t* vcd)
+{
+  return vcd->tochdr.cdth_trk1;
+}
+
 static int vcd_read(mp_vcd_priv_t* vcd,char *mem){
-#if	defined(linux) || defined(__bsdi__)
-  memcpy(vcd->buf,&vcd->entry.cdte_addr.msf,sizeof(struct cdrom_msf));
+#ifndef sun
+  memcpy(vcd->buf,&vcd->entry.cdte_addr.msf,sizeof(vcd->entry.cdte_addr.msf));
   if(ioctl(vcd->fd,CDROMREADRAW,vcd->buf)==-1) return 0; // EOF?
   memcpy(mem,&vcd->buf[VCD_SECTOR_OFFS],VCD_SECTOR_DATA);
-#elif	defined(sun)
+#else
   {
     int offset;
-    if (sun_vcd_read(vcd->fd, &offset) <= 0) return 0;
+    if (sun_vcd_read(vcd, &offset) <= 0) return 0;
     memcpy(mem,&vcd->buf[offset],VCD_SECTOR_DATA);
   }
 #endif
@@ -141,12 +172,12 @@ static int vcd_read(mp_vcd_priv_t* vcd,char *mem){
       vcd->entry.cdte_addr.msf.minute++;
     }
   }
-    
+
   return VCD_SECTOR_DATA;
 }
 
 
-#ifdef	sun
+#ifdef sun
 #include <sys/scsi/generic/commands.h>
 #include <sys/scsi/impl/uscsi.h>
 
@@ -163,7 +194,7 @@ static int sun_vcd_read(mp_vcd_priv_t* vcd, int *offset)
   cdxa.cdxa_length = 1;
   cdxa.cdxa_data = vcd->buf;
   cdxa.cdxa_format = CDROM_XA_SECTOR_DATA;
-  
+
   if(ioctl(vcd->fd,CDROMCDXA,&cdxa)==-1) {
     mp_msg(MSGT_STREAM,MSGL_ERR,"CDROMCDXA: %s\n",strerror(errno));
     return 0;
@@ -185,36 +216,15 @@ static int sun_vcd_read(mp_vcd_priv_t* vcd, int *offset)
   union scsi_cdb cdb;
   int lba = vcd_get_msf(vcd);
   int blocks = 1;
-  int sector_type;
-  int sync, header_code, user_data, edc_ecc, error_field;
-  int sub_channel;
-
-  /* sector_type = 3; *//* mode2 */
-  sector_type = 5;	/* mode2/form2 */
-  sync = 0;
-  header_code = 0;
-  user_data = 1;
-  edc_ecc = 0;
-  error_field = 0;
-  sub_channel = 0;
 
   memset(&cdb, 0, sizeof(cdb));
   memset(&sc, 0, sizeof(sc));
   cdb.scc_cmd = 0xBE;
-  cdb.cdb_opaque[1] = (sector_type) << 2;
-  cdb.cdb_opaque[2] = (lba >> 24) & 0xff;
-  cdb.cdb_opaque[3] = (lba >> 16) & 0xff;
-  cdb.cdb_opaque[4] = (lba >>  8) & 0xff;
-  cdb.cdb_opaque[5] =  lba & 0xff;
-  cdb.cdb_opaque[6] = (blocks >> 16) & 0xff;
-  cdb.cdb_opaque[7] = (blocks >>  8) & 0xff;
-  cdb.cdb_opaque[8] =  blocks & 0xff;
-  cdb.cdb_opaque[9] = (sync << 7) |
-		      (header_code << 5) |
-		      (user_data << 4) |
-		      (edc_ecc << 3) |
-		      (error_field << 1);
-  cdb.cdb_opaque[10] = sub_channel;
+  cdb.cdb_opaque[1] = 5 << 2; // mode2 / form2
+  AV_WB32(&cdb.cdb_opaque[2], lba);
+  AV_WB24(&cdb.cdb_opaque[6], blocks);
+  cdb.cdb_opaque[9] = 1 << 4; // user data only
+  cdb.cdb_opaque[10] = 0;     // subchannel
 
   sc.uscsi_cdb = (caddr_t)&cdb;
   sc.uscsi_cdblen = 12;
@@ -238,8 +248,4 @@ static int sun_vcd_read(mp_vcd_priv_t* vcd, int *offset)
 }
 #endif	/*sun*/
 
-#else /* linux || sun || __bsdi__ */
-
-#error vcd is not yet supported on this arch...
-
-#endif
+#endif /* MPLAYER_VCD_READ_H */

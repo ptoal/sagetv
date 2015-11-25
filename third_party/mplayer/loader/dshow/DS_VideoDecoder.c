@@ -7,19 +7,14 @@
 #include "config.h"
 #include "guids.h"
 #include "interfaces.h"
-#include "registry.h"
-
-#ifndef NOAVIFILE_HEADERS
-#include "videodecoder.h"
-#else
+#include "loader/registry.h"
 #include "libwin32.h"
-#endif
 #include "DS_Filter.h"
 
-struct _DS_VideoDecoder
+struct DS_VideoDecoder
 {
     IVideoDecoder iv;
-    
+
     DS_Filter* m_pDS_Filter;
     AM_MEDIA_TYPE m_sOurType, m_sDestType;
     VIDEOINFOHEADER* m_sVhdr;
@@ -35,26 +30,21 @@ static SampleProcUserData sampleProcData;
 
 #include "DS_VideoDecoder.h"
 
-#include "../wine/winerror.h"
+#include "loader/wine/winerror.h"
 #ifdef WIN32_LOADER
-#include "../ldt_keeper.h"
-#endif
-
-#ifndef NOAVIFILE_HEADERS
-#define VFW_E_NOT_RUNNING               0x80040226
-#include "fourcc.h"
-#include "except.h"
+#include "loader/ldt_keeper.h"
 #endif
 
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <sys/types.h>
-#ifndef __MINGW32__
+#if HAVE_SYS_MMAN_H
 #include <sys/mman.h>
 #endif
 #include <stdio.h>
 #include <stdlib.h>  // labs
+#include <strings.h>
 
 // strcmp((const char*)info.dll,...)  is used instead of  (... == ...)
 // so Arpi could use char* pointer in his simplified DS_VideoDecoder class
@@ -64,16 +54,16 @@ static SampleProcUserData sampleProcData;
 
 int DS_VideoDecoder_GetCapabilities(DS_VideoDecoder *this)
 {return this->m_Caps;}
-	    
-typedef struct _ct ct;
 
-struct _ct {
+typedef struct ct ct;
+
+struct ct {
 		unsigned int bits;
 		fourcc_t fcc;
 		const GUID *subtype;
 		int cap;
 	    };
-            
+
 static ct check[] = {
 		{16, fccYUY2, &MEDIASUBTYPE_YUY2, CAP_YUY2},
 		{12, fccIYUV, &MEDIASUBTYPE_IYUV, CAP_IYUV},
@@ -92,10 +82,10 @@ DS_VideoDecoder * DS_VideoDecoder_Open(char* dllname, GUID* guid, BITMAPINFOHEAD
     DS_VideoDecoder *this;
     HRESULT result;
     ct* c;
-                        
+
     this = malloc(sizeof(DS_VideoDecoder));
     memset( this, 0, sizeof(DS_VideoDecoder));
-    
+
     this->m_sVhdr2 = 0;
     this->m_iLastQuality = -1;
     this->m_iMaxAuto = maxauto;
@@ -109,10 +99,10 @@ DS_VideoDecoder * DS_VideoDecoder_Open(char* dllname, GUID* guid, BITMAPINFOHEAD
     /*try*/
     {
         unsigned int bihs;
-        
+
 	bihs = (format->biSize < (int) sizeof(BITMAPINFOHEADER)) ?
 	    sizeof(BITMAPINFOHEADER) : format->biSize;
-     
+
         this->iv.m_bh = malloc(bihs);
         memcpy(this->iv.m_bh, format, bihs);
         this->iv.m_bh->biSize = bihs;
@@ -124,7 +114,7 @@ DS_VideoDecoder * DS_VideoDecoder_Open(char* dllname, GUID* guid, BITMAPINFOHEAD
         this->iv.m_iPlaypos = -1;
         this->iv.m_fQuality = 0.0f;
         this->iv.m_bCapable16b = true;
-                
+
         bihs += sizeof(VIDEOINFOHEADER) - sizeof(BITMAPINFOHEADER);
 	this->m_sVhdr = malloc(bihs);
 	memset(this->m_sVhdr, 0, bihs);
@@ -146,7 +136,7 @@ DS_VideoDecoder * DS_VideoDecoder_Open(char* dllname, GUID* guid, BITMAPINFOHEAD
         this->m_sOurType.cbFormat = bihs;
         this->m_sOurType.pbFormat = (char*)this->m_sVhdr;
 
-	this->m_sVhdr2 = (VIDEOINFOHEADER*)(malloc(sizeof(VIDEOINFOHEADER)+12));
+	this->m_sVhdr2 = malloc(sizeof(VIDEOINFOHEADER)+12);
 	memcpy(this->m_sVhdr2, this->m_sVhdr, sizeof(VIDEOINFOHEADER));
         memset((char*)this->m_sVhdr2 + sizeof(VIDEOINFOHEADER), 0, 12);
 	this->m_sVhdr2->bmiHeader.biCompression = 0;
@@ -164,7 +154,7 @@ DS_VideoDecoder * DS_VideoDecoder_Open(char* dllname, GUID* guid, BITMAPINFOHEAD
 	this->m_sDestType.pUnk = 0;
 	this->m_sDestType.cbFormat = sizeof(VIDEOINFOHEADER);
 	this->m_sDestType.pbFormat = (char*)this->m_sVhdr2;
-        
+
         memset(&this->iv.m_obh, 0, sizeof(this->iv.m_obh));
 	memcpy(&this->iv.m_obh, this->iv.m_bh, sizeof(this->iv.m_obh) < (unsigned) this->iv.m_bh->biSize
 	       ? sizeof(this->iv.m_obh) : (unsigned) this->iv.m_bh->biSize);
@@ -177,7 +167,7 @@ DS_VideoDecoder * DS_VideoDecoder_Open(char* dllname, GUID* guid, BITMAPINFOHEAD
 
 
 	this->m_pDS_Filter = DS_FilterCreate(dllname, guid, &this->m_sOurType, &this->m_sDestType,&sampleProcData);
-	
+
 	if (!this->m_pDS_Filter)
 	{
 	    printf("Failed to create DirectShow filter\n");
@@ -218,7 +208,7 @@ DS_VideoDecoder * DS_VideoDecoder_Open(char* dllname, GUID* guid, BITMAPINFOHEAD
 	    break;
 #endif
 	default:
-              
+
 	    this->m_Caps = CAP_NONE;
 
 	    printf("Decoder supports the following YUV formats: ");
@@ -276,12 +266,11 @@ void DS_VideoDecoder_Destroy(DS_VideoDecoder *this)
 
 void DS_VideoDecoder_StartInternal(DS_VideoDecoder *this)
 {
-    ALLOCATOR_PROPERTIES props, props1;
     Debug printf("DS_VideoDecoder_StartInternal\n");
     //cout << "DSSTART" << endl;
     this->m_pDS_Filter->m_pAll->vt->Commit(this->m_pDS_Filter->m_pAll);
     this->m_pDS_Filter->Start(this->m_pDS_Filter);
-    
+
     this->iv.m_State = START;
 }
 
@@ -296,17 +285,17 @@ int DS_VideoDecoder_DecodeInternal(DS_VideoDecoder *this, const void* src, int s
     IMediaSample* sample = 0;
     char* ptr;
     int result;
-    
+
     Debug printf("DS_VideoDecoder_DecodeInternal(%p,%p,%d,%d,%p)\n",this,src,size,is_keyframe,pImage);
-            
+
     this->m_pDS_Filter->m_pAll->vt->GetBuffer(this->m_pDS_Filter->m_pAll, &sample, 0, 0, 0);
-    
+
     if (!sample)
     {
 	Debug printf("ERROR: null sample\n");
 	return -1;
     }
-    
+
     //cout << "DECODE " << (void*) pImage << "   d: " << (void*) pImage->Data() << endl;
 
 
@@ -420,15 +409,15 @@ int DS_VideoDecoder_SetDestFmt(DS_VideoDecoder *this, int bits, unsigned int csp
     HRESULT result;
     ALLOCATOR_PROPERTIES props,props1;
     int should_test=1;
-    int stoped = 0;   
-    
+    int stopped = 0;
+
     Debug printf("DS_VideoDecoder_SetDestFmt (%p, %d, %d)\n",this,bits,(int)csp);
-        
+
        /* if (!CImage::Supported(csp, bits))
 	return -1;
 */
     // BitmapInfo temp = m_obh;
-    
+
     if (!csp)	// RGB
     {
 	int ok = true;
@@ -462,7 +451,7 @@ int DS_VideoDecoder_SetDestFmt(DS_VideoDecoder *this, int bits, unsigned int csp
 	      this->iv.m_obh.biCompression=3;//BI_BITFIELDS
 	      this->iv.m_obh.biSizeImage=abs((int)(2*this->iv.m_obh.biWidth*this->iv.m_obh.biHeight));
 	    }
-            
+
             if( bits == 16 ) {
 	      this->iv.m_obh.colors[0]=0xF800;
 	      this->iv.m_obh.colors[1]=0x07E0;
@@ -596,7 +585,7 @@ int DS_VideoDecoder_SetDestFmt(DS_VideoDecoder *this, int bits, unsigned int csp
     {
 	DS_VideoDecoder_StopInternal(this);
         this->iv.m_State = STOP;
-        stoped = true;
+        stopped = true;
     }
 
     this->m_pDS_Filter->m_pInputPin->vt->Disconnect(this->m_pDS_Filter->m_pInputPin);
@@ -637,10 +626,10 @@ int DS_VideoDecoder_SetDestFmt(DS_VideoDecoder *this, int bits, unsigned int csp
 	return -1;
     }
 
-    if (stoped)
+    if (stopped)
     {
 	DS_VideoDecoder_StartInternal(this);
-        this->iv.m_State = START; 
+        this->iv.m_State = START;
     }
 
     return 0;
@@ -699,7 +688,7 @@ int DS_VideoDecoder_GetValue(DS_VideoDecoder *this, const char* name, int* value
 	IHidden* hidden=(IHidden*)((int)m_pDS_Filter->m_pFilter+0xb8);
 	if (strcmp(name, "Quality") == 0)
 	{
-#warning NOT SURE
+	    // NOT SURE
 	    int r = hidden->vt->GetSmth2(hidden, &value);
 	    if (value >= 10)
 		value -= 10;
@@ -727,7 +716,7 @@ int DS_VideoDecoder_GetValue(DS_VideoDecoder *this, const char* name, int* value
 	    Debug printf("No such interface\n");
 	    return -1;
 	}
-#warning FIXME
+	// FIXME
 	int recordpar[30];
 	recordpar[0]=0x7c;
 	recordpar[1]=fccIV50;
@@ -826,7 +815,7 @@ int DS_VideoDecoder_SetValue(DS_VideoDecoder *this, const char* name, int value)
 	}
         return 0;
     }
-#if 0    
+#if 0
     if (strcmp((const char*)record.dll, "ir50_32.dll") == 0)
     {
 	IHidden2* hidden = 0;
@@ -871,9 +860,6 @@ int DS_VideoDecoder_SetValue(DS_VideoDecoder *this, const char* name, int value)
 //    printf("DS_SetValue for ????, name=%s  value=%d\n",name,value);
     return 0;
 }
-/*
-vim: vi* sux.
-*/
 
 int DS_SetAttr_DivX(char* attribute, int value){
     int result, status, newkey;
@@ -884,23 +870,23 @@ int DS_SetAttr_DivX(char* attribute, int value){
 	    {
 	        printf("VideoDecoder::SetExtAttr: registry failure\n");
 	        return -1;
-	    }    
+	    }
 	    result=RegSetValueExA(newkey, "Current Post Process Mode", 0, REG_DWORD, &value, 4);
             if(result!=0)
 	    {
 	        printf("VideoDecoder::SetExtAttr: error writing value\n");
 	        return -1;
-	    }    
+	    }
 	    value=-1;
 	    result=RegSetValueExA(newkey, "Force Post Process Mode", 0, REG_DWORD, &value, 4);
             if(result!=0)
 	    {
 		printf("VideoDecoder::SetExtAttr: error writing value\n");
 	    	return -1;
-	    }    
+	    }
    	    RegCloseKey(newkey);
    	    return 0;
-	}   	
+	}
 
         if(
 	(strcasecmp(attribute, "Saturation")==0) ||
@@ -915,21 +901,17 @@ int DS_SetAttr_DivX(char* attribute, int value){
 	    {
 	        printf("VideoDecoder::SetExtAttr: registry failure\n");
 	        return -1;
-	    }    
+	    }
 	    result=RegSetValueExA(newkey, attribute, 0, REG_DWORD, &value, 4);
             if(result!=0)
 	    {
 	        printf("VideoDecoder::SetExtAttr: error writing value\n");
 	        return -1;
-	    }    
+	    }
    	    RegCloseKey(newkey);
    	    return 0;
-	}   	
+	}
 
         printf("Unknown attribute!\n");
         return -200;
 }
-
-
-
-

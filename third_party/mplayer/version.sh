@@ -2,17 +2,29 @@
 
 test "$1" && extra="-$1"
 
-svn_revision=`LC_ALL=C svn info 2> /dev/null | grep Revision | cut -d' ' -f2`
-test $svn_revision || svn_revision=`grep revision .svn/entries | \
-                                    cut -d '"' -f2 2> /dev/null`
-test $svn_revision || svn_revision=UNKNOWN
+# releases extract the version number from the VERSION file
+version=$(cat VERSION 2> /dev/null)
 
-NEW_REVISION="#define VERSION \"dev-SVN-r${svn_revision}${extra}\""
-OLD_REVISION=`cat version.h 2> /dev/null`
-TITLE="#define MP_TITLE \"MPlayer dev-SVN-r${svn_revision}${extra} (C) 2000-2007 MPlayer Team\""
+if test -z $version ; then
+# Extract revision number from file used by daily tarball snapshots
+# or from the places different Subversion versions have it.
+svn_revision=$(cat snapshot_version 2> /dev/null)
+test $svn_revision || svn_revision=$(LC_ALL=C svn info 2> /dev/null | grep Revision | cut -d' ' -f2)
+test $svn_revision || svn_revision=$(grep revision .svn/entries 2>/dev/null | cut -d '"' -f2)
+test $svn_revision || svn_revision=$(sed -n -e '/^dir$/{n;p;q;}' .svn/entries 2>/dev/null)
+test $svn_revision && svn_revision=SVN-r$svn_revision
+test $svn_revision || svn_revision=UNKNOWN
+version=$svn_revision
+fi
+
+NEW_REVISION="#define VERSION \"${version}${extra}\""
+OLD_REVISION=$(head -n 1 version.h 2> /dev/null)
+TITLE='#define MP_TITLE "%s "VERSION" (C) 2000-2015 MPlayer Team\n"'
 
 # Update version.h only on revision changes to avoid spurious rebuilds
 if test "$NEW_REVISION" != "$OLD_REVISION"; then
-    echo "$NEW_REVISION" > version.h
-    echo "$TITLE" >> version.h
+    cat <<EOF > version.h
+$NEW_REVISION
+$TITLE
+EOF
 fi

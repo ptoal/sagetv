@@ -15,16 +15,22 @@
 /*
  * Modified for use with MPlayer, detailed changelog at
  * http://svn.mplayerhq.hu/mplayer/trunk/
- * $Id: ldt_keeper.c,v 1.4 2007-04-10 19:33:29 Narflex Exp $
  */
 
+#define _BSD_SOURCE
+
+#include "config.h"
 #include "ldt_keeper.h"
 
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
 #include <fcntl.h>
+#if HAVE_SYS_MMAN_H
 #include <sys/mman.h>
+#else
+#include "osdep/mmap.h"
+#endif
 #include <sys/types.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -39,38 +45,26 @@
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,5,47)
 #define modify_ldt_ldt_s user_desc
 #endif
-/* prototype it here, so we won't depend on kernel headers */
-#ifdef  __cplusplus
-extern "C" {
-#endif
 /// declare modify_ldt with the _syscall3 macro for older glibcs
 #if defined(__GLIBC__) &&  (__GLIBC__ < 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ == 0))
 _syscall3( int, modify_ldt, int, func, void *, ptr, unsigned long, bytecount );
 #else
 int modify_ldt(int func, void *ptr, unsigned long bytecount);
 #endif
-#ifdef  __cplusplus
-}
-#endif
 #else
 #if defined(__NetBSD__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
 #include <machine/segments.h>
 #include <machine/sysarch.h>
-#endif
-
-#ifdef __svr4__
+#elif defined(__APPLE__)
+#include <architecture/i386/table.h>
+#include <i386/user_ldt.h>
+#elif defined(__svr4__)
 #include <sys/segment.h>
 #include <sys/sysi86.h>
 
 /* solaris x86: add missing prototype for sysi86(), but only when sysi86(int, void*) is known to be valid */
-#ifdef HAVE_SYSI86_iv
-#ifdef  __cplusplus
-extern "C" {
-#endif
+#if HAVE_SYSI86
 int sysi86(int, void*);
-#ifdef  __cplusplus
-}
-#endif
 #endif
 
 #ifndef NUMSYSLDTS             /* SunOS 2.5.1 does not define NUMSYSLDTS */
@@ -122,14 +116,11 @@ static unsigned int fs_ldt = TEB_SEL_IDX;
  * in C++ we use static class for this...
  */
 
-#ifdef __cplusplus
-extern "C"
-#endif
 void Setup_FS_Segment(void)
 {
     unsigned int ldt_desc = LDT_SEL(fs_ldt);
 
-    __asm__ __volatile__(
+    __asm__ volatile(
 	"movl %0,%%eax; movw %%ax, %%fs" : : "r" (ldt_desc)
 	:"eax"
     );
@@ -145,7 +136,7 @@ static int LDT_Modify( int func, struct modify_ldt_ldt_s *ptr,
 {
     int res;
 #ifdef __PIC__
-    __asm__ __volatile__( "pushl %%ebx\n\t"
+    __asm__ volatile( "pushl %%ebx\n\t"
 			  "movl %2,%%ebx\n\t"
 			  "int $0x80\n\t"
 			  "popl %%ebx"
@@ -156,7 +147,7 @@ static int LDT_Modify( int func, struct modify_ldt_ldt_s *ptr,
 			  "d"(16)//sizeof(*ptr) from kernel point of view
 			  :"esi"     );
 #else
-    __asm__ __volatile__("int $0x80"
+    __asm__ volatile("int $0x80"
 			 : "=a" (res)
 			 : "0" (__NR_modify_ldt),
 			 "b" (func),
@@ -193,7 +184,7 @@ ldt_fs_t* Setup_LDT_Keeper(void)
 {
     struct modify_ldt_ldt_s array;
     int ret;
-    ldt_fs_t* ldt_fs = (ldt_fs_t*) malloc(sizeof(ldt_fs_t));
+    ldt_fs_t* ldt_fs = malloc(sizeof(ldt_fs_t));
 
     if (!ldt_fs)
 	return NULL;
@@ -202,7 +193,7 @@ ldt_fs_t* Setup_LDT_Keeper(void)
     if (getenv("DYLD_BIND_AT_LAUNCH") == NULL)
         mp_msg(MSGT_LOADER, MSGL_WARN, MSGTR_LOADER_DYLD_Warning);
 #endif /* __APPLE__ */
-    
+
     fs_seg=
     ldt_fs->fs_seg = mmap_anon(NULL, getpagesize(), PROT_READ | PROT_WRITE, MAP_PRIVATE, 0);
     if (ldt_fs->fs_seg == (void*)-1)
@@ -229,9 +220,7 @@ ldt_fs_t* Setup_LDT_Keeper(void)
 	perror("install_fs");
 	printf("Couldn't install fs segment, expect segfault\n");
     }
-#endif /*linux*/
-
-#if defined(__NetBSD__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__DragonFly__) || defined(__APPLE__)
+#elif defined(__NetBSD__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__DragonFly__) || defined(__APPLE__)
     {
         unsigned long d[2];
 
@@ -253,9 +242,7 @@ ldt_fs_t* Setup_LDT_Keeper(void)
 #endif
         }
     }
-#endif  /* __NetBSD__ || __FreeBSD__ || __OpenBSD__ || __DragonFly__ || __APPLE__ */
-
-#if defined(__svr4__)
+#elif defined(__svr4__)
     {
 	struct ssd ssd;
 	ssd.sel = LDT_SEL(TEB_SEL_IDX);
@@ -270,6 +257,9 @@ ldt_fs_t* Setup_LDT_Keeper(void)
 	    printf("Couldn't install fs segment, expect segfault\n");
 	}
     }
+#elif defined(__OS2__)
+    /* convert flat addr to sel idx for LDT_SEL() */
+    fs_ldt = (uintptr_t)fs_seg >> 16;
 #endif
 
     Setup_FS_Segment();
@@ -284,8 +274,7 @@ void Restore_LDT_Keeper(ldt_fs_t* ldt_fs)
 {
     if (ldt_fs == NULL || ldt_fs->fs_seg == 0)
 	return;
-    if (ldt_fs->prev_struct)
-	free(ldt_fs->prev_struct);
+    free(ldt_fs->prev_struct);
     munmap((char*)ldt_fs->fs_seg, getpagesize());
     ldt_fs->fs_seg = 0;
     free(ldt_fs);

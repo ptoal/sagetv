@@ -1,24 +1,24 @@
-/* 
- *    video_out_3dfx.c
+/*
+ * video_out_3dfx.c
+ * Heavily based on video_out_mga.c of Aaron Holtzman's mpeg2dec.
  *
- *	Copyright (C) Colin Cross Apr 2000
+ * Copyright (C) Colin Cross Apr 2000
  *
- *  This file heavily based off of video_out_mga.c of Aaron Holtzman's
- *  mpeg2dec
- *	
- *  mpeg2dec is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2, or (at your option)
- *  any later version.
- *   
- *  mpeg2dec is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *   
- *  You should have received a copy of the GNU General Public License
- *  along with mpeg2dec; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include <stdio.h>
@@ -30,6 +30,7 @@
 #include "help_mp.h"
 #include "video_out.h"
 #include "video_out_internal.h"
+#include "x11_common.h"
 
 #include <sys/ioctl.h>
 #include <unistd.h>
@@ -50,7 +51,7 @@
 
 #include "fastmemcpy.h"
 
-static vo_info_t info = 
+static const vo_info_t info =
 {
 	"3dfx (/dev/3dfx)",
 	"3dfx",
@@ -58,7 +59,7 @@ static vo_info_t info =
 	""
 };
 
-LIBVO_EXTERN(3dfx)
+const LIBVO_EXTERN(3dfx)
 
 static uint32_t is_fullscreen = 1;
 
@@ -105,23 +106,23 @@ static XWindowAttributes attribs;
 static int fd=-1;
 
 
-static void 
-restore(void) 
+static void
+restore(void)
 {
 	//reg_IO->vidDesktopStartAddr = vidpage0offset;
 	XF86DGADirectVideo(display,0,0);
 }
 
-static void 
-sighup(int foo) 
+static void
+sighup(int foo)
 {
 	//reg_IO->vidDesktopStartAddr = vidpage0offset;
 	XF86DGADirectVideo(display,0,0);
 	exit(0);
 }
 
-static void 
-restore_regs(voodoo_2d_reg *regs) 
+static void
+restore_regs(voodoo_2d_reg *regs)
 {
 	reg_2d->commandExtra = regs->commandExtra;
 	reg_2d->clip0Min = regs->clip0Min;
@@ -140,8 +141,8 @@ restore_regs(voodoo_2d_reg *regs)
 	reg_2d->command = 0;
 }
 
-static uint32_t 
-create_window(Display *display, char *title) 
+static uint32_t
+create_window(Display *display, char *title)
 {
 	int screen;
 	unsigned int fg, bg;
@@ -166,7 +167,7 @@ create_window(Display *display, char *title)
 
 	XGetWindowAttributes(display, DefaultRootWindow(display), &attribs);
 	bpp = attribs.depth;
-	if (bpp != 16) 
+	if (bpp != 16)
 	{
 		mp_msg(MSGT_VO,MSGL_WARN, MSGTR_LIBVO_3DFX_Only16BppSupported);
 		exit(-1);
@@ -199,7 +200,7 @@ create_window(Display *display, char *title)
 	XMapWindow(display, mywindow);
 
 	/* Wait for map. */
-	do 
+	do
 	{
 		XNextEvent(display, &xev);
 	}
@@ -212,17 +213,17 @@ create_window(Display *display, char *title)
 	return 0;
 }
 
-static void 
-dump_yuv_planar(uint32_t *y, uint32_t *u, uint32_t *v, uint32_t to, uint32_t width, uint32_t height) 
+static void
+dump_yuv_planar(uint32_t *y, uint32_t *u, uint32_t *v, uint32_t to, uint32_t width, uint32_t height)
 {
 	// YUV conversion works like this:
 	//
 	//		 We write the Y, U, and V planes separately into 3dfx YUV Planar memory
 	//		 region.  The nice chip then takes these and packs them into the YUYV
 	//		 format in the regular frame buffer, starting at yuvBaseAddr, page 2 here.
-	//		 Then we tell the 3dfx to do a Screen to Screen Stretch BLT to copy all 
+	//		 Then we tell the 3dfx to do a Screen to Screen Stretch BLT to copy all
 	//		 of the data on page 2 onto page 1, converting it to 16 bpp RGB as it goes.
-	//		 The result is a nice image on page 1 ready for display. 
+	//		 The result is a nice image on page 1 ready for display.
 
 	uint32_t j;
 	uint32_t y_imax, uv_imax, jmax;
@@ -235,19 +236,19 @@ dump_yuv_planar(uint32_t *y, uint32_t *u, uint32_t *v, uint32_t to, uint32_t wid
 	y_imax = width; // Y plane is twice as wide as U and V planes
 	uv_imax = width>>1;  // vidwidth/2/4, width of U and V planes in 32-bit words
 
-	for (j=0;j<jmax;j++) 
+	for (j=0;j<jmax;j++)
 	{
 		//XXX this should be hand-rolled 32 bit memcpy for safeness.
-		memcpy(fb_YUV->U + (uint32_t) VOODOO_YUV_STRIDE*  j       ,((uint8_t*) u) + uv_imax*  j       , uv_imax);
-		memcpy(fb_YUV->V + (uint32_t) VOODOO_YUV_STRIDE*  j       ,((uint8_t*) v) + uv_imax*  j       , uv_imax);
-		memcpy(fb_YUV->Y + (uint32_t) VOODOO_YUV_STRIDE* (j<<1)   ,((uint8_t*) y) + y_imax * (j<<1)   , y_imax);
-		memcpy(fb_YUV->Y + (uint32_t) VOODOO_YUV_STRIDE*((j<<1)+1),((uint8_t*) y) + y_imax *((j<<1)+1), y_imax);
+		fast_memcpy(fb_YUV->U + (uint32_t) VOODOO_YUV_STRIDE*  j       ,((uint8_t*) u) + uv_imax*  j       , uv_imax);
+		fast_memcpy(fb_YUV->V + (uint32_t) VOODOO_YUV_STRIDE*  j       ,((uint8_t*) v) + uv_imax*  j       , uv_imax);
+		fast_memcpy(fb_YUV->Y + (uint32_t) VOODOO_YUV_STRIDE* (j<<1)   ,((uint8_t*) y) + y_imax * (j<<1)   , y_imax);
+		fast_memcpy(fb_YUV->Y + (uint32_t) VOODOO_YUV_STRIDE*((j<<1)+1),((uint8_t*) y) + y_imax *((j<<1)+1), y_imax);
 	}
   LOG("video_out_3dfx: done planar dump\n");
 }
 
-static void 
-screen_to_screen_stretch_blt(uint32_t to, uint32_t from, uint32_t width, uint32_t height) 
+static void
+screen_to_screen_stretch_blt(uint32_t to, uint32_t from, uint32_t width, uint32_t height)
 {
 	//FIXME - this function should be called by a show_frame function that
 	//        uses a series of blts to show only those areas not covered
@@ -288,8 +289,8 @@ screen_to_screen_stretch_blt(uint32_t to, uint32_t from, uint32_t width, uint32_
 	LOG("video_out_3dfx: done blt\n");
 }
 
-static void 
-update_target(void) 
+static void
+update_target(void)
 {
 	uint32_t xp, yp, w, h, b, d;
 	Window root;
@@ -301,14 +302,14 @@ update_target(void)
 	dispwidth = (uint32_t) w;
 	dispheight = (uint32_t) h;
 
-	if (is_fullscreen) 
+	if (is_fullscreen)
 		targetoffset = vidpage0offset + (screenheight - dispheight)/2*screenwidth*screendepth + (screenwidth-dispwidth)/2*screendepth;
-	else 
+	else
 		targetoffset = vidpage0offset + (dispy*screenwidth + dispx)*screendepth;
 }
 
-static int 
-config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uint32_t fullscreen, char *title, uint32_t format) 
+static int
+config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uint32_t fullscreen, char *title, uint32_t format)
 {
 	char *name = ":0.0";
 	pioData data;
@@ -332,7 +333,7 @@ config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uin
 	//alarm(120);
 
 	// Open driver device
-	if ( fd == -1 ) 
+	if ( fd == -1 )
 	{
 		mp_msg(MSGT_VO,MSGL_WARN, MSGTR_LIBVO_3DFX_UnableToOpenDevice);
 		return -1;
@@ -343,7 +344,7 @@ config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uin
 	vidheight = height;
 
 	is_fullscreen = fullscreen = 0;
-	if (!is_fullscreen) 
+	if (!is_fullscreen)
 		create_window(display, title);
 
 	// Ask 3dfx driver for base memory address 0
@@ -351,7 +352,7 @@ config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uin
 	data.size = 4;
 	data.value = &baseAddr0;
 	data.device = 0;
-	if ((retval = ioctl(fd,_IOC(_IOC_READ,'3',3,0),&data)) < 0) 
+	if ((retval = ioctl(fd,_IOC(_IOC_READ,'3',3,0),&data)) < 0)
 	{
 		mp_msg(MSGT_VO,MSGL_WARN, MSGTR_LIBVO_3DFX_Error,retval);
 		return -1;
@@ -362,7 +363,7 @@ config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uin
 	data.size = 4;
 	data.value = &baseAddr1;
 	data.device = 0;
-	if ((retval = ioctl(fd,_IOC(_IOC_READ,'3',3,0),&data)) < 0) 
+	if ((retval = ioctl(fd,_IOC(_IOC_READ,'3',3,0),&data)) < 0)
 	{
 		mp_msg(MSGT_VO,MSGL_WARN, MSGTR_LIBVO_3DFX_Error,retval);
 		return -1;
@@ -371,11 +372,11 @@ config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uin
 	// Map all 3dfx memory areas
 	memBase0 = mmap(0,0x1000000,PROT_READ | PROT_WRITE,MAP_SHARED,fd,baseAddr0);
 	memBase1 = mmap(0,3*page_space,PROT_READ | PROT_WRITE,MAP_SHARED,fd,baseAddr1);
-	if (memBase0 == (uint32_t *) 0xFFFFFFFF || memBase1 == (uint32_t *) 0xFFFFFFFF) 
+	if (memBase0 == (uint32_t *) 0xFFFFFFFF || memBase1 == (uint32_t *) 0xFFFFFFFF)
 	{
-		mp_msg(MSGT_VO,MSGL_WARN, MSGTR_LIBVO_3DFX_CouldntMapMemoryArea, 
+		mp_msg(MSGT_VO,MSGL_WARN, MSGTR_LIBVO_3DFX_CouldntMapMemoryArea,
 		 memBase0,memBase1,errno);
-	}  
+	}
 
 	// Set up global pointers
 	reg_IO  = (void *)memBase0 + VOODOO_IO_REG_OFFSET;
@@ -387,13 +388,13 @@ config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uin
 	vidpage1 = (void *)memBase1 + (unsigned long int)vidpage1offset;
 	vidpage2 = (void *)memBase1 + (unsigned long int)vidpage2offset;
 
-	// Clear pages 1,2,3 
+	// Clear pages 1,2,3
 	// leave page 0, that belongs to X.
 	// So does part of 1.  Oops.
 	memset(vidpage1,0x00,page_space);
 	memset(vidpage2,0x00,page_space);
 
-	if (is_fullscreen) 
+	if (is_fullscreen)
 		memset(vidpage0,0x00,page_space);
 
 
@@ -405,7 +406,7 @@ config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uin
 		 Find a better way to do this?
 		 Currently I use DGA to tell XF86 to not screw with registers, but I can't really use it
 		 to do FB stuff because I need to know the absolute FB position and offset FB position
-		 to feed to BLT command 
+		 to feed to BLT command
 	*/
 	//XF86DGADirectVideo(display,0,XF86DGADirectGraphics); //| XF86DGADirectMouse | XF86DGADirectKeyb);
 #endif
@@ -416,8 +417,8 @@ config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uin
 	return 0;
 }
 
-static int 
-draw_frame(uint8_t *src[]) 
+static int
+draw_frame(uint8_t *src[])
 {
 	LOG("video_out_3dfx: starting display_frame\n");
 
@@ -429,8 +430,8 @@ draw_frame(uint8_t *src[])
 	return 0;
 }
 
-static int 
-//draw_slice(uint8_t *src[], uint32_t slice_num) 
+static int
+//draw_slice(uint8_t *src[], uint32_t slice_num)
 draw_slice(uint8_t *src[], int stride[], int w,int h,int x,int y)
 {
 	uint32_t target;
@@ -444,8 +445,8 @@ static void draw_osd(void)
 {
 }
 
-static void 
-flip_page(void) 
+static void
+flip_page(void)
 {
 	//FIXME - update_target() should be called by event handler when window
 	//        is resized or moved
@@ -482,13 +483,13 @@ static void check_events(void)
 
 static int preinit(const char *arg)
 {
-    if ( (fd = open("/dev/3dfx",O_RDWR) ) == -1) 
+    if ( (fd = open("/dev/3dfx",O_RDWR) ) == -1)
     {
         mp_msg(MSGT_VO,MSGL_WARN, MSGTR_LIBVO_3DFX_UnableToOpenDevice);
         return -1;
     }
-                                                        
-    if(arg) 
+
+    if(arg)
     {
 	mp_msg(MSGT_VO,MSGL_WARN, MSGTR_LIBVO_3DFX_UnknownSubdevice,arg);
 	return ENOSYS;
@@ -496,7 +497,7 @@ static int preinit(const char *arg)
     return 0;
 }
 
-static int control(uint32_t request, void *data, ...)
+static int control(uint32_t request, void *data)
 {
   switch (request) {
   case VOCTRL_QUERY_FORMAT:

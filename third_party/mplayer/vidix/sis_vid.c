@@ -1,27 +1,27 @@
-/**
-    VIDIX driver for SiS 300 and 310/325 series chips.
-
-    Copyright 2003 Jake Page, Sugar Media.
-
-    Based on SiS Xv driver:
-    Copyright 2002-2003 by Thomas Winischhofer, Vienna, Austria.
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
-
-    2003/10/08 integrated into mplayer/vidix architecture -- Alex Beregszaszi
-**/
+/*
+ * VIDIX driver for SiS chipsets.
+ * Based on SiS Xv driver
+ *
+ * Copyright (C) 2003 Jake Page, Sugar Media
+ * Copyright 2002-2003 by Thomas Winischhofer, Vienna, Austria
+ * 2003/10/08 integrated into mplayer/vidix architecture -- Alex Beregszaszi
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <errno.h>
 #include <stdio.h>
@@ -30,14 +30,15 @@
 #include <inttypes.h>
 #include <unistd.h>
 
+#include "config.h"
 #include "vidix.h"
-#include "vidixlib.h"
 #include "fourcc.h"
-#include "../libdha/libdha.h"
-#include "../libdha/pci_ids.h"
-#include "../libdha/pci_names.h"
-#include "../config.h"
+#include "dha.h"
+#include "pci_ids.h"
+#include "pci_names.h"
+#include "mp_msg.h"
 
+#include "sis_bridge.h"
 #include "sis_regs.h"
 #include "sis_defs.h"
 
@@ -93,7 +94,7 @@ typedef struct {
 
     uint8_t lineBufSize;
 
-     uint8_t(*VBlankActiveFunc) ();
+     uint8_t(*VBlankActiveFunc)(void);
 
     uint16_t SCREENheight;
 
@@ -168,9 +169,6 @@ static unsigned short sis_card_ids[] = {
 
 /** function declarations **/
 
-extern void sis_init_video_bridge(void);
-
-
 static void set_overlay(SISOverlayPtr pOverlay, int index);
 static void close_overlay(void);
 static void calc_scale_factor(SISOverlayPtr pOverlay,
@@ -184,16 +182,13 @@ static void set_brightness(uint8_t brightness);
 static void set_contrast(uint8_t contrast);
 static void set_saturation(char saturation);
 static void set_hue(uint8_t hue);
-#if 0
-static void set_alpha(uint8_t alpha);
-#endif
 
 /* IO Port access functions */
 static uint8_t getvideoreg(uint8_t reg)
 {
     uint8_t ret;
     inSISIDXREG(SISVID, reg, ret);
-    return (ret);
+    return ret;
 }
 
 static void setvideoreg(uint8_t reg, uint8_t data)
@@ -223,7 +218,7 @@ static void setsrregmask(uint8_t reg, uint8_t data, uint8_t mask)
 static uint8_t vblank_active_CRT1(void)
 {
     /* this may be too simplistic? */
-    return (inSISREG(SISINPSTAT) & 0x08);
+    return inSISREG(SISINPSTAT) & 0x08;
 }
 
 static uint8_t vblank_active_CRT2(void)
@@ -234,7 +229,7 @@ static uint8_t vblank_active_CRT2(void)
     } else {
 	inSISIDXREG(SISPART1, Index_CRT2_FC_VR, ret);
     }
-    return ((ret & 0x02) ^ 0x02);
+    return (ret & 0x02) ^ 0x02;
 }
 
 static int find_chip(unsigned chip_id)
@@ -257,7 +252,7 @@ static int sis_probe(int verbose, int force)
     force = force;
     err = pci_scan(lst, &num_pci);
     if (err) {
-	printf("[SiS] Error occurred during pci scan: %s\n", strerror(err));
+	mp_msg(MSGT_VO, MSGL_STATUS, "[SiS] Error occurred during pci scan: %s\n", strerror(err));
 	return err;
     } else {
 	err = ENXIO;
@@ -271,7 +266,7 @@ static int sis_probe(int verbose, int force)
 		dname = pci_device_name(VENDOR_SIS, lst[i].device);
 		dname = dname ? dname : "Unknown chip";
 		if (sis_verbose > 0)
-		    printf("[SiS] Found chip: %s (0x%X)\n",
+		    mp_msg(MSGT_VO, MSGL_STATUS, "[SiS] Found chip: %s (0x%X)\n",
 			   dname, lst[i].device);
 		sis_device_id = sis_cap.device_id = lst[i].device;
 		err = 0;
@@ -282,18 +277,21 @@ static int sis_probe(int verbose, int force)
 		case DEVICE_SIS_300:
 		case DEVICE_SIS_630_VGA:
 		    sis_has_two_overlays = 1;
+                    /* Fallthrough, same as next otherwise */
 		case DEVICE_SIS_540_VGA:
 		    sis_vga_engine = SIS_300_VGA;
 		    break;
 		case DEVICE_SIS_330:
 		case DEVICE_SIS_550_VGA:
 		    sis_has_two_overlays = 1;
+                    /* Fallthrough, same as next otherwise */
 		case DEVICE_SIS_315H:
 		case DEVICE_SIS_315:
 		case DEVICE_SIS_315PRO:
 		case DEVICE_SIS_650_VGA:
 		    /* M650 & 651 have 2 overlays */
 		    /* JCP: I think this works, but not really tested yet */
+		    if (enable_app_io() == 0 )
 		    {
 			unsigned char CR5F;
 			unsigned char tempreg1, tempreg2;
@@ -315,9 +313,10 @@ static int sis_probe(int verbose, int force)
 			}
 			if (sis_has_two_overlays) {
 			    if (sis_verbose > 0)
-				printf
-				    ("[SiS] detected M650/651 with 2 overlays\n");
+				mp_msg(MSGT_VO, MSGL_STATUS,
+				    "[SiS] detected M650/651 with 2 overlays\n");
 			}
+			disable_app_io();
 		    }
 		    sis_vga_engine = SIS_315_VGA;
 		    break;
@@ -330,7 +329,7 @@ static int sis_probe(int verbose, int force)
 	}
     }
     if (err && sis_verbose) {
-	printf("[SiS] Can't find chip\n");
+	mp_msg(MSGT_VO, MSGL_STATUS, "[SiS] Can't find chip\n");
     } else {
 	sis_probed = 1;
     }
@@ -344,8 +343,14 @@ static int sis_init(void)
     char *env_overlay_crt;
 
     if (!sis_probed) {
-	printf("[SiS] driver was not probed but is being initialized\n");
-	return (EINTR);
+	mp_msg(MSGT_VO, MSGL_STATUS, "[SiS] driver was not probed but is being initialized\n");
+	return EINTR;
+    }
+
+    if (enable_app_io() != 0)
+    {
+      mp_msg(MSGT_VO, MSGL_STATUS, "[SiS] can't enable register I/O\n");
+      return EINTR;
     }
 
     /* JCP: this is WRONG.  Need to coordinate w/ sisfb to use correct mem */
@@ -372,14 +377,6 @@ static int sis_init(void)
     if (sr_data & 0x20)		/* interlaced mode */
 	sis_vmode |= VMODE_INTERLACED;
 
-#if 0				/* getting back false data here... */
-    /* CR9 bit 7 set = double scan active */
-    inSISIDXREG(SISCR, 0x09, cr_data);
-    if (cr_data & 0x40) {
-	sis_vmode |= VMODE_DOUBLESCAN;
-    }
-#endif
-
     /* JCP: eventually I'd like to replace this with a call to sisfb
        SISFB_GET_INFO ioctl to get video bridge info.  Not for now,
        since it requires a very new and not widely distributed version. */
@@ -391,8 +388,8 @@ static int sis_init(void)
 	if (crt == 1 || crt == 2) {
 	    sis_overlay_on_crt1 = (crt == 1);
 	    if (sis_verbose > 0) {
-		printf
-		    ("[SiS] override: using overlay on CRT%d from VIDIX_CRT\n",
+		mp_msg(MSGT_VO, MSGL_STATUS,
+		    "[SiS] override: using overlay on CRT%d from VIDIX_CRT\n",
 		     crt);
 	    }
 	}
@@ -406,6 +403,7 @@ static void sis_destroy(void)
     /* unmap_phys_mem(sis_reg_base, 0x20000); */
     /* JCP: see above, hence also a hack. */
     unmap_phys_mem(sis_mem_base, 0x1000000);
+    disable_app_io();
 }
 
 static int sis_get_caps(vidix_capability_t * to)
@@ -435,8 +433,7 @@ static int sis_query_fourcc(vidix_fourcc_t * to)
 	to->depth = VID_DEPTH_8BPP | VID_DEPTH_16BPP | VID_DEPTH_32BPP;
 	to->flags = VID_CAP_EXPAND | VID_CAP_SHRINK | VID_CAP_COLORKEY;
 	return 0;
-    } else
-	to->depth = to->flags = 0;
+    }
     return ENOSYS;
 }
 
@@ -489,7 +486,7 @@ static void set_disptype_regs(void)
     switch (sis_displaymode) {
     case DISPMODE_SINGLE1:	/* TW: CRT1 only */
 	if (sis_verbose > 2) {
-	    printf("[SiS] Setting up overlay on CRT1\n");
+	    mp_msg(MSGT_VO, MSGL_STATUS, "[SiS] Setting up overlay on CRT1\n");
 	}
 	if (sis_has_two_overlays) {
 	    setsrregmask(0x06, 0x00, 0xc0);
@@ -501,7 +498,7 @@ static void set_disptype_regs(void)
 	break;
     case DISPMODE_SINGLE2:	/* TW: CRT2 only */
 	if (sis_verbose > 2) {
-	    printf("[SiS] Setting up overlay on CRT2\n");
+	    mp_msg(MSGT_VO, MSGL_STATUS, "[SiS] Setting up overlay on CRT2\n");
 	}
 	if (sis_has_two_overlays) {
 	    setsrregmask(0x06, 0x80, 0xc0);
@@ -514,7 +511,7 @@ static void set_disptype_regs(void)
     case DISPMODE_MIRROR:	/* TW: CRT1 + CRT2 */
     default:
 	if (sis_verbose > 2) {
-	    printf("[SiS] Setting up overlay on CRT1 AND CRT2!\n");
+	    mp_msg(MSGT_VO, MSGL_STATUS, "[SiS] Setting up overlay on CRT1 AND CRT2!\n");
 	}
 	setsrregmask(0x06, 0x80, 0xc0);
 	setsrregmask(0x32, 0x80, 0xc0);
@@ -767,20 +764,6 @@ static int sis_config_playback(vidix_playback_t * info)
     /* FIXME: is it possible that srcW < 0? */
     overlay.srcW = src_w - (sx - src_x);
     overlay.srcH = src_h - (sy - src_y);
-
-    /* JCP: what to do about this? */
-#if 0
-    if ((pPriv->oldx1 != overlay.dstBox.x1) ||
-	(pPriv->oldx2 != overlay.dstBox.x2) ||
-	(pPriv->oldy1 != overlay.dstBox.y1) ||
-	(pPriv->oldy2 != overlay.dstBox.y2)) {
-	pPriv->mustwait = 1;
-	pPriv->oldx1 = overlay.dstBox.x1;
-	pPriv->oldx2 = overlay.dstBox.x2;
-	pPriv->oldy1 = overlay.dstBox.y1;
-	pPriv->oldy2 = overlay.dstBox.y2;
-    }
-#endif
 
     /* set merge line buffer */
     merge_line_buf(overlay.srcW > 384);
@@ -1046,7 +1029,7 @@ static void set_overlay(SISOverlayPtr pOverlay, int index)
 	watchdog = WATCHDOG_DELAY;
 	while ((!pOverlay->VBlankActiveFunc()) && --watchdog);
 	if (!watchdog && sis_verbose > 0) {
-	    printf("[SiS]: timed out waiting for vertical retrace\n");
+	    mp_msg(MSGT_VO, MSGL_STATUS, "[SiS]: timed out waiting for vertical retrace\n");
 	}
     }
 
@@ -1215,35 +1198,6 @@ calc_scale_factor(SISOverlayPtr pOverlay, int index, int iscrt2)
     index = index;
     iscrt2 = iscrt2;
 
-#if 0				/* JCP: don't bother with this for now. */
-    /* TW: Stretch image due to idiotic LCD "auto"-scaling on LVDS (and 630+301B) */
-    if (pSiS->VBFlags & CRT2_LCD) {
-	if (sis_bridge_is_slave) {
-	    if (pSiS->VBFlags & VB_LVDS) {
-		dstH = (dstH * LCDheight) / pOverlay->SCREENheight;
-	    } else if ((sis_vga_engine == SIS_300_VGA) &&
-		       (pSiS->
-			VBFlags & (VB_301B | VB_302B | VB_301LV |
-				   VB_302LV))) {
-		dstH = (dstH * LCDheight) / pOverlay->SCREENheight;
-	    }
-	} else if (iscrt2) {
-	    if (pSiS->VBFlags & VB_LVDS) {
-		dstH = (dstH * LCDheight) / pOverlay->SCREENheight;
-		if (sis_displaymode == DISPMODE_MIRROR)
-		    flag = 1;
-	    } else if ((sis_vga_engine == SIS_300_VGA) &&
-		       (pSiS->
-			VBFlags & (VB_301B | VB_302B | VB_301LV |
-				   VB_302LV))) {
-		dstH = (dstH * LCDheight) / pOverlay->SCREENheight;
-		if (sis_displaymode == DISPMODE_MIRROR)
-		    flag = 1;
-	    }
-	}
-    }
-#endif
-
     /* TW: For double scan modes, we need to double the height
      *     (Perhaps we also need to scale LVDS, but I'm not sure.)
      *     On 310/325 series, we need to double the width as well.
@@ -1319,13 +1273,6 @@ calc_scale_factor(SISOverlayPtr pOverlay, int index, int iscrt2)
 	    if ((flag) && (mult = (srcH / origdstH)) >= 2)
 		pOverlay->pitch /= mult;
 	} else {
-#if 0
-	    if (((pOverlay->bobEnable & 0x08) == 0x00) &&
-		(((srcPitch * i) >> 2) > 0xFFF)) {
-		pOverlay->bobEnable |= 0x08;
-		srcPitch >>= 1;
-	    }
-#endif
 	    if (((srcPitch * i) >> 2) > 0xFFF) {
 		i = (0xFFF * 2 / srcPitch);
 		pOverlay->VUSF = 0xFFFF;
@@ -1544,22 +1491,10 @@ static void set_hue(uint8_t hue)
     setvideoreg(Index_VI_Hue, (hue & 0x08) ? (hue ^ 0x07) : hue);
 }
 
-#if 0
-/* JCP: not used (I don't think it's correct anyway) */
-static void set_alpha(uint8_t alpha)
-{
-    uint8_t data;
-
-    data = getvideoreg(Index_VI_Key_Overlay_OP);
-    data &= 0x0F;
-    setvideoreg(Index_VI_Key_Overlay_OP, data | (alpha << 4));
-}
-#endif
-
 VDXDriver sis_drv = {
   "sis",
   NULL,
-    
+
   .probe = sis_probe,
   .get_caps = sis_get_caps,
   .query_fourcc = sis_query_fourcc,

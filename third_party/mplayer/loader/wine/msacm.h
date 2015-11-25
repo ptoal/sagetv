@@ -2,16 +2,12 @@
  *      msacm.h   -       Declarations for MSACM
  */
 
-#ifndef __WINE_MSACM_H
-#define __WINE_MSACM_H
+#ifndef MPLAYER_MSACM_H
+#define MPLAYER_MSACM_H
 
 #include "windef.h"
 #include "driver.h"
 #include "mmreg.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif /* defined(__cplusplus) */
 
 //typedef WORD    VERSION;        /* major (high byte), minor (low byte) */
 
@@ -242,7 +238,7 @@ typedef UINT16 CALLBACK ( *ACMFORMATCHOOSEHOOKPROC16)(
  * Structures
  */
 
-typedef struct _ACMDRIVERDETAILSA
+typedef struct ACMDRIVERDETAILSA
 {
   DWORD    cbStruct;
 
@@ -268,7 +264,7 @@ typedef struct _ACMDRIVERDETAILSA
   CHAR     szFeatures[ACMDRIVERDETAILS_FEATURES_CHARS];
 } ACMDRIVERDETAILSA, *PACMDRIVERDETAILSA;
 
-typedef struct _ACMDRIVERDETAILSW
+typedef struct ACMDRIVERDETAILSW
 {
   DWORD    cbStruct;
 
@@ -294,7 +290,7 @@ typedef struct _ACMDRIVERDETAILSW
   WCHAR    szFeatures[ACMDRIVERDETAILS_FEATURES_CHARS];
 } ACMDRIVERDETAILSW, *PACMDRIVERDETAILSW;
 
-typedef struct _ACMDRIVERDETAILS16
+typedef struct ACMDRIVERDETAILS16
 {
   DWORD   cbStruct;
 
@@ -320,7 +316,7 @@ typedef struct _ACMDRIVERDETAILS16
   CHAR    szFeatures[ACMDRIVERDETAILS_FEATURES_CHARS];
 } ACMDRIVERDETAILS16, *NPACMDRIVERDETAILS16, *LPACMDRIVERDETAILS16;
 
-typedef struct _ACMFILTERCHOOSEA
+typedef struct ACMFILTERCHOOSEA
 {
   DWORD         cbStruct;
   DWORD         fdwStyle;
@@ -339,14 +335,14 @@ typedef struct _ACMFILTERCHOOSEA
 
   DWORD         fdwEnum;
   PWAVEFILTER   pwfltrEnum;
-    
+
   HINSTANCE   hInstance;
   LPCSTR        pszTemplateName;
   LPARAM        lCustData;
   ACMFILTERCHOOSEHOOKPROCA pfnHook;
 } ACMFILTERCHOOSEA, *PACMFILTERCHOOSEA;
 
-typedef struct _ACMFILTERCHOOSEW
+typedef struct ACMFILTERCHOOSEW
 {
   DWORD         cbStruct;
   DWORD         fdwStyle;
@@ -365,14 +361,14 @@ typedef struct _ACMFILTERCHOOSEW
 
   DWORD         fdwEnum;
   PWAVEFILTER   pwfltrEnum;
-    
+
   HINSTANCE   hInstance;
   LPCWSTR       pszTemplateName;
   LPARAM        lCustData;
   ACMFILTERCHOOSEHOOKPROCW pfnHook;
 } ACMFILTERCHOOSEW, *PACMFILTERCHOOSEW;
 
-typedef struct _ACMFILTERCHOOSE16
+typedef struct ACMFILTERCHOOSE16
 {
   DWORD          cbStruct;
   DWORD          fdwStyle;
@@ -391,14 +387,14 @@ typedef struct _ACMFILTERCHOOSE16
 
   DWORD          fdwEnum;
   LPWAVEFILTER   pwfltrEnum;
-    
+
   HINSTANCE16    hInstance;
   LPCSTR         pszTemplateName;
   LPARAM         lCustData;
   ACMFILTERCHOOSEHOOKPROC16 pfnHook;
 } ACMFILTERCHOOSE16, *NPACMFILTERCHOOSE16, *LPACMFILTERCHOOSE16;
 
-typedef struct _ACMFILTERDETAILSA
+typedef struct ACMFILTERDETAILSA
 {
   DWORD           cbStruct;
   DWORD           dwFilterIndex;
@@ -409,7 +405,7 @@ typedef struct _ACMFILTERDETAILSA
   CHAR            szFilter[ACMFILTERDETAILS_FILTER_CHARS];
 } ACMFILTERDETAILSA, *PACMFILTERDETAILSA;
 
-typedef struct _ACMFILTERDETAILSW
+typedef struct ACMFILTERDETAILSW
 {
   DWORD          cbStruct;
   DWORD          dwFilterIndex;
@@ -420,7 +416,7 @@ typedef struct _ACMFILTERDETAILSW
   WCHAR          szFilter[ACMFILTERDETAILS_FILTER_CHARS];
 } ACMFILTERDETAILSW, *PACMFILTERDETAILSW;
 
-typedef struct _ACMFILTERDETAILS16
+typedef struct ACMFILTERDETAILS16
 {
   DWORD          cbStruct;
   DWORD          dwFilterIndex;
@@ -431,7 +427,7 @@ typedef struct _ACMFILTERDETAILS16
   CHAR           szFilter[ACMFILTERDETAILS_FILTER_CHARS];
 } ACMFILTERDETAILS16, *NPACMFILTERDETAILS16, *LPACMFILTERDETAILS16;
 
-typedef struct _ACMFILTERTAGDETAILSA
+typedef struct ACMFILTERTAGDETAILSA
 {
   DWORD cbStruct;
   DWORD dwFilterTagIndex;
@@ -442,7 +438,7 @@ typedef struct _ACMFILTERTAGDETAILSA
   CHAR  szFilterTag[ACMFILTERTAGDETAILS_FILTERTAG_CHARS];
 } ACMFILTERTAGDETAILSA, *PACMFILTERTAGDETAILSA;
 
-typedef struct _ACMFILTERTAGDETAILSW
+typedef struct ACMFILTERTAGDETAILSW
 {
   DWORD cbStruct;
   DWORD dwFilterTagIndex;
@@ -453,7 +449,7 @@ typedef struct _ACMFILTERTAGDETAILSW
   WCHAR szFilterTag[ACMFILTERTAGDETAILS_FILTERTAG_CHARS];
 } ACMFILTERTAGDETAILSW, *PACMFILTERTAGDETAILSW;
 
-typedef struct _ACMFILTERTAGDETAILS16
+typedef struct ACMFILTERTAGDETAILS16
 {
   DWORD cbStruct;
   DWORD dwFilterTagIndex;
@@ -464,85 +460,85 @@ typedef struct _ACMFILTERTAGDETAILS16
   CHAR  szFilterTag[ACMFILTERTAGDETAILS_FILTERTAG_CHARS];
 } ACMFILTERTAGDETAILS16, *NPACMFILTERTAGDETAILS16, *LPACMFILTERTAGDETAILS16;
 
-typedef struct _ACMFORMATCHOOSEA
+typedef struct ACMFORMATCHOOSEA
 {
   DWORD           cbStruct;
   DWORD           fdwStyle;
- 
+
   HWND          hwndOwner;
 
   PWAVEFORMATEX   pwfx;
   DWORD           cbwfx;
   LPCSTR          pszTitle;
-    
+
   CHAR            szFormatTag[ACMFORMATTAGDETAILS_FORMATTAG_CHARS];
-  CHAR            szFormat[ACMFORMATDETAILS_FORMAT_CHARS];    
+  CHAR            szFormat[ACMFORMATDETAILS_FORMAT_CHARS];
 
   LPSTR           pszName;
   DWORD           cchName;
 
   DWORD           fdwEnum;
   PWAVEFORMATEX   pwfxEnum;
-    
+
   HINSTANCE     hInstance;
   LPCSTR          pszTemplateName;
   LPARAM          lCustData;
   ACMFORMATCHOOSEHOOKPROCA pfnHook;
 } ACMFORMATCHOOSEA, *PACMFORMATCHOOSEA;
 
-typedef struct _ACMFORMATCHOOSEW
+typedef struct ACMFORMATCHOOSEW
 {
   DWORD           cbStruct;
   DWORD           fdwStyle;
-    
+
   HWND          hwndOwner;
 
   PWAVEFORMATEX   pwfx;
   DWORD           cbwfx;
   LPCWSTR         pszTitle;
-    
+
   WCHAR           szFormatTag[ACMFORMATTAGDETAILS_FORMATTAG_CHARS];
-  WCHAR           szFormat[ACMFORMATDETAILS_FORMAT_CHARS];    
+  WCHAR           szFormat[ACMFORMATDETAILS_FORMAT_CHARS];
 
   LPWSTR          pszName;
   DWORD           cchName;
 
   DWORD           fdwEnum;
   LPWAVEFORMATEX  pwfxEnum;
-    
+
   HINSTANCE     hInstance;
   LPCWSTR         pszTemplateName;
   LPARAM          lCustData;
   ACMFORMATCHOOSEHOOKPROCW pfnHook;
 } ACMFORMATCHOOSEW, *PACMFORMATCHOOSEW;
 
-typedef struct _ACMFORMATCHOOSE16
+typedef struct ACMFORMATCHOOSE16
 {
   DWORD            cbStruct;
   DWORD            fdwStyle;
-    
+
   HWND16           hwndOwner;
 
   LPWAVEFORMATEX   pwfx;
   DWORD            cbwfx;
   LPCSTR           pszTitle;
-    
+
   CHAR             szFormatTag[ACMFORMATTAGDETAILS_FORMATTAG_CHARS];
-  CHAR             szFormat[ACMFORMATDETAILS_FORMAT_CHARS];    
+  CHAR             szFormat[ACMFORMATDETAILS_FORMAT_CHARS];
 
   LPSTR            pszName;
   DWORD            cchName;
 
   DWORD            fdwEnum;
   LPWAVEFORMATEX   pwfxEnum;
-    
+
   HINSTANCE16      hInstance;
   LPCSTR           pszTemplateName;
   LPARAM           lCustData;
   ACMFORMATCHOOSEHOOKPROC16 pfnHook;
 } ACMFORMATCHOOSE16, *NPACMFORMATCHOOSE16, *LPACMFORMATCHOOSE16;
 
-typedef struct _ACMFORMATDETAILSA
+typedef struct ACMFORMATDETAILSA
 {
   DWORD           cbStruct;
   DWORD           dwFormatIndex;
@@ -553,7 +549,7 @@ typedef struct _ACMFORMATDETAILSA
   CHAR            szFormat[ACMFORMATDETAILS_FORMAT_CHARS];
 } ACMFORMATDETAILSA, *PACMFORMATDETAILSA;
 
-typedef struct _ACMFORMATDETAILSW
+typedef struct ACMFORMATDETAILSW
 {
     DWORD           cbStruct;
     DWORD           dwFormatIndex;
@@ -564,7 +560,7 @@ typedef struct _ACMFORMATDETAILSW
     WCHAR           szFormat[ACMFORMATDETAILS_FORMAT_CHARS];
 } ACMFORMATDETAILSW, *PACMFORMATDETAILSW;
 
-typedef struct _ACMFORMATDETAILS16
+typedef struct ACMFORMATDETAILS16
 {
     DWORD            cbStruct;
     DWORD            dwFormatIndex;
@@ -575,7 +571,7 @@ typedef struct _ACMFORMATDETAILS16
     CHAR             szFormat[ACMFORMATDETAILS_FORMAT_CHARS];
 } ACMFORMATDETAILS16, *NPACMFORMATDETAILS16, *LPACMFORMATDETAILS16;
 
-typedef struct _ACMFORMATTAGDETAILSA
+typedef struct ACMFORMATTAGDETAILSA
 {
   DWORD cbStruct;
   DWORD dwFormatTagIndex;
@@ -586,7 +582,7 @@ typedef struct _ACMFORMATTAGDETAILSA
   CHAR  szFormatTag[ACMFORMATTAGDETAILS_FORMATTAG_CHARS];
 } ACMFORMATTAGDETAILSA, *PACMFORMATTAGDETAILSA;
 
-typedef struct _ACMFORMATTAGDETAILSW
+typedef struct ACMFORMATTAGDETAILSW
 {
   DWORD cbStruct;
   DWORD dwFormatTagIndex;
@@ -597,7 +593,7 @@ typedef struct _ACMFORMATTAGDETAILSW
   WCHAR szFormatTag[ACMFORMATTAGDETAILS_FORMATTAG_CHARS];
 } ACMFORMATTAGDETAILSW, *PACMFORMATTAGDETAILSW;
 
-typedef struct _ACMFORMATTAGDETAILS16
+typedef struct ACMFORMATTAGDETAILS16
 {
   DWORD cbStruct;
   DWORD dwFormatTagIndex;
@@ -608,7 +604,7 @@ typedef struct _ACMFORMATTAGDETAILS16
   CHAR  szFormatTag[ACMFORMATTAGDETAILS_FORMATTAG_CHARS];
 } ACMFORMATTAGDETAILS16, *NPACMFORMATTAGDETAILS16, *LPACMFORMATTAGDETAILS16;
 
-typedef struct _ACMSTREAMHEADER
+typedef struct ACMSTREAMHEADER
 {
   DWORD  cbStruct;
   DWORD  fdwStatus;
@@ -694,6 +690,7 @@ typedef WIN_BOOL16 CALLBACK ( *ACMFORMATTAGENUMCB16)(
  */
 
 DWORD WINAPI acmGetVersion16(
+  void
 );
 MMRESULT16 WINAPI acmMetrics16(
   HACMOBJ16 hao, UINT16 uMetric, LPVOID pMetric
@@ -744,7 +741,7 @@ MMRESULT16 WINAPI acmFormatEnum16(
   ACMFORMATENUMCB16 fnCallback, DWORD dwInstance, DWORD fdwEnum
 );
 MMRESULT16 WINAPI acmFormatSuggest16(
-  HACMDRIVER16 had, LPWAVEFORMATEX pwfxSrc, 
+  HACMDRIVER16 had, LPWAVEFORMATEX pwfxSrc,
   LPWAVEFORMATEX pwfxDst, DWORD cbwfxDst, DWORD fdwSuggest
 );
 MMRESULT16 WINAPI acmFilterTagDetails16(
@@ -774,7 +771,7 @@ MMRESULT16 WINAPI acmStreamClose16(
   HACMSTREAM16 has, DWORD fdwClose
 );
 MMRESULT16 WINAPI acmStreamSize16(
-  HACMSTREAM16 has, DWORD cbInput, 
+  HACMSTREAM16 has, DWORD cbInput,
   LPDWORD pdwOutputBytes, DWORD fdwSize
 );
 MMRESULT16 WINAPI acmStreamConvert16(
@@ -842,11 +839,11 @@ MMRESULT WINAPI acmFilterDetailsW(
   HACMDRIVER had, PACMFILTERDETAILSW pafd, DWORD fdwDetails
 );
 MMRESULT WINAPI acmFilterEnumA(
-  HACMDRIVER had, PACMFILTERDETAILSA pafd, 
+  HACMDRIVER had, PACMFILTERDETAILSA pafd,
   ACMFILTERENUMCBA fnCallback, DWORD dwInstance, DWORD fdwEnum
 );
 MMRESULT WINAPI acmFilterEnumW(
-  HACMDRIVER had, PACMFILTERDETAILSW pafd, 
+  HACMDRIVER had, PACMFILTERDETAILSW pafd,
   ACMFILTERENUMCBW fnCallback, DWORD dwInstance, DWORD fdwEnum
 );
 MMRESULT WINAPI acmFilterTagDetailsA(
@@ -902,6 +899,7 @@ MMRESULT WINAPI acmFormatTagEnumW(
   ACMFORMATTAGENUMCBW fnCallback, DWORD dwInstance, DWORD fdwEnum
 );
 DWORD WINAPI acmGetVersion(
+  void
 );
 MMRESULT WINAPI acmMetrics(
   HACMOBJ hao, UINT  uMetric, LPVOID  pMetric
@@ -927,17 +925,11 @@ MMRESULT WINAPI acmStreamReset(
   HACMSTREAM has, DWORD fdwReset
 );
 MMRESULT WINAPI acmStreamSize(
-  HACMSTREAM has, DWORD cbInput, 
+  HACMSTREAM has, DWORD cbInput,
   LPDWORD pdwOutputBytes, DWORD fdwSize
 );
 MMRESULT WINAPI acmStreamUnprepareHeader(
   HACMSTREAM has, PACMSTREAMHEADER pash, DWORD fdwUnprepare
 );
 
-#ifdef __cplusplus
-} /* extern "C" */
-#endif /* defined(__cplusplus) */
-
-#endif  /* __WINE_MSACM_H */
-
-
+#endif /* MPLAYER_MSACM_H */

@@ -5,8 +5,10 @@
 
 // Modified for MPlayer on 2004.12.29
 
-#ifndef tvqdec_h
-#define tvqdec_h
+#ifndef MPLAYER_VQF_H
+#define MPLAYER_VQF_H
+
+#include <stdio.h>
 
 #ifdef _MSC_VER
 #	ifdef DLL_MODULE
@@ -191,7 +193,7 @@ typedef struct {
 //DllPort int  TvqInitialize( headerInfo *setupInfo, INDEX *index, int dispErrorMessageBox );
 //DllPort void TvqTerminate( INDEX *index );
 //DllPort void TvqGetVectorInfo(int *bits0[], int *bits1[]);
-//DllPort void TvqResetFrameCounter();
+//DllPort void TvqResetFrameCounter(void);
 
 // TwinVQ decoder function
 //DllPort void TvqDecodeFrame(INDEX  *indexp, float out[]);
@@ -203,19 +205,19 @@ typedef struct {
 //DllPort int   TvqCheckVersion(char *versionID);
 //DllPort void  TvqGetSetupInfo(headerInfo *setupInfo); // setup information
 //DllPort void  TvqGetConfInfo(tvqConfInfo *cf);  // configuration information
-//DllPort int   TvqGetFrameSize();   // frame size
-//DllPort int   TvqGetNumChannels(); // number of channels
-//DllPort int   TvqGetBitRate();                        // total bitrate
-//DllPort float TvqGetSamplingRate();                   // sampling rate
-//DllPort int   TvqGetNumFixedBitsPerFrame();           // number of fixed bits per frame
-//DllPort int   TvqGetNumFrames();   // number of decoded frame
+//DllPort int   TvqGetFrameSize(void);   // frame size
+//DllPort int   TvqGetNumChannels(void); // number of channels
+//DllPort int   TvqGetBitRate(void);                        // total bitrate
+//DllPort float TvqGetSamplingRate(void);                   // sampling rate
+//DllPort int   TvqGetNumFixedBitsPerFrame(void);           // number of fixed bits per frame
+//DllPort int   TvqGetNumFrames(void);   // number of decoded frame
 //DllPort int   TvqGetModuleVersion( char* versionString );
 
 #ifdef V2PLUS_SUPPORT
 // TwinVQ FB coding tool control
-DllPort void  TvqFbCountUsedBits(int nbit);  // count number of used bits 
-DllPort float TvqGetFbCurrentBitrate();  // query average bitrate for the tool
-DllPort int   TvqGetFbTotalBits();  // query total number of used bits 
+DllPort void  TvqFbCountUsedBits(int nbit);  // count number of used bits
+DllPort float TvqGetFbCurrentBitrate(void);  // query average bitrate for the tool
+DllPort int   TvqGetFbTotalBits(void);  // query total number of used bits
 #endif
 
 #ifdef __cplusplus
@@ -223,4 +225,4 @@ DllPort int   TvqGetFbTotalBits();  // query total number of used bits
 #endif
 
 
-#endif
+#endif /* MPLAYER_VQF_H */

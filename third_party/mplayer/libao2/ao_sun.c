@@ -1,3 +1,23 @@
+/*
+ * SUN audio output driver
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,7 +49,7 @@
 #include "mp_msg.h"
 #include "help_mp.h"
 
-static ao_info_t info = 
+static const ao_info_t info =
 {
     "Sun audio output",
     "sun",
@@ -65,6 +85,13 @@ static enum {
 } enable_sample_timing;
 
 
+static void flush_audio(int fd) {
+#ifdef AUDIO_FLUSH
+  ioctl(fd, AUDIO_FLUSH, 0);
+#elif defined(__svr4__)
+  ioctl(fd, I_FLUSH, FLUSHW);
+#endif
+}
 
 // convert an OSS audio format specification into a sun audio encoding
 static int af2sunfmt(int format)
@@ -115,7 +142,7 @@ static int realtime_samplecounter_available(char *dev)
     silence = calloc(1, len);
     if (silence == NULL)
 	goto error;
-    
+
     if ((fd = open(dev, O_WRONLY)) < 0)
 	goto error;
 
@@ -126,20 +153,17 @@ static int realtime_samplecounter_available(char *dev)
     info.play.encoding = AUDIO_ENCODING_LINEAR;
     info.play.samples = 0;
     if (ioctl(fd, AUDIO_SETINFO, &info)) {
-	if ( mp_msg_test(MSGT_AO,MSGL_V) )
-	    mp_msg(MSGT_AO, MSGL_ERR, MSGTR_AO_SUN_RtscSetinfoFailed);
+        mp_msg(MSGT_AO, MSGL_ERR, MSGTR_AO_SUN_RtscSetinfoFailed);
 	goto error;
     }
-    
+
     if (write(fd, silence, len) != len) {
-	if ( mp_msg_test(MSGT_AO,MSGL_V) )
-	    mp_msg(MSGT_AO, MSGL_ERR, MSGTR_AO_SUN_RtscWriteFailed);
+        mp_msg(MSGT_AO, MSGL_ERR, MSGTR_AO_SUN_RtscWriteFailed);
 	goto error;
     }
 
     if (ioctl(fd, AUDIO_GETINFO, &info)) {
-	if ( mp_msg_test(MSGT_AO,MSGL_V) )
-	    perror("rtsc: GETINFO1");
+        perror("rtsc: GETINFO1");
 	goto error;
     }
 
@@ -160,13 +184,11 @@ static int realtime_samplecounter_available(char *dev)
 	    break;
 
 	if (ioctl(fd, AUDIO_GETINFO, &info)) {
-	    if ( mp_msg_test(MSGT_AO,MSGL_V) )
-		perror("rtsc: GETINFO2 failed");
+            perror("rtsc: GETINFO2 failed");
 	    goto error;
 	}
 	if (info.play.samples < last_samplecnt) {
-	    if ( mp_msg_test(MSGT_AO,MSGL_V) )
-		mp_msg(MSGT_AO,MSGL_V,"rtsc: %d > %d?\n", last_samplecnt, info.play.samples);
+            mp_msg(MSGT_AO, MSGL_ERR, "rtsc: %d > %d?\n", last_samplecnt, info.play.samples);
 	    goto error;
 	}
 
@@ -188,7 +210,7 @@ static int realtime_samplecounter_available(char *dev)
      * sample counter increment from the soundcard driver of less than
      * 2000 samples,  we assume that the driver provides a useable realtime
      * sample counter in the AUDIO_INFO play.samples field.  Timing based
-     * on sample counts should be much more accurate than counting whole 
+     * on sample counts should be much more accurate than counting whole
      * 16kbyte chunks.
      */
     if (min_increment < 2000)
@@ -198,17 +220,14 @@ static int realtime_samplecounter_available(char *dev)
 	mp_msg(MSGT_AO,MSGL_V,"ao_sun: minimum sample counter increment per 10msec interval: %d\n"
 	       "\t%susing sample counter based timing code\n",
 	       min_increment, rtsc_ok == RTSC_ENABLED ? "" : "not ");
-    
+
 
 error:
-    if (silence != NULL) free(silence);
+    free(silence);
     if (fd >= 0) {
-#ifdef	__svr4__
 	// remove the 0 bytes from the above measurement from the
 	// audio driver's STREAMS queue
-	ioctl(fd, I_FLUSH, FLUSHW);
-#endif
-	//ioctl(fd, AUDIO_DRAIN, 0);
+        flush_audio(fd);
 	close(fd);
     }
 
@@ -248,7 +267,7 @@ find_close_samplerate_match(int dev, unsigned sample_rate)
 
     if (sr->flags & MIXER_SR_LIMITS) {
 	/*
-	 * HW can playback any rate between 
+	 * HW can playback any rate between
 	 * sr->samp_rates[0] .. sr->samp_rates[1]
 	 */
 	free(sr);
@@ -294,7 +313,7 @@ find_close_samplerate_match(int dev, unsigned sample_rate)
     for (i = 0; audiocs_rates[i]; i++) {
 	err = abs(audiocs_rates[i] - sample_rate);
 	if (err == 0) {
-	    /* 
+	    /*
 	     * exact supported sample rate match, no need to
 	     * retry something elise
 	     */
@@ -337,7 +356,7 @@ find_highest_samplerate(int dev)
 
     if (sr->flags & MIXER_SR_LIMITS) {
 	/*
-	 * HW can playback any rate between 
+	 * HW can playback any rate between
 	 * sr->samp_rates[0] .. sr->samp_rates[1]
 	 */
 	max_rate = sr->samp_rates[1];
@@ -411,7 +430,7 @@ static int control(int cmd,void *arg){
 	    }
 	    close( fd );
 	    return CONTROL_OK;
-	}	
+	}
 	return CONTROL_ERROR;
     }
     case AOCONTROL_SET_VOLUME:
@@ -442,7 +461,7 @@ static int control(int cmd,void *arg){
 	    ioctl( fd,AUDIO_SETINFO,&info );
 	    close( fd );
 	    return CONTROL_OK;
-	}	
+	}
 	return CONTROL_ERROR;
     }
     }
@@ -474,8 +493,6 @@ static int init(int rate,int channels,int format,int flags){
 	return 0;
     }
 
-    ioctl(audio_fd, AUDIO_DRAIN, 0);
-
     if (af2sunfmt(format) == AUDIO_ENCODING_NONE)
       format = AF_FORMAT_S16_NE;
 
@@ -494,7 +511,7 @@ static int init(int rate,int channels,int format,int flags){
 
 	if (pass & 1) {
 	    /*
-	     * on some sun audio drivers, 8-bit unsigned LINEAR8 encoding is 
+	     * on some sun audio drivers, 8-bit unsigned LINEAR8 encoding is
 	     * not supported, but 8-bit signed encoding is.
 	     *
 	     * Try S8, and if it works, use our own U8->S8 conversion before
@@ -517,7 +534,7 @@ static int init(int rate,int channels,int format,int flags){
 	     * supported rates,  use the fixed supported rate instead.
 	     */
 	    if (!(info.play.sample_rate =
-		  find_close_samplerate_match(audio_fd, rate))) 
+		  find_close_samplerate_match(audio_fd, rate)))
 	      continue;
 
 	    /*
@@ -562,89 +579,32 @@ static int init(int rate,int channels,int format,int flags){
     ao_data.bps = byte_per_sec = bytes_per_sample * ao_data.samplerate;
     ao_data.outburst = byte_per_sec > 100000 ? 16384 : 8192;
 
-#ifdef	__not_used__
-    /*
-     * hmm, ao_data.buffersize is currently not used in this driver, do there's
-     * no need to measure it
-     */
-    if(ao_data.buffersize==-1){
-	// Measuring buffer size:
-	void* data;
-	ao_data.buffersize=0;
-#ifdef HAVE_AUDIO_SELECT
-	data = malloc(ao_data.outburst);
-	memset(data, format==AF_FORMAT_U8 ? 0x80 : 0, ao_data.outburst);
-	while(ao_data.buffersize<0x40000){
-	    fd_set rfds;
-	    struct timeval tv;
-	    FD_ZERO(&rfds); FD_SET(audio_fd,&rfds);
-	    tv.tv_sec=0; tv.tv_usec = 0;
-	    if(!select(audio_fd+1, NULL, &rfds, NULL, &tv)) break;
-	    write(audio_fd,data,ao_data.outburst);
-	    ao_data.buffersize+=ao_data.outburst;
-	}
-	free(data);
-	if(ao_data.buffersize==0){
-	    mp_msg(MSGT_AO, MSGL_ERR, MSGTR_AO_SUN_CantUseSelect);
-	    return 0;
-	}
-#ifdef	__svr4__
-	// remove the 0 bytes from the above ao_data.buffersize measurement from the
-	// audio driver's STREAMS queue
-	ioctl(audio_fd, I_FLUSH, FLUSHW);
-#endif
-	ioctl(audio_fd, AUDIO_DRAIN, 0);
-#endif
-    }
-#endif	/* __not_used__ */
-
-    AUDIO_INITINFO(&info);
-    info.play.samples = 0;
-    info.play.eof = 0;
-    info.play.error = 0;
-    ioctl (audio_fd, AUDIO_SETINFO, &info);
-
-    queued_bursts = 0;
-    queued_samples = 0;
+    reset();
 
     return 1;
 }
 
 // close audio device
 static void uninit(int immed){
-#ifdef	__svr4__
     // throw away buffered data in the audio driver's STREAMS queue
     if (immed)
-	ioctl(audio_fd, I_FLUSH, FLUSHW);
-#endif
+	flush_audio(audio_fd);
+    else
+	ioctl(audio_fd, AUDIO_DRAIN, 0);
     close(audio_fd);
 }
 
 // stop playing and empty buffers (for seeking/pause)
 static void reset(void){
     audio_info_t info;
-
-    uninit(1);
-    audio_fd=open(audio_dev, O_WRONLY);
-    if(audio_fd<0){
-	mp_msg(MSGT_AO, MSGL_FATAL, MSGTR_AO_SUN_CantReopenReset, strerror(errno));
-	return;
-    }
-
-    ioctl(audio_fd, AUDIO_DRAIN, 0);
+    flush_audio(audio_fd);
 
     AUDIO_INITINFO(&info);
-    info.play.encoding = af2sunfmt(ao_data.format);
-    info.play.precision =
-	(ao_data.format==AF_FORMAT_S16_NE 
-	 ? AUDIO_PRECISION_16
-	 : AUDIO_PRECISION_8);
-    info.play.channels = ao_data.channels;
-    info.play.sample_rate = ao_data.samplerate;
     info.play.samples = 0;
     info.play.eof = 0;
     info.play.error = 0;
-    ioctl (audio_fd, AUDIO_SETINFO, &info);
+    ioctl(audio_fd, AUDIO_SETINFO, &info);
+
     queued_bursts = 0;
     queued_samples = 0;
 }
@@ -685,17 +645,13 @@ static int get_space(void){
     }
 #endif
 
-#if !defined (__OpenBSD__) && !defined(__NetBSD__)
     ioctl(audio_fd, AUDIO_GETINFO, &info);
+#if !defined (__OpenBSD__) && !defined(__NetBSD__)
     if (queued_bursts - info.play.eof > 2)
 	return 0;
-#endif
-
-#if defined(__NetBSD__) || defined(__OpenBSD__)
-    ioctl(audio_fd, AUDIO_GETINFO, &info);
-    return info.hiwat * info.blocksize - info.play.seek;
-#else
     return ao_data.outburst;
+#else
+    return info.hiwat * info.blocksize - info.play.seek;
 #endif
 
 }
@@ -704,9 +660,11 @@ static int get_space(void){
 // it should round it down to outburst*n
 // return: number of bytes played
 static int play(void* data,int len,int flags){
-    if (len < ao_data.outburst) return 0;
-    len /= ao_data.outburst;
-    len *= ao_data.outburst;
+    if (!(flags & AOPLAY_FINAL_CHUNK)) {
+	len /= ao_data.outburst;
+	len *= ao_data.outburst;
+    }
+    if (len <= 0) return 0;
 
     len = write(audio_fd, data, len);
     if(len > 0) {
@@ -733,4 +691,3 @@ static float get_delay(void){
 	return (float)((queued_bursts - info.play.eof) * ao_data.outburst) / (float)byte_per_sec;
 #endif
 }
-

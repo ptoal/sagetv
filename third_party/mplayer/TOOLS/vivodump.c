@@ -1,16 +1,32 @@
+/*
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
 
 #include "loader/wine/mmreg.h"
-#include "loader/wine/avifmt.h"
 #include "loader/wine/vfw.h"
 
 #include "stream/stream.h"
 #include "libmpdemux/muxer.h"
 #include "libmpdemux/demuxer.h"
 
+/* linking hacks */
 char *info_name;
 char *info_artist;
 char *info_genre;
@@ -18,6 +34,10 @@ char *info_subject;
 char *info_copyright;
 char *info_sourceform;
 char *info_comment;
+
+char* out_filename = NULL;
+char* force_fourcc=NULL;
+char* passtmpfile="divx2pass.log";
 
 static const short h263_format[8][2] = {
     { 0, 0 },
@@ -34,7 +54,7 @@ int bufptr=0;
 int bitcnt=0;
 unsigned char buf=0;
 
-unsigned int x_get_bits(int n){
+static unsigned int x_get_bits(int n){
     unsigned int x=0;
     while(n-->0){
 	if(!bitcnt){
@@ -59,12 +79,12 @@ int width=320;
 int height=240;
 
 /* most is hardcoded. should extend to handle all h263 streams */
-int h263_decode_picture_header(unsigned char *b_ptr)
+static int h263_decode_picture_header(unsigned char *b_ptr)
 {
     int i;
-        
+
     for(i=0;i<16;i++) printf(" %02X",b_ptr[i]); printf("\n");
-    
+
     buffer=b_ptr;
     bufptr=bitcnt=buf=0;
 
@@ -155,9 +175,6 @@ int postable[32768];
 
 int main(int argc,char ** argv){
 int c;
-unsigned int head=-1;
-int pos=0;
-int frames=0;
 FILE *f;
 FILE *f2;
 muxer_t* avi;
@@ -165,7 +182,6 @@ muxer_stream_t* mux;
 //unsigned char* buffer=malloc(0x200000);
 int i,len;
 int v_id=0;
-int flag=0;
 int flag2=0;
 int prefix=0;
 
@@ -193,11 +209,11 @@ mux=muxer_new_stream(avi,MUXER_TYPE_VIDEO);
 mux->buffer_size=0x200000;
 mux->buffer=malloc(mux->buffer_size);
 
-mux->h.dwScale=1; 
-mux->h.dwRate=10; 
+mux->h.dwScale=1;
+mux->h.dwRate=10;
 
-mux->bih=malloc(sizeof(BITMAPINFOHEADER));
-mux->bih->biSize=sizeof(BITMAPINFOHEADER);
+mux->bih=malloc(sizeof(*mux->bih));
+mux->bih->biSize=sizeof(*mux->bih);
 mux->bih->biPlanes=1;
 mux->bih->biBitCount=24;
 mux->bih->biCompression=0x6f766976;//      7669766f;
@@ -214,14 +230,14 @@ for(i=0;i<len;i++) fgetc(f);
 
 while((c=fgetc(f))>=0){
 
-    printf("%08X  %02X\n",ftell(f),c);
+    printf("%08lX  %02X\n",ftell(f),c);
 
     prefix=0;
     if(c==0x82){
 	prefix=1;
 	//continue;
 	c=fgetc(f);
-	printf("%08X  %02X\n",ftell(f),c);
+	printf("%08lX  %02X\n",ftell(f),c);
     }
 
     if(c==0x00){
@@ -256,7 +272,7 @@ while((c=fgetc(f))>=0){
 	h263_decode_picture_header(mux->buffer);
 	muxer_write_chunk(mux,mux->buffer_len,0x10, MP_NOPTS_VALUE, MP_NOPTS_VALUE);
 	mux->buffer_len=0;
-	
+
 	if((v_id&0xF0)==0x10) fprintf(stderr,"hmm. last video packet %02X\n",v_id);
     }
     flag2=0;
@@ -294,4 +310,5 @@ muxer_write_index(avi);
 fseek(f2,0,SEEK_SET);
 muxer_write_header(avi);
 
+return 0;
 }

@@ -1,65 +1,56 @@
 /*
-   MPlayer video driver for DirectFB / Matrox G200/G400/G450/G550
+ * MPlayer video driver for DirectFB / Matrox G200/G400/G450/G550
+ *
+ * copyright (C) 2002-2008 Ville Syrjala <syrjala@sci.fi>
+ * Originally based on vo_directfb.c by Jiri Svoboda <Jiri.Svoboda@seznam.cz>.
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-   Copyright (C) 2002-2005 Ville Syrjala <syrjala@sci.fi>
-
-   Originally based on vo_directfb.c by
-   Jiri Svoboda <Jiri.Svoboda@seznam.cz>
-
-   This library is free software; you can redistribute it and/or
-   modify it under the terms of the GNU Lesser General Public
-   License as published by the Free Software Foundation; either
-   version 2 of the License, or (at your option) any later version.
-
-   This library is distributed in the hope that it will be useful,
-   but WITHOUT ANY WARRANTY; without even the implied warranty of
-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-   Lesser General Public License for more details.
-
-   You should have received a copy of the GNU Lesser General Public
-   License along with this library; if not, write to the
-   Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110-1301 USA.
-*/
-
-/* directfb includes */
 #include <directfb.h>
-
-#define DFB_VERSION(a,b,c) (((a)<<16)|((b)<<8)|(c))
-
-/* other things */
+#include <directfb_version.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "config.h"
 #include "video_out.h"
+#define NO_DRAW_FRAME
 #include "video_out_internal.h"
+#include "libmpcodecs/vf.h"
 #include "fastmemcpy.h"
-#include "sub.h"
+#include "sub/sub.h"
 #include "mp_msg.h"
 #include "aspect.h"
 #include "mp_fifo.h"
 
-static vo_info_t info = {
+static const vo_info_t info = {
      "DirectFB / Matrox G200/G400/G450/G550",
      "dfbmga",
      "Ville Syrjala <syrjala@sci.fi>",
      ""
 };
 
-LIBVO_EXTERN(dfbmga)
+const LIBVO_EXTERN(dfbmga)
 
-/******************************
-*	   directfb 	      *
-******************************/
-
-/*
- * (Globals)
- */
 static IDirectFB *dfb;
 
-static IDirectFBDisplayLayer *primary;
+static IDirectFBDisplayLayer *crtc1;
 static IDirectFBDisplayLayer *bes;
 static IDirectFBDisplayLayer *crtc2;
 static IDirectFBDisplayLayer *spic;
@@ -73,6 +64,7 @@ static IDirectFBSurface *frame;
 static IDirectFBSurface *subframe;
 
 static IDirectFBSurface *besframe;
+static IDirectFBSurface *c1frame;
 static IDirectFBSurface *c2frame;
 static IDirectFBSurface *spicframe;
 
@@ -80,6 +72,7 @@ static DFBSurfacePixelFormat frame_format;
 static DFBSurfacePixelFormat subframe_format;
 
 static DFBRectangle besrect;
+static DFBRectangle c1rect;
 static DFBRectangle c2rect;
 static DFBRectangle *subrect;
 
@@ -88,9 +81,11 @@ static IDirectFBInputDevice  *remote;
 static IDirectFBEventBuffer  *buffer;
 
 static int blit_done;
-static int stretch;
+static int c1stretch;
+static int c2stretch;
 
 static int use_bes;
+static int use_crtc1;
 static int use_crtc2;
 static int use_spic;
 static int use_input;
@@ -106,20 +101,6 @@ static int osd_current;
 static int osd_max;
 
 static int is_g200;
-
-/******************************
-*	    vo_dfbmga         *
-******************************/
-
-#if DIRECTFBVERSION < DFB_VERSION(0,9,18)
- #define DSPF_ALUT44 DSPF_LUT8
- #define DLBM_TRIPLE ~0
- #define DSFLIP_ONSYNC 0
-#endif
-
-#if DIRECTFBVERSION < DFB_VERSION(0,9,16)
- #define DSPF_ARGB1555 DSPF_RGB15
-#endif
 
 static uint32_t in_width;
 static uint32_t in_height;
@@ -137,30 +118,26 @@ pixelformat_name( DFBSurfacePixelFormat format )
           return "ARGB";
      case DSPF_RGB32:
           return "RGB32";
-     case DSPF_RGB24:
-	  return "RGB24";
      case DSPF_RGB16:
-	  return "RGB16";
+          return "RGB16";
      case DSPF_ARGB1555:
-	  return "ARGB1555";
+          return "ARGB1555";
      case DSPF_YUY2:
-	  return "YUY2";
+          return "YUY2";
      case DSPF_UYVY:
-	  return "UYVY";
+          return "UYVY";
      case DSPF_YV12:
-	  return "YV12";
+          return "YV12";
      case DSPF_I420:
-	  return "I420";
+          return "I420";
      case DSPF_ALUT44:
-	  return "ALUT44";
-#if DIRECTFBVERSION > DFB_VERSION(0,9,21)
+          return "ALUT44";
      case DSPF_NV12:
           return "NV12";
      case DSPF_NV21:
           return "NV21";
-#endif
      default:
-	  return "Unknown pixel format";
+          return "Unknown pixel format";
      }
 }
 
@@ -169,30 +146,26 @@ imgfmt_to_pixelformat( uint32_t format )
 {
      switch (format) {
      case IMGFMT_BGR32:
-	  return DSPF_RGB32;
-     case IMGFMT_BGR24:
-	  return DSPF_RGB24;
+          return DSPF_RGB32;
      case IMGFMT_BGR16:
-	  return DSPF_RGB16;
+          return DSPF_RGB16;
      case IMGFMT_BGR15:
-	  return DSPF_ARGB1555;
+          return DSPF_ARGB1555;
      case IMGFMT_YUY2:
-	  return DSPF_YUY2;
+          return DSPF_YUY2;
      case IMGFMT_UYVY:
-	  return DSPF_UYVY;
+          return DSPF_UYVY;
      case IMGFMT_YV12:
-	  return DSPF_YV12;
+          return DSPF_YV12;
      case IMGFMT_I420:
      case IMGFMT_IYUV:
           return DSPF_I420;
-#if DIRECTFBVERSION > DFB_VERSION(0,9,21)
      case IMGFMT_NV12:
           return DSPF_NV12;
      case IMGFMT_NV21:
           return DSPF_NV21;
-#endif
      default:
-	  return DSPF_UNKNOWN;
+          return DSPF_UNKNOWN;
      }
 }
 
@@ -210,25 +183,12 @@ get_layer_by_name( DFBDisplayLayerID id,
 {
      struct layer_enum *l = (struct layer_enum *) data;
 
-#if DIRECTFBVERSION > DFB_VERSION(0,9,15)
-     /* We have desc.name so use it */
      if (!strcmp( l->name, desc.name ))
           if ((l->res = dfb->GetDisplayLayer( dfb, id, l->layer )) == DFB_OK)
                return DFENUM_CANCEL;
-#else
-     /* Fake it according to id */
-     if ((id == 0 && !strcmp( l->name, "FBDev Primary Layer" )) ||
-         (id == 1 && !strcmp( l->name, "Matrox Backend Scaler" )) ||
-         (id == 2 && !strcmp( l->name, "Matrox CRTC2" )) ||
-         (id == 3 && !strcmp( l->name, "Matrox CRTC2 Sub-Picture" )))
-          if ((l->res = dfb->GetDisplayLayer( dfb, id, l->layer )) == DFB_OK)
-               return DFENUM_CANCEL;
-#endif
 
      return DFENUM_OK;
 }
-
-static void uninit( void );
 
 static int
 preinit( const char *arg )
@@ -238,16 +198,12 @@ preinit( const char *arg )
 
      /* Some defaults */
      use_bes = 0;
+     use_crtc1 = 0;
      use_crtc2 = 1;
      use_spic = 1;
      field_parity = -1;
-#if DIRECTFBVERSION > DFB_VERSION(0,9,17)
      buffermode = DLBM_TRIPLE;
      osd_max = 4;
-#else
-     buffermode = DLBM_BACKVIDEO;
-     osd_max = 2;
-#endif
      flipping = 1;
      tvnorm = -1;
 
@@ -260,6 +216,10 @@ preinit( const char *arg )
                if (!strncmp(vo_subdevice, "bes", 3)) {
                     use_bes = !opt_no;
                     vo_subdevice += 3;
+                    opt_no = 0;
+               } else if (!strncmp(vo_subdevice, "crtc1", 5)) {
+                    use_crtc1 = !opt_no;
+                    vo_subdevice += 5;
                     opt_no = 0;
                } else if (!strncmp(vo_subdevice, "crtc2", 5)) {
                     use_crtc2 = !opt_no;
@@ -358,13 +318,14 @@ preinit( const char *arg )
                     show_help = 1;
                     break;
                }
-               }
+          }
           if (show_help) {
                mp_msg( MSGT_VO, MSGL_ERR,
                        "\nvo_dfbmga command line help:\n"
                        "Example: mplayer -vo dfbmga:nocrtc2:bes:buffermode=single\n"
                        "\nOptions (use 'no' prefix to disable):\n"
                        "  bes    Use Backend Scaler\n"
+                       "  crtc1  Use CRTC1\n"
                        "  crtc2  Use CRTC2\n"
                        "  spic   Use hardware sub-picture for OSD\n"
                        "  input  Use DirectFB for keyboard input\n"
@@ -385,62 +346,66 @@ preinit( const char *arg )
                return -1;
           }
      }
-     if (!use_bes && !use_crtc2) {
-	  mp_msg( MSGT_VO, MSGL_ERR, "vo_dfbmga: No output selected\n" );
+     if (!use_bes && !use_crtc1 && !use_crtc2) {
+          mp_msg( MSGT_VO, MSGL_ERR, "vo_dfbmga: No output selected\n" );
+          return -1;
+     }
+     if (use_bes && use_crtc1) {
+          mp_msg( MSGT_VO, MSGL_ERR, "vo_dfbmga: Both BES and CRTC1 outputs selected\n" );
           return -1;
      }
 
-          if ((res = DirectFBInit( NULL, NULL )) != DFB_OK) {
-               mp_msg( MSGT_VO, MSGL_ERR,
-                       "vo_dfbmga: DirectFBInit() failed - %s\n",
-                       DirectFBErrorString( res ) );
-               return -1;
-          }
+     if ((res = DirectFBInit( NULL, NULL )) != DFB_OK) {
+          mp_msg( MSGT_VO, MSGL_ERR,
+                  "vo_dfbmga: DirectFBInit() failed - %s\n",
+                  DirectFBErrorString( res ) );
+          return -1;
+     }
 
-          switch (tvnorm) {
-          case 0:
-               DirectFBSetOption( "matrox-tv-standard", "pal" );
-               mp_msg( MSGT_VO, MSGL_INFO, "vo_dfbmga: Forced TV standard to PAL\n" );
-               break;
-          case 1:
+     switch (tvnorm) {
+     case 0:
+          DirectFBSetOption( "matrox-tv-standard", "pal" );
+          mp_msg( MSGT_VO, MSGL_INFO, "vo_dfbmga: Forced TV standard to PAL\n" );
+          break;
+     case 1:
+          DirectFBSetOption( "matrox-tv-standard", "ntsc" );
+          mp_msg( MSGT_VO, MSGL_INFO, "vo_dfbmga: Forced TV standard to NTSC\n" );
+          break;
+     case 2:
+          if (vo_fps > 27) {
                DirectFBSetOption( "matrox-tv-standard", "ntsc" );
-               mp_msg( MSGT_VO, MSGL_INFO, "vo_dfbmga: Forced TV standard to NTSC\n" );
-               break;
-          case 2:
-               if (vo_fps > 27) {
-                    DirectFBSetOption( "matrox-tv-standard", "ntsc" );
-                    mp_msg( MSGT_VO, MSGL_INFO,
-                            "vo_dfbmga: Selected TV standard based upon FPS: NTSC\n" );
-               } else {
-                    DirectFBSetOption( "matrox-tv-standard", "pal" );
-                    mp_msg( MSGT_VO, MSGL_INFO,
-                            "vo_dfbmga: Selected TV standard based upon FPS: PAL\n" );
-               }
-               break;
+               mp_msg( MSGT_VO, MSGL_INFO,
+                       "vo_dfbmga: Selected TV standard based upon FPS: NTSC\n" );
+          } else {
+               DirectFBSetOption( "matrox-tv-standard", "pal" );
+               mp_msg( MSGT_VO, MSGL_INFO,
+                       "vo_dfbmga: Selected TV standard based upon FPS: PAL\n" );
           }
+          break;
+     }
 
-          if ((res = DirectFBCreate( &dfb )) != DFB_OK) {
-               mp_msg( MSGT_VO, MSGL_ERR,
-                       "vo_dfbmga: DirectFBCreate() failed - %s\n",
-                       DirectFBErrorString( res ) );
-               return -1;
-          }
+     if ((res = DirectFBCreate( &dfb )) != DFB_OK) {
+          mp_msg( MSGT_VO, MSGL_ERR,
+                  "vo_dfbmga: DirectFBCreate() failed - %s\n",
+                  DirectFBErrorString( res ) );
+          return -1;
+     }
 
-     if (use_bes) {
+     if (use_crtc1 || use_bes) {
           struct layer_enum l = {
                "FBDev Primary Layer",
-               &primary,
+               &crtc1,
                DFB_UNSUPPORTED
           };
           dfb->EnumDisplayLayers( dfb, get_layer_by_name, &l );
           if (l.res != DFB_OK) {
-               mp_msg( MSGT_VO, MSGL_ERR, "vo_dfbmga: Can't get primary layer - %s\n",
+               mp_msg( MSGT_VO, MSGL_ERR, "vo_dfbmga: Can't get CRTC1 layer - %s\n",
                        DirectFBErrorString( l.res ) );
                uninit();
                return -1;
           }
-          if ((res = primary->SetCooperativeLevel( primary, DLSCL_EXCLUSIVE )) != DFB_OK) {
-               mp_msg( MSGT_VO, MSGL_ERR, "Can't get exclusive access to primary layer - %s\n",
+          if ((res = crtc1->SetCooperativeLevel( crtc1, DLSCL_EXCLUSIVE )) != DFB_OK) {
+               mp_msg( MSGT_VO, MSGL_ERR, "Can't get exclusive access to CRTC1 layer - %s\n",
                        DirectFBErrorString( res ) );
                uninit();
                return -1;
@@ -483,11 +448,7 @@ preinit( const char *arg )
 
      if (use_crtc2) {
           struct layer_enum l = {
-#if DIRECTFBVERSION > DFB_VERSION(0,9,20)
                "Matrox CRTC2 Layer",
-#else
-               "Matrox CRTC2",
-#endif
                &crtc2,
                DFB_UNSUPPORTED
           };
@@ -549,7 +510,7 @@ preinit( const char *arg )
                return -1;
           }
      }
-     
+
      return 0;
 }
 
@@ -561,6 +522,8 @@ static void release_config( void )
           spic->Release( spic );
      if (c2frame)
           c2frame->Release( c2frame );
+     if (c1frame)
+          c1frame->Release( c1frame );
      if (besframe)
           besframe->Release( besframe );
      if (bufs[0])
@@ -569,10 +532,11 @@ static void release_config( void )
           bufs[1]->Release( bufs[1] );
      if (bufs[2])
           bufs[2]->Release( bufs[2] );
-     
+
      spicframe = NULL;
      spic = NULL;
      c2frame = NULL;
+     c1frame = NULL;
      besframe = NULL;
      bufs[0] = NULL;
      bufs[1] = NULL;
@@ -584,7 +548,7 @@ config( uint32_t width, uint32_t height,
         uint32_t d_width, uint32_t d_height,
         uint32_t flags,
         char *title,
-	uint32_t format )
+        uint32_t format )
 {
      DFBResult res;
 
@@ -656,11 +620,7 @@ config( uint32_t width, uint32_t height,
           dlc.flags       = DLCONF_WIDTH | DLCONF_HEIGHT | DLCONF_PIXELFORMAT | DLCONF_BUFFERMODE;
           dlc.width       = besrect.w + besrect.x * 2;
           dlc.height      = besrect.h + besrect.y * 2;
-
-          if (use_crtc2)
-               dlc.buffermode = DLBM_FRONTONLY;
-          else
-               dlc.buffermode = buffermode;
+          dlc.buffermode  = buffermode;
 
           if ((res = bes->TestConfiguration( bes, &dlc, &failed )) != DFB_OK) {
                mp_msg( MSGT_VO, MSGL_ERR,
@@ -692,6 +652,63 @@ config( uint32_t width, uint32_t height,
      }
 
      /*
+      * CRTC1
+      */
+     if (use_crtc1) {
+          dlc.flags      = DLCONF_BUFFERMODE;
+          dlc.buffermode = buffermode;
+
+          if ((res = crtc1->TestConfiguration( crtc1, &dlc, &failed )) != DFB_OK) {
+               mp_msg( MSGT_VO, MSGL_ERR,
+                       "vo_dfbmga: Invalid CRTC1 configuration - %s!\n",
+                       DirectFBErrorString( res ) );
+               return -1;
+          }
+          if ((res = crtc1->SetConfiguration( crtc1, &dlc )) != DFB_OK) {
+               mp_msg( MSGT_VO, MSGL_ERR,
+                       "vo_dfbmga: CRTC1 configuration failed - %s!\n",
+                       DirectFBErrorString( res ) );
+               return -1;
+          }
+          if ((res = crtc1->GetConfiguration( crtc1, &dlc )) != DFB_OK) {
+               mp_msg( MSGT_VO, MSGL_ERR,
+                       "vo_dfbmga: Getting CRTC1 configuration failed - %s!\n",
+                       DirectFBErrorString( res ) );
+               return -1;
+          }
+
+          crtc1->GetSurface( crtc1, &c1frame );
+          c1frame->SetBlittingFlags( c1frame, DSBLIT_NOFX );
+          c1frame->SetColor( c1frame, 0, 0, 0, 0xff );
+
+          c1frame->GetSize( c1frame, &screen_width, &screen_height );
+
+          aspect_save_screenres( screen_width, screen_height );
+          aspect( &out_width, &out_height, (flags & VOFLAG_FULLSCREEN) ? A_ZOOM : A_NOZOOM );
+
+          if (in_width != out_width || in_height != out_height)
+               c1stretch = 1;
+          else
+               c1stretch = 0;
+
+          c1rect.x = (screen_width  - out_width)  / 2;
+          c1rect.y = (screen_height - out_height) / 2;
+          c1rect.w = out_width;
+          c1rect.h = out_height;
+
+          c1frame->Clear( c1frame, 0, 0, 0, 0xff );
+          c1frame->Flip( c1frame, NULL, 0 );
+          c1frame->Clear( c1frame, 0, 0, 0, 0xff );
+          c1frame->Flip( c1frame, NULL, 0 );
+          c1frame->Clear( c1frame, 0, 0, 0, 0xff );
+
+          mp_msg( MSGT_VO, MSGL_INFO, "vo_dfbmga: CRTC1 using %s buffering\n",
+                  dlc.buffermode == DLBM_TRIPLE ? "triple" :
+                  dlc.buffermode == DLBM_BACKVIDEO ? "double" : "single" );
+          mp_msg( MSGT_VO, MSGL_INFO, "vo_dfbmga: CRTC1 surface %dx%d %s\n", screen_width, screen_height, pixelformat_name( dlc.pixelformat ) );
+     }
+
+     /*
       * CRTC2
       */
      if (use_crtc2) {
@@ -699,11 +716,9 @@ config( uint32_t width, uint32_t height,
           dlc.buffermode = buffermode;
           dlc.options    = DLOP_NONE;
 
-#if DIRECTFBVERSION > DFB_VERSION(0,9,16)
           if (field_parity != -1) {
                dlc.options |= DLOP_FIELD_PARITY;
           }
-#endif
           mp_msg( MSGT_VO, MSGL_INFO, "vo_dfbmga: Field parity set to: ");
           switch (field_parity) {
           case -1:
@@ -747,10 +762,8 @@ config( uint32_t width, uint32_t height,
                return -1;
           }
 
-#if DIRECTFBVERSION > DFB_VERSION(0,9,16)
           if (field_parity != -1)
                crtc2->SetFieldParity( crtc2, field_parity );
-#endif
 
           crtc2->GetSurface( crtc2, &c2frame );
           c2frame->SetBlittingFlags( c2frame, DSBLIT_NOFX );
@@ -775,9 +788,9 @@ config( uint32_t width, uint32_t height,
 
           if (in_width != out_width ||
               in_height != out_height)
-               stretch = 1;
+               c2stretch = 1;
           else
-               stretch = 0;
+               c2stretch = 0;
 
           c2rect.x = (screen_width  - out_width)  / 2;
           c2rect.y = (screen_height - out_height) / 2;
@@ -826,11 +839,9 @@ config( uint32_t width, uint32_t height,
           dlc.flags       = DLCONF_PIXELFORMAT | DLCONF_BUFFERMODE;
           dlc.pixelformat = DSPF_ALUT44;
           dlc.buffermode  = buffermode;
-
-#if DIRECTFBVERSION > DFB_VERSION(0,9,16)
           dlc.flags      |= DLCONF_OPTIONS;
           dlc.options     = DLOP_ALPHACHANNEL;
-#endif
+
           if ((res = spic->TestConfiguration( spic, &dlc, &failed )) != DFB_OK) {
                mp_msg( MSGT_VO, MSGL_ERR,
                        "vo_dfbmga: Invalid sub-picture configuration - %s!\n",
@@ -872,6 +883,10 @@ config( uint32_t width, uint32_t height,
           /* Draw OSD to CRTC2 surface */
           subframe = c2frame;
           subrect = &c2rect;
+     } else if (use_crtc1) {
+          /* Draw OSD to CRTC1 surface */
+          subframe = c1frame;
+          subrect = &c1rect;
      } else {
           /* Draw OSD to BES surface */
           subframe = besframe;
@@ -883,7 +898,8 @@ config( uint32_t width, uint32_t height,
      mp_msg( MSGT_VO, MSGL_INFO, "vo_dfbmga: Sub-picture surface %dx%d %s (%s)\n",
              sub_width, sub_height,
              pixelformat_name( subframe_format ),
-             use_crtc2 ? (use_spic ? "Sub-picture layer" : "CRTC2") : "BES" );
+             use_crtc2 ? (use_spic ? "Sub-picture layer" : "CRTC2") :
+             use_crtc1 ? "CRTC1" : "BES" );
 
      osd_dirty = 0;
      osd_current = 1;
@@ -896,43 +912,47 @@ static int
 query_format( uint32_t format )
 {
      switch (format) {
-          case IMGFMT_BGR32:
-          case IMGFMT_BGR24:
-          case IMGFMT_BGR16:
-          case IMGFMT_BGR15:
-          case IMGFMT_UYVY:
-          case IMGFMT_YV12:
-          case IMGFMT_I420:
-          case IMGFMT_IYUV:
-               if (is_g200)
-                    return 0;
-          case IMGFMT_YUY2:
-               break;
-#if DIRECTFBVERSION > DFB_VERSION(0,9,21)
-          case IMGFMT_NV12:
-          case IMGFMT_NV21:
-               if (!use_bes || use_crtc2)
-                    return 0;
-               break;
-#endif
-          default:
+     case IMGFMT_YV12:
+     case IMGFMT_I420:
+     case IMGFMT_IYUV:
+          if (is_g200 || use_crtc1)
                return 0;
+          break;
+     case IMGFMT_BGR32:
+     case IMGFMT_BGR16:
+     case IMGFMT_BGR15:
+          if (is_g200 && use_bes)
+               return 0;
+          break;
+     case IMGFMT_UYVY:
+          if (is_g200)
+               return 0;
+          break;
+     case IMGFMT_YUY2:
+          break;
+     case IMGFMT_NV12:
+     case IMGFMT_NV21:
+          if (use_crtc1 || use_crtc2)
+               return 0;
+          break;
+     default:
+          return 0;
      }
 
-     return (VFCAP_HWSCALE_UP |
+     return  VFCAP_HWSCALE_UP |
              VFCAP_HWSCALE_DOWN |
              VFCAP_CSP_SUPPORTED_BY_HW |
              VFCAP_CSP_SUPPORTED |
-             VFCAP_OSD);
+             VFCAP_OSD;
 }
 
 static void
 vo_draw_alpha_alut44( int w, int h,
-                    unsigned char* src,
-                    unsigned char *srca,
-                    int srcstride,
-                    unsigned char* dst,
-                    int dststride )
+                      unsigned char* src,
+                      unsigned char *srca,
+                      int srcstride,
+                      unsigned char* dst,
+                      int dststride )
 {
      int x;
 
@@ -959,10 +979,11 @@ static void
 draw_alpha( int x0, int y0,
             int w, int h,
             unsigned char *src,
-	    unsigned char *srca,
+            unsigned char *srca,
             int stride )
 {
-     void *dst;
+     uint8_t *dst;
+     void *ptr;
      int pitch;
 
      if (use_spic) {
@@ -977,75 +998,65 @@ draw_alpha( int x0, int y0,
                osd_dirty |= osd_current;
      }
 
-     if (subframe->Lock( subframe, DSLF_READ | DSLF_WRITE, &dst, &pitch ) != DFB_OK)
+     if (subframe->Lock( subframe, DSLF_READ | DSLF_WRITE, &ptr, &pitch ) != DFB_OK)
           return;
+     dst = ptr;
 
      switch (subframe_format) {
      case DSPF_ALUT44:
           vo_draw_alpha_alut44( w, h, src, srca, stride,
-                                ((uint8_t *) dst) + pitch * y0 + x0,
-                              pitch );
+                                dst + pitch * y0 + x0,
+                                pitch );
           break;
      case DSPF_RGB32:
      case DSPF_ARGB:
-	  vo_draw_alpha_rgb32( w, h, src, srca, stride,
-			       (( uint8_t *) dst) + pitch * y0 + 4 * x0,
+          vo_draw_alpha_rgb32( w, h, src, srca, stride,
+                               dst + pitch * y0 + 4 * x0,
                                pitch );
-	  break;
-     case DSPF_RGB24:
-	  vo_draw_alpha_rgb24( w, h, src, srca, stride,
-			       ((uint8_t *) dst) + pitch * y0 + 3 * x0,
-                               pitch );
-	  break;
+          break;
      case DSPF_RGB16:
-	  vo_draw_alpha_rgb16( w, h, src, srca, stride,
-			       ((uint8_t *) dst) + pitch * y0 + 2 * x0,
+          vo_draw_alpha_rgb16( w, h, src, srca, stride,
+                               dst + pitch * y0 + 2 * x0,
                                pitch );
-	  break;
+          break;
      case DSPF_ARGB1555:
-	  vo_draw_alpha_rgb15( w, h, src, srca, stride,
-			       ((uint8_t *) dst) + pitch * y0 + 2 * x0,
+          vo_draw_alpha_rgb15( w, h, src, srca, stride,
+                               dst + pitch * y0 + 2 * x0,
                                pitch );
-	  break;
+          break;
      case DSPF_YUY2:
-	  vo_draw_alpha_yuy2( w, h, src, srca, stride,
-			      ((uint8_t *) dst) + pitch * y0 + 2 * x0,
+          vo_draw_alpha_yuy2( w, h, src, srca, stride,
+                              dst + pitch * y0 + 2 * x0,
                               pitch );
-	  break;
+          break;
      case DSPF_UYVY:
-	  vo_draw_alpha_yuy2( w, h, src, srca, stride,
-			      ((uint8_t *) dst) + pitch * y0 + 2 * x0 + 1,
+          vo_draw_alpha_yuy2( w, h, src, srca, stride,
+                              dst + pitch * y0 + 2 * x0 + 1,
                               pitch );
-	  break;
-#if DIRECTFBVERSION > DFB_VERSION(0,9,21)
+          break;
      case DSPF_NV12:
      case DSPF_NV21:
-#endif
      case DSPF_I420:
      case DSPF_YV12:
-	  vo_draw_alpha_yv12( w, h, src, srca, stride,
-			      ((uint8_t *) dst) + pitch * y0 + x0,
+          vo_draw_alpha_yv12( w, h, src, srca, stride,
+                              dst + pitch * y0 + x0,
                               pitch );
-	  break;
+          break;
      }
 
      subframe->Unlock( subframe );
 }
 
 static int
-draw_frame( uint8_t * src[] )
-{
-     return -1;
-}
-
-static int
 draw_slice( uint8_t * src[], int stride[], int w, int h, int x, int y )
 {
-     void *dst;
+     uint8_t *dst;
+     void *ptr;
      int pitch;
 
-     if (frame->Lock( frame, DSLF_WRITE, &dst, &pitch ) != DFB_OK)
+     if (frame->Lock( frame, DSLF_WRITE, &ptr, &pitch ) != DFB_OK)
           return VO_FALSE;
+     dst = ptr;
 
      memcpy_pic( dst + pitch * y + x, src[0],
                  w, h, pitch, stride[0] );
@@ -1055,32 +1066,29 @@ draw_slice( uint8_t * src[], int stride[], int w, int h, int x, int y )
      y /= 2;
      h /= 2;
 
-#if DIRECTFBVERSION > DFB_VERSION(0,9,21)
      if (frame_format == DSPF_NV12 || frame_format == DSPF_NV21) {
           memcpy_pic( dst + pitch * y + x, src[1],
                       w, h, pitch, stride[1] );
-     } else
-#endif
-     {
-     x /= 2;
-     w /= 2;
-     pitch /= 2;
+     } else {
+          x /= 2;
+          w /= 2;
+          pitch /= 2;
 
-     if (frame_format == DSPF_I420 )
-          memcpy_pic( dst + pitch * y + x, src[1],
-                      w, h, pitch, stride[1] );
-     else 
-          memcpy_pic( dst + pitch * y + x, src[2],
-                      w, h, pitch, stride[2] );
+          if (frame_format == DSPF_I420 )
+               memcpy_pic( dst + pitch * y + x, src[1],
+                           w, h, pitch, stride[1] );
+          else
+               memcpy_pic( dst + pitch * y + x, src[2],
+                           w, h, pitch, stride[2] );
 
-     dst += pitch * buf_height / 2;
+          dst += pitch * buf_height / 2;
 
-     if (frame_format == DSPF_I420 )
-          memcpy_pic( dst + pitch * y + x, src[2],
-                      w, h, pitch, stride[2] );
-     else
-          memcpy_pic( dst + pitch * y + x, src[1],
-                      w, h, pitch, stride[1] );
+          if (frame_format == DSPF_I420 )
+               memcpy_pic( dst + pitch * y + x, src[2],
+                           w, h, pitch, stride[2] );
+          else
+               memcpy_pic( dst + pitch * y + x, src[1],
+                           w, h, pitch, stride[1] );
      }
 
      frame->Unlock( frame );
@@ -1095,25 +1103,31 @@ blit_to_screen( void )
      DFBRectangle *srect = NULL;
 
      if (use_bes) {
-#if DIRECTFBVERSION > DFB_VERSION(0,9,15)
-          if (vo_vsync && !flipping && !use_crtc2)
+          if (vo_vsync && !flipping)
                bes->WaitForSync( bes );
-#endif
 
           besframe->Blit( besframe, blitsrc, NULL, besrect.x, besrect.y );
           blitsrc = besframe;
           srect = &besrect;
      }
 
+     if (use_crtc1) {
+          if (vo_vsync && !flipping)
+               crtc1->WaitForSync( crtc1 );
+
+          if (c1stretch)
+               c1frame->StretchBlit( c1frame, blitsrc, srect, &c1rect );
+          else
+               c1frame->Blit( c1frame, blitsrc, srect, c1rect.x, c1rect.y );
+     }
+
      if (use_crtc2) {
-#if DIRECTFBVERSION > DFB_VERSION(0,9,15)
           if (vo_vsync && !flipping)
                crtc2->WaitForSync( crtc2 );
-#endif
 
-     if (stretch)
+          if (c2stretch)
                c2frame->StretchBlit( c2frame, blitsrc, srect, &c2rect );
-     else
+          else
                c2frame->Blit( c2frame, blitsrc, srect, c2rect.x, c2rect.y );
      }
 }
@@ -1147,8 +1161,8 @@ draw_osd( void )
           osd_dirty &= ~osd_current;
      }
 
-          blit_to_screen();
-          blit_done = 1;
+     blit_to_screen();
+     blit_done = 1;
 
      vo_remove_text( sub_width, sub_height, clear_alpha );
      vo_draw_text( sub_width, sub_height, draw_alpha );
@@ -1164,13 +1178,15 @@ draw_osd( void )
 static void
 flip_page( void )
 {
-          if (!blit_done)
-               blit_to_screen();
+     if (!blit_done)
+          blit_to_screen();
 
      if (flipping) {
           if (use_crtc2)
                c2frame->Flip( c2frame, NULL, vo_vsync ? DSFLIP_WAITFORSYNC : DSFLIP_ONSYNC );
-          else
+          if (use_crtc1)
+               c1frame->Flip( c1frame, NULL, vo_vsync ? DSFLIP_WAITFORSYNC : DSFLIP_ONSYNC );
+          if (use_bes)
                besframe->Flip( besframe, NULL, vo_vsync ? DSFLIP_WAITFORSYNC : DSFLIP_ONSYNC );
 
           if (!use_spic) {
@@ -1199,8 +1215,8 @@ uninit( void )
           crtc2->Release( crtc2 );
      if (bes)
           bes->Release( bes );
-     if (primary)
-          primary->Release( primary );
+     if (crtc1)
+          crtc1->Release( crtc1 );
      if (dfb)
           dfb->Release( dfb );
 
@@ -1209,7 +1225,7 @@ uninit( void )
      keyboard = NULL;
      crtc2 = NULL;
      bes = NULL;
-     primary = NULL;
+     crtc1 = NULL;
      dfb = NULL;
 }
 
@@ -1217,7 +1233,8 @@ static uint32_t
 get_image( mp_image_t *mpi )
 {
      int buf = current_buf;
-     void *dst;
+     uint8_t *dst;
+     void *ptr;
      int pitch;
 
      if (mpi->flags & MP_IMGFLAG_READABLE &&
@@ -1240,8 +1257,9 @@ get_image( mp_image_t *mpi )
 
      /* Always use DSLF_READ to preserve system memory copy */
      if (frame->Lock( frame, DSLF_WRITE | DSLF_READ,
-                      &dst, &pitch ) != DFB_OK)
+                      &ptr, &pitch ) != DFB_OK)
           return VO_FALSE;
+     dst = ptr;
 
      if ((mpi->width == pitch) ||
          (mpi->flags & (MP_IMGFLAG_ACCEPT_STRIDE | MP_IMGFLAG_ACCEPT_WIDTH))) {
@@ -1252,17 +1270,17 @@ get_image( mp_image_t *mpi )
 
           if (mpi->flags & MP_IMGFLAG_PLANAR) {
                if (mpi->num_planes > 2) {
-               mpi->stride[1] = mpi->stride[2] = pitch / 2;
+                    mpi->stride[1] = mpi->stride[2] = pitch / 2;
 
-               if (mpi->flags & MP_IMGFLAG_SWAPPED) {
-                    /* I420 */
-                    mpi->planes[1] = dst + buf_height * pitch;
-                    mpi->planes[2] = mpi->planes[1] + buf_height * pitch / 4;
-               } else {
-                    /* YV12 */
-                    mpi->planes[2] = dst + buf_height * pitch;
-                    mpi->planes[1] = mpi->planes[2] + buf_height * pitch / 4;
-               }
+                    if (mpi->flags & MP_IMGFLAG_SWAPPED) {
+                         /* I420 */
+                         mpi->planes[1] = dst + buf_height * pitch;
+                         mpi->planes[2] = mpi->planes[1] + buf_height * pitch / 4;
+                    } else {
+                         /* YV12 */
+                         mpi->planes[2] = dst + buf_height * pitch;
+                         mpi->planes[1] = mpi->planes[2] + buf_height * pitch / 4;
+                    }
                } else {
                     /* NV12/NV21 */
                     mpi->stride[1] = pitch;
@@ -1271,7 +1289,7 @@ get_image( mp_image_t *mpi )
           }
 
           mpi->flags |= MP_IMGFLAG_DIRECT;
-          mpi->priv = (void *) buf;
+          mpi->priv = (void *)(intptr_t)buf;
           current_buf = buf;
 
           return VO_TRUE;
@@ -1288,7 +1306,7 @@ static uint32_t
 draw_image( mp_image_t *mpi )
 {
      if (mpi->flags & MP_IMGFLAG_DIRECT) {
-          current_buf = (int) mpi->priv;
+          current_buf = (intptr_t)mpi->priv;
           return VO_TRUE;
      }
      if (mpi->flags & MP_IMGFLAG_DRAW_CALLBACK)
@@ -1313,7 +1331,7 @@ draw_image( mp_image_t *mpi )
 }
 
 static int
-set_equalizer( char *data, int value )
+set_equalizer( const char *data, int value )
 {
      DFBResult res;
      DFBColorAdjustment ca;
@@ -1341,6 +1359,8 @@ set_equalizer( char *data, int value )
      /* Prefer CRTC2 over BES */
      if (use_crtc2)
           res = crtc2->SetColorAdjustment( crtc2, &ca );
+     else if (use_crtc1)
+          res = crtc1->SetColorAdjustment( crtc1, &ca );
      else
           res = bes->SetColorAdjustment( bes, &ca );
 
@@ -1351,7 +1371,7 @@ set_equalizer( char *data, int value )
 }
 
 static int
-get_equalizer( char *data, int *value )
+get_equalizer( const char *data, int *value )
 {
      DFBResult res;
      DFBColorAdjustment ca;
@@ -1360,12 +1380,14 @@ get_equalizer( char *data, int *value )
      /* Prefer CRTC2 over BES */
      if (use_crtc2)
           res = crtc2->GetColorAdjustment( crtc2, &ca );
+     else if (use_crtc1)
+          res = crtc1->GetColorAdjustment( crtc1, &ca );
      else
           res = bes->GetColorAdjustment( bes, &ca );
 
      if (res != DFB_OK)
           return VO_FALSE;
-     
+
      if (!strcasecmp( data, "brightness" ) &&
          (ca.flags & DCAF_BRIGHTNESS))
           *value = (ca.brightness - 0x8000) * factor;
@@ -1383,15 +1405,11 @@ get_equalizer( char *data, int *value )
 }
 
 static int
-control( uint32_t request, void *data, ... )
+control( uint32_t request, void *data )
 {
      switch (request) {
-     case VOCTRL_GUISUPPORT:
-     case VOCTRL_GUI_NOWINDOW:
-          return VO_TRUE;
-
      case VOCTRL_QUERY_FORMAT:
-	  return query_format( *((uint32_t *) data) );
+          return query_format( *((uint32_t *) data) );
 
      case VOCTRL_GET_IMAGE:
           return get_image( data );
@@ -1401,25 +1419,13 @@ control( uint32_t request, void *data, ... )
 
      case VOCTRL_SET_EQUALIZER:
           {
-               va_list ap;
-               int value;
-
-               va_start( ap, data );
-               value = va_arg( ap, int );
-               va_end( ap );
-
-               return set_equalizer( data, value );
+               vf_equalizer_t *eq=data;
+               return set_equalizer( eq->item, eq->value );
           }
      case VOCTRL_GET_EQUALIZER:
           {
-               va_list ap;
-               int *value;
-
-               va_start( ap, data );
-               value = va_arg( ap, int* );
-               va_end( ap );
-
-               return get_equalizer( data, value );
+               vf_equalizer_t *eq=data;
+               return get_equalizer( eq->item, &eq->value );
           }
      }
 
@@ -1504,7 +1510,7 @@ check_events( void )
                     mplayer_put_key( KEY_PREV );
                     break;
                case DIKS_VOLUME_UP:
-                     mplayer_put_key( KEY_VOLUME_UP );
+                    mplayer_put_key( KEY_VOLUME_UP );
                     break;
                case DIKS_VOLUME_DOWN:
                     mplayer_put_key( KEY_VOLUME_DOWN );

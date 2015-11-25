@@ -1,13 +1,29 @@
 /*
-	GIF file parser for MPlayer
-	by Joey Parrish
-*/
-#include "config.h"
+ * GIF file parser
+ * Copyright (C) 2003 Joey Parrish
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 
+#include "config.h"
 
 #include "mp_msg.h"
 #include "help_mp.h"
@@ -29,13 +45,43 @@ typedef struct {
 
 #define GIF_SIGNATURE (('G' << 16) | ('I' << 8) | 'F')
 
-#ifndef HAVE_GIF_TVT_HACK
+#if defined GIFLIB_MAJOR && GIFLIB_MAJOR >= 5
+#define DGifOpen(a, b) DGifOpen(a, b, NULL)
+#define DGifOpenFileHandle(a) DGifOpenFileHandle(a, NULL)
+#define GifError() (gif ? gif->Error : 0)
+#define GifErrorString() GifErrorString(err)
+#if defined GIFLIB_MINOR && GIFLIB_MINOR >= 1
+#define DGifCloseFile(a) DGifCloseFile(a, NULL)
+#endif
+#endif
+
+/* >= 4.2 prior GIFLIB did not have MAJOR/MINOR defines */
+#if defined GIFLIB_MAJOR && GIFLIB_MAJOR >= 4
+static void print_gif_error(GifFileType *gif)
+{
+  int err = GifError();
+  char *err_str = GifErrorString();
+
+  if (err_str)
+    mp_msg(MSGT_DEMUX, MSGL_ERR, "\n[gif] GIF-LIB error: %s.\n", err_str);
+  else
+    mp_msg(MSGT_DEMUX, MSGL_ERR, "\n[gif] GIF-LIB undefined error %d.\n", err);
+}
+#else
+static void print_gif_error(GifFileType *gif)
+{
+  PrintGifError();
+}
+#endif
+
+#ifndef CONFIG_GIF_TVT_HACK
 // not supported by certain versions of the library
-int my_read_gif(GifFileType *gif, uint8_t *buf, int len) {
+static int my_read_gif(GifFileType *gif, uint8_t *buf, int len)
+{
   return stream_read(gif->UserData, buf, len);
 }
 #endif
-  
+
 static int gif_check_file(demuxer_t *demuxer)
 {
   if (stream_read_int24(demuxer->stream) == GIF_SIGNATURE)
@@ -77,14 +123,14 @@ static int demux_gif_fill_buffer(demuxer_t *demuxer, demux_stream_t *ds)
 
   while (type != IMAGE_DESC_RECORD_TYPE) {
     if (DGifGetRecordType(gif, &type) == GIF_ERROR) {
-      PrintGifError();
+      print_gif_error(priv->gif);
       return 0; // oops
     }
     if (type == TERMINATE_RECORD_TYPE)
       return 0; // eof
     if (type == SCREEN_DESC_RECORD_TYPE) {
       if (DGifGetScreenDesc(gif) == GIF_ERROR) {
-        PrintGifError();
+        print_gif_error(priv->gif);
         return 0; // oops
       }
     }
@@ -92,7 +138,7 @@ static int demux_gif_fill_buffer(demuxer_t *demuxer, demux_stream_t *ds)
       int code;
       unsigned char *p = NULL;
       if (DGifGetExtension(gif, &code, &p) == GIF_ERROR) {
-        PrintGifError();
+        print_gif_error(priv->gif);
         return 0; // oops
       }
       if (code == 0xF9) {
@@ -109,7 +155,7 @@ static int demux_gif_fill_buffer(demuxer_t *demuxer, demux_stream_t *ds)
           // http://samples.mplayerhq.hu/GIF/broken-gif/CLAIRE.GIF
           if (refmode == 0) refmode = 1;
           frametime = (p[3] << 8) | p[2]; // set the time, centiseconds
-          transparent_col = p[4];  
+          transparent_col = p[4];
         }
         priv->current_pts += frametime;
       } else if ((code == 0xFE) && (verbose)) { // comment extension
@@ -121,7 +167,7 @@ static int demux_gif_fill_buffer(demuxer_t *demuxer, demux_stream_t *ds)
 	  comments[length] = 0;
 	  printf("%s", comments);
           if (DGifGetExtensionNext(gif, &p) == GIF_ERROR) {
-            PrintGifError();
+            print_gif_error(priv->gif);
             return 0; // oops
           }
 	}
@@ -129,15 +175,15 @@ static int demux_gif_fill_buffer(demuxer_t *demuxer, demux_stream_t *ds)
       }
       while (p != NULL) {
         if (DGifGetExtensionNext(gif, &p) == GIF_ERROR) {
-          PrintGifError();
+          print_gif_error(priv->gif);
           return 0; // oops
         }
       }
     }
   }
-  
+
   if (DGifGetImageDesc(gif) == GIF_ERROR) {
-    PrintGifError();
+    print_gif_error(priv->gif);
     return 0; // oops
   }
 
@@ -145,12 +191,14 @@ static int demux_gif_fill_buffer(demuxer_t *demuxer, demux_stream_t *ds)
   dp = new_demux_packet(priv->w * priv->h);
   buf = calloc(gif->Image.Width, gif->Image.Height);
   if (priv->useref)
-    memcpy(dp->buffer, priv->refimg, priv->w * priv->h);
+    fast_memcpy(dp->buffer, priv->refimg, priv->w * priv->h);
   else
     memset(dp->buffer, gif->SBackGroundColor, priv->w * priv->h);
-  
+
   if (DGifGetLine(gif, buf, len) == GIF_ERROR) {
-    PrintGifError();
+    print_gif_error(priv->gif);
+    free(buf);
+    free_demux_packet(dp);
     return 0; // oops
   }
 
@@ -199,7 +247,7 @@ static int demux_gif_fill_buffer(demuxer_t *demuxer, demux_stream_t *ds)
       memcpy_transp_pic(dest, buf, w, h, priv->w, gif->Image.Width,
                         transparency, transparent_col);
 
-    if (refmode == 1) memcpy(priv->refimg, dp->buffer, priv->w * priv->h);
+    if (refmode == 1) fast_memcpy(priv->refimg, dp->buffer, priv->w * priv->h);
     if (refmode == 2 && priv->useref) {
       dest = priv->refimg + priv->w * t + l;
       memset(buf, gif->SBackGroundColor, len);
@@ -230,7 +278,7 @@ static demuxer_t* demux_open_gif(demuxer_t* demuxer)
   // go back to the beginning
   stream_seek(demuxer->stream,demuxer->stream->start_pos);
 
-#ifdef HAVE_GIF_TVT_HACK
+#ifdef CONFIG_GIF_TVT_HACK
   // without the TVT functionality of libungif, a hard seek must be
   // done to the beginning of the file.  this is because libgif is
   // unable to use mplayer's cache, and without this lseek libgif will
@@ -242,7 +290,8 @@ static demuxer_t* demux_open_gif(demuxer_t* demuxer)
   gif = DGifOpen(demuxer->stream, my_read_gif);
 #endif
   if (!gif) {
-    PrintGifError();
+    print_gif_error(NULL);
+    free(priv);
     return NULL;
   }
 
@@ -251,19 +300,15 @@ static demuxer_t* demux_open_gif(demuxer_t* demuxer)
 
   // make sure the demuxer knows about the new video stream header
   // (even though new_sh_video() ought to take care of it)
+  demuxer->video->id = 0;
   demuxer->video->sh = sh_video;
 
-  // make sure that the video demuxer stream header knows about its
-  // parent video demuxer stream (this is getting wacky), or else
-  // video_read_properties() will choke
-  sh_video->ds = demuxer->video;
-
   sh_video->format = mmioFOURCC(8, 'R', 'G', 'B');
-  
+
   sh_video->fps = 5.0f;
   sh_video->frametime = 1.0f / sh_video->fps;
-  
-  sh_video->bih = malloc(sizeof(BITMAPINFOHEADER) + (256 * 4));
+
+  sh_video->bih = malloc(sizeof(*sh_video->bih) + (256 * 4));
   sh_video->bih->biCompression = sh_video->format;
   sh_video->bih->biWidth = priv->w = (uint16_t)gif->SWidth;
   sh_video->bih->biHeight = priv->h = (uint16_t)gif->SHeight;
@@ -271,7 +316,7 @@ static demuxer_t* demux_open_gif(demuxer_t* demuxer)
   sh_video->bih->biPlanes = 2;
   priv->palette = (unsigned char *)(sh_video->bih + 1);
   priv->refimg = malloc(priv->w * priv->h);
-  
+
   priv->gif = gif;
   demuxer->priv = priv;
 
@@ -283,13 +328,13 @@ static void demux_close_gif(demuxer_t* demuxer)
   gif_priv_t *priv = demuxer->priv;
   if (!priv) return;
   if (priv->gif && DGifCloseFile(priv->gif) == GIF_ERROR)
-    PrintGifError();
+    print_gif_error(NULL);
   free(priv->refimg);
   free(priv);
 }
 
 
-demuxer_desc_t demuxer_desc_gif = {
+const demuxer_desc_t demuxer_desc_gif = {
   "GIF demuxer",
   "gif",
   "GIF",

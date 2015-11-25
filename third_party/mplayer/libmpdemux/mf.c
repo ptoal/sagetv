@@ -1,4 +1,22 @@
-#include "config.h"
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
+#define _BSD_SOURCE
 
 #include <ctype.h>
 #include <stdio.h>
@@ -7,15 +25,18 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <limits.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 
+#include "config.h"
 
 #ifdef HAVE_GLOB
 #include <glob.h>
 #else
 #include "osdep/glob.h"
 #endif
+#include "osdep/strsep.h"
 
 #include "mp_msg.h"
 #include "help_mp.h"
@@ -25,7 +46,7 @@
 
 int    mf_w = 0; //352; // let codecs to detect it
 int    mf_h = 0; //288;
-float  mf_fps = 25.0;
+double mf_fps = 25.0;
 char * mf_type = NULL; //"jpg";
 
 mf_t* open_mf(char * filename){
@@ -41,17 +62,17 @@ mf_t* open_mf(char * filename){
  mf=calloc( 1,sizeof( mf_t ) );
 
  if( filename[0] == '@' )
-  { 
+  {
    FILE *lst_f=fopen(filename + 1,"r");
-   if ( lst_f ) 
+   if ( lst_f )
     {
-     fname=malloc( 255 );
-     while ( fgets( fname,255,lst_f ) ) 
+     fname=malloc(PATH_MAX);
+     while ( fgets( fname,PATH_MAX,lst_f ) )
       {
        /* remove spaces from end of fname */
        char *t=fname + strlen( fname ) - 1;
        while ( t > fname && isspace( *t ) ) *(t--)=0;
-       if ( stat( fname,&fs ) ) 
+       if ( stat( fname,&fs ) )
         {
          mp_msg( MSGT_STREAM,MSGL_V,"[mf] file not found: '%s'\n",fname );
         }
@@ -63,7 +84,7 @@ mf_t* open_mf(char * filename){
         }
       }
       fclose( lst_f );
-	     
+
       mp_msg( MSGT_STREAM,MSGL_INFO,"[mf] number of files: %d\n",mf->nr_of_files );
       goto exit_mf;
     }
@@ -71,12 +92,12 @@ mf_t* open_mf(char * filename){
   }
 
  if( strchr( filename,',') )
-  { 
+  {
    mp_msg( MSGT_STREAM,MSGL_INFO,"[mf] filelist: %s\n",filename );
- 
+
    while ( ( fname=strsep( &filename,"," ) ) )
     {
-     if ( stat( fname,&fs ) ) 
+     if ( stat( fname,&fs ) )
       {
        mp_msg( MSGT_STREAM,MSGL_V,"[mf] file not found: '%s'\n",fname );
       }
@@ -89,15 +110,15 @@ mf_t* open_mf(char * filename){
       }
     }
    mp_msg( MSGT_STREAM,MSGL_INFO,"[mf] number of files: %d\n",mf->nr_of_files );
- 
+
    goto exit_mf;
-  } 
+  }
 
  fname=malloc( strlen( filename ) + 32 );
 
  if ( !strchr( filename,'%' ) )
   {
-   strcpy( fname,filename ); 
+   strcpy( fname,filename );
    if ( !strchr( filename,'*' ) ) strcat( fname,"*" );
 
    mp_msg( MSGT_STREAM,MSGL_INFO,"[mf] search expr: %s\n",fname );
@@ -108,7 +129,7 @@ mf_t* open_mf(char * filename){
    mf->nr_of_files=gg.gl_pathc;
    mf->names=calloc( gg.gl_pathc, sizeof( char* ) );
 
-   mp_msg( MSGT_STREAM,MSGL_INFO,"[mf] number of files: %d (%d)\n",mf->nr_of_files, gg.gl_pathc * sizeof( char* ) );
+   mp_msg( MSGT_STREAM, MSGL_INFO, "[mf] number of files: %d (%zu)\n", mf->nr_of_files, gg.gl_pathc * sizeof( char* ) );
 
    for( i=0;i < gg.gl_pathc;i++ )
     {
@@ -122,11 +143,11 @@ mf_t* open_mf(char * filename){
   }
 
  mp_msg( MSGT_STREAM,MSGL_INFO,"[mf] search expr: %s\n",filename );
- 
+
  while ( error_count < 5 )
   {
    sprintf( fname,filename,count++ );
-   if ( stat( fname,&fs ) ) 
+   if ( stat( fname,&fs ) )
     {
      error_count++;
      mp_msg( MSGT_STREAM,MSGL_V,"[mf] file not found: '%s'\n",fname );
@@ -150,4 +171,3 @@ exit_mf:
  return 0;
 #endif
 }
-

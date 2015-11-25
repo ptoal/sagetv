@@ -1,13 +1,29 @@
 /*
-	FLI file parser for the MPlayer program
-	by Mike Melanson
-*/
-#include "config.h"
+ * FLI file parser
+ * copyright (c) 2001 Mike Melanson
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 
+#include "config.h"
 #include "mp_msg.h"
 #include "help_mp.h"
 
@@ -15,7 +31,7 @@
 #include "demuxer.h"
 #include "stheader.h"
 
-typedef struct _fli_frames_t {
+typedef struct {
   int num_frames;
   int current_frame;
   off_t *filepos;
@@ -25,8 +41,8 @@ typedef struct _fli_frames_t {
 static void demux_seek_fli(demuxer_t *demuxer,float rel_seek_secs,float audio_delay,int flags){
   fli_frames_t *frames = (fli_frames_t *)demuxer->priv;
   sh_video_t *sh_video = demuxer->video->sh;
-  int newpos=(flags&1)?0:frames->current_frame;
-  if(flags&2){
+  int newpos=(flags&SEEK_ABSOLUTE)?0:frames->current_frame;
+  if(flags&SEEK_FACTOR){
       // float 0..1
       newpos+=rel_seek_secs*frames->num_frames;
   } else {
@@ -54,7 +70,7 @@ static int demux_fli_fill_buffer(demuxer_t *demuxer, demux_stream_t *ds){
   // seem to do it, even though it takes a file offset as a parameter
   stream_seek(demuxer->stream, frames->filepos[frames->current_frame]);
   ds_read_packet(demuxer->video,
-    demuxer->stream, 
+    demuxer->stream,
     frames->frame_size[frames->current_frame],
     frames->current_frame/sh_video->fps,
     frames->filepos[frames->current_frame],
@@ -80,7 +96,7 @@ static demuxer_t* demux_open_fli(demuxer_t* demuxer){
   stream_reset(demuxer->stream);
   stream_seek(demuxer->stream, 0);
 
-  header = malloc(sizeof(BITMAPINFOHEADER) + 128);
+  header = calloc(1, sizeof(BITMAPINFOHEADER) + 128);
   stream_read(demuxer->stream, header + sizeof(BITMAPINFOHEADER), 128);
   stream_seek(demuxer->stream, 0);
 
@@ -88,14 +104,14 @@ static demuxer_t* demux_open_fli(demuxer_t* demuxer){
   demuxer->movi_end = stream_read_dword_le(demuxer->stream);
 
   magic_number = stream_read_word_le(demuxer->stream);
-  
+
   if ((magic_number != 0xAF11) && (magic_number != 0xAF12))
   {
     mp_msg(MSGT_DEMUX, MSGL_ERR, "Bad/unknown magic number (%04x)\n",
 	magic_number);
     free(header);
     free(frames);
-    return(NULL);    
+    return NULL;
   }
 
   // fetch the number of frames
@@ -112,12 +128,8 @@ static demuxer_t* demux_open_fli(demuxer_t* demuxer){
 
   // make sure the demuxer knows about the new video stream header
   // (even though new_sh_video() ought to take care of it)
+  demuxer->video->id = 0;
   demuxer->video->sh = sh_video;
-
-  // make sure that the video demuxer stream header knows about its
-  // parent video demuxer stream (this is getting wacky), or else
-  // video_read_properties() will choke
-  sh_video->ds = demuxer->video;
 
   // custom fourcc for internal MPlayer use
   sh_video->format = mmioFOURCC('F', 'L', 'I', 'C');
@@ -128,7 +140,9 @@ static demuxer_t* demux_open_fli(demuxer_t* demuxer){
   // pass extradata to codec
   sh_video->bih = (BITMAPINFOHEADER*)header;
   sh_video->bih->biSize = sizeof(BITMAPINFOHEADER) + 128;
-    
+  sh_video->bih->biWidth = sh_video->disp_w;
+  sh_video->bih->biHeight = sh_video->disp_h;
+
   // skip the video depth and flags
   stream_skip(demuxer->stream, 4);
 
@@ -173,11 +187,8 @@ static void demux_close_fli(demuxer_t* demuxer) {
   if(!frames)
     return;
 
-  if(frames->filepos)
-    free(frames->filepos);
-  if(frames->frame_size)
-    free(frames->frame_size);
-
+  free(frames->filepos);
+  free(frames->frame_size);
   free(frames);
 
 }
@@ -197,7 +208,7 @@ static int fli_check_file(demuxer_t* demuxer)
 }
 
 
-demuxer_desc_t demuxer_desc_fli = {
+const demuxer_desc_t demuxer_desc_fli = {
   "Autodesk FLIC demuxer",
   "fli",
   "FLI",

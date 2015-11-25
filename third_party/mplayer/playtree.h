@@ -1,11 +1,28 @@
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
+#ifndef MPLAYER_PLAYTREE_H
+#define MPLAYER_PLAYTREE_H
 
 /// \file
 /// \ingroup Playtree
 
-#ifndef __PLAYTREE_H
-#define __PLAYTREE_H
-
-struct stream_st;
+struct stream;
 struct m_config;
 
 /// \defgroup PlaytreeIterReturn Playtree iterator return code
@@ -31,7 +48,7 @@ struct m_config;
 /// \defgroup PlaytreeEntryFlags Playtree flags
 /// \ingroup Playtree
 ///@{
-/// Play the item childs in random order.
+/// Play the item children in random order.
 #define PLAY_TREE_RND  (1<<0)
 /// Playtree flags used by the iterator to mark items already "randomly" played.
 #define PLAY_TREE_RND_PLAYED  (1<<8)
@@ -44,7 +61,7 @@ struct m_config;
 #define PLAY_TREE_ITER_RND 1
 ///@}
 
-/// \defgroup Playtree
+/// \defgroup playtree Playtree
 ///@{
 
 typedef struct play_tree play_tree_t;
@@ -107,7 +124,7 @@ struct play_tree_iter {
   int num_files;
   int entry_pushed;
   int mode;
- 
+
   ///  loop/valid stack to save/revert status when we go up/down.
   int* status_stack;
   /// status stack size
@@ -116,26 +133,26 @@ struct play_tree_iter {
 ///@}
 
 /// Create a new empty playtree item.
-play_tree_t* 
+play_tree_t*
 play_tree_new(void);
 
 /// Free a playtree item.
 /** \param pt Item to free.
- *  \param childs If non-zero the item's childs are recursively freed.
+ *  \param children If non-zero the item's children are recursively freed.
  */
 void
-play_tree_free(play_tree_t* pt, int childs);
+play_tree_free(play_tree_t* pt, int children);
 
 
 /// Free an item and its siblings.
 /** \param pt Item to free.
- *  \param childs If non-zero the items' childs are recursively freed.
+ *  \param children If non-zero the items' children are recursively freed.
  */
 void
-play_tree_free_list(play_tree_t* pt, int childs);
+play_tree_free_list(play_tree_t* pt, int children);
 
 
-/// Set the childs of a playtree item.
+/// Set the children of a playtree item.
 void
 play_tree_set_child(play_tree_t* pt, play_tree_t* child);
 
@@ -158,24 +175,24 @@ play_tree_insert_entry(play_tree_t* pt, play_tree_t* entry);
 
 /// Detach an item from the tree.
 void
-play_tree_remove(play_tree_t* pt, int free_it,int with_childs);
+play_tree_remove(play_tree_t* pt, int free_it,int with_children);
 
 /// Add a file to an item.
 void
-play_tree_add_file(play_tree_t* pt,char* file);
+play_tree_add_file(play_tree_t* pt,const char* file);
 
 /// Remove a file from an item.
 int
-play_tree_remove_file(play_tree_t* pt,char* file);
+play_tree_remove_file(play_tree_t* pt,const char* file);
 
 
 /// Add a config paramter to an item.
 void
-play_tree_set_param(play_tree_t* pt, char* name, char* val);
+play_tree_set_param(play_tree_t* pt, const char* name, const char* val);
 
 /// Remove a config parameter from an item.
 int
-play_tree_unset_param(play_tree_t* pt, char* name);
+play_tree_unset_param(play_tree_t* pt, const char* name);
 
 /// Copy the config parameters from one item to another.
 void
@@ -199,16 +216,16 @@ play_tree_iter_free(play_tree_iter_t* iter);
 /// Step an iterator.
 /** \param iter The iterator.
  *  \param d The direction: d > 0 == next , d < 0 == prev
- *  \param with_node TRUE == stop on nodes with childs, FALSE == go directly to the next child
+ *  \param with_node TRUE == stop on nodes with children, FALSE == go directly to the next child
  *  \return See \ref PlaytreeIterReturn.
  */
-int 
+int
 play_tree_iter_step(play_tree_iter_t* iter, int d,int with_nodes);
 
 /// Step up, useful to break a loop, etc.
 /** \param iter The iterator.
  *  \param d The direction: d > 0 == next , d < 0 == prev
- *  \param with_node TRUE == stop on nodes with childs, FALSE == go directly to the next child
+ *  \param with_node TRUE == stop on nodes with children, FALSE == go directly to the next child
  *  \return See \ref PlaytreeIterReturn.
  */
 int
@@ -229,7 +246,7 @@ play_tree_iter_get_file(play_tree_iter_t* iter, int d);
 /** \ingroup PlaytreeParser
  */
 play_tree_t*
-parse_playtree(struct stream_st *stream, int forced);
+parse_playtree(struct stream *stream, int forced);
 
 /// Clean a tree by destroying all empty elements.
 play_tree_t*
@@ -267,21 +284,16 @@ void pt_iter_insert_entry(play_tree_iter_t* iter, play_tree_t* entry);
 void pt_iter_replace_entry(play_tree_iter_t* iter, play_tree_t* entry);
 
 /// Adds a new file to the playtree, if it is not valid it is created.
-void pt_add_file(play_tree_t** ppt, char* filename);
+void pt_add_file(play_tree_t** ppt, const char* filename);
 
-/// \brief Performs a convert to playtree-syntax, by concat path/file 
-/// and performs pt_add_file
-void pt_add_gui_file(play_tree_t** ppt, char* path, char* file);
-
-// Two macros to use only the iter and not the other things.
+// Macro to use only the iter and not the other things.
 #define pt_iter_add_file(iter, filename) pt_add_file(&iter->tree, filename)
-#define pt_iter_add_gui_file(iter, path, name) pt_add_gui_file(&iter->tree, path, name)
 
 /// Resets the iter and goes back to head.
 void pt_iter_goto_head(play_tree_iter_t* iter);
 
 ///@}
 
-#endif
-
 ///@}
+
+#endif /* MPLAYER_PLAYTREE_H */

@@ -1,120 +1,25 @@
 /*
- * vo_dxr3.c - DXR3/H+ video out
+ * DXR3/H+ video output
  *
  * Copyright (C) 2002-2003 David Holm <david@realityrift.com>
  *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-/* ChangeLog added 2002-01-10
- * 2003-11-28:
- *  Added a patch from Anders Rune Jensen to support the latest em8300 CVS
- *  changes.
- *
- * 2003-02-19:
- *  Yet another patch from Tamas Kohegyi to fix subpic placement.
- *
- * 2003-01-12:
- *  Added patch from Tamas Kohegyi to fix subpic placement with freetype.
- *
- * 2003-01-02:
- *  Added patch from Jens Axboe that makes vo_dxr3 return to previous TV norm
- *   after quiting.
- *  Added patch from Thomas Jarosch that fixed a lot of textual ouput
- *   errors.
- *
- * 2002-12-24: (Hohoho)
- *  Added patch from Thomas Jarosch <tomj@simonv.com> which adds support
- *   for setting the TV norm by movie framerate.
- *
- * 2002-11-03:
- *  Cleaned up syncing code and renamed setup variables so
- *   they can be accessed from the GUI.
- *
- * 2002-11-02:
- *  Added native overlay support, activate with :overlay
- *   you have to run dxr3view to modify settings (or manually
- *   edit the files in ~/.overlay.
- *
- * 2002-10-29:
- *  Added new sync-engine, activate with :sync option.
- *  Greatly improved commandline parser.
- *  Replaced :noprebuf with :prebuf and made noprebuf the default.
- *
- * 2002-10-28:
- *  Fixed multicard bug on athlons
- *
- * 2002-07-18:
- *  Disabled spuenc support, this is still not stable enough =(
- *
- * 2002-07-05:
- *  Removed lavc and fame encoder to be compatible with new libvo style.
- *  Added graphic equalizer support.
- *
- * 2002-04-15:
- *  The spuenc code isn't 100% stable yet, therefore I'm disabling
- *  it due to the upcoming stable release.
- *
- * 2002-04-03:
- *  Carl George added spuenc support
- *
- * 2002-03-26:
- *  XorA added an option parser and support for selecting encoder
- *  codec. We thank him again.
- *
- * 2002-03-25:
- *  A couple of bugfixes by XorA
- *
- * 2002-03-23:
- *  Thanks to Marcel Hild <hild@b4mad.net> the jitter-bug experienced
- *  with some videos have been fixed, many thanks goes to him.
- *
- * 2002-03-16:
- *  Fixed problems with fame, it gives a better picture than avcodec,
- *  but is slightly slower. Most notably the wobbling effect is gone
- *  with fame.
- *
- * 2002-03-13:
- *  Preliminary fame support added (it breaks after seeking, why?)
- *
- * 2002-02-18:
- *  Fixed sync problems when pausing video (while using prebuffering)
- *
- * 2002-02-16:
- *  Fixed bug which would case invalid output when using :noprebuf
- *  Removed equalization code, it caused problems on slow systems
- *
- * 2002-02-13:
- *  Using the swscaler instead of the old hand coded shit. (Checkout man mplayer and search for sws ;).
- *  Using aspect function to setup a proper mpeg1, no more hassling with odd resolutions or GOP-sizes,
- *  this would only create jitter on some vids!
- *  The swscaler sometimes exits with sig8 on mpegs, I don't know why yet (just use -vc mpegpes in this
- *  case, and report to me if you have any avi's etc which does this...)
- *
- * 2002-02-09:
- *  Thanks to the new control() method I have finally been able to enable the em8300 prebuffering.
- *  This should speed up playback on all systems, the vout cpu usage should rocket since I will be hogging
- *  the pci bus. Not to worry though, since frames are prebuffered it should be able to take a few blows
- *  if you start doing other stuff simultaneously.
- *
- * 2002-02-03:
- *  Removal of libmp1e, libavcodec has finally become faster (and it's code is helluva lot cleaner)
- *
- * 2002-02-02:
- *  Cleaned out some old code which might have slowed down writes
- *
- * 2002-01-17:
- *  Testrelease of new sync engine (using previously undocumented feature of em8300).
- *
- * 2002-01-15:
- *  Preliminary subpic support with -vc mpegpes and dvd's
- *  Device interfaces tries the new naming scheme by default (even though most users probably still use the old one)
- *
- * 2002-01-10:
- *  I rehauled the entire codebase. I have now changed to
- *  Kernighan & Ritchie codingstyle, please mail me if you 
- *  find any inconcistencies.
- */
- 
 #include <linux/em8300.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
@@ -124,6 +29,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <time.h>
@@ -132,33 +38,34 @@
 #include "config.h"
 #include "mp_msg.h"
 #include "help_mp.h"
-#ifdef HAVE_MALLOC_H
-#include <malloc.h>
-#endif
 #include "fastmemcpy.h"
 
 #include "video_out.h"
-#include "video_out_internal.h"
+#include "libmpcodecs/vf.h"
 #include "aspect.h"
-#include "spuenc.h"
-#include "sub.h"
-#ifdef HAVE_NEW_GUI
-#include "Gui/interface.h"
+#include "sub/spuenc.h"
+#include "sub/sub.h"
+#ifdef CONFIG_GUI
+#include "gui/interface.h"
 #endif
-#ifdef HAVE_X11
+#ifdef CONFIG_X11
 #include "x11_common.h"
 #endif
+#include "libavutil/avstring.h"
+
+#define NO_DRAW_SLICE
+#include "video_out_internal.h"
 
 #define SPU_SUPPORT
 
-static vo_info_t info = 
+static const vo_info_t info =
 {
 	"DXR3/H+ video out",
 	"dxr3",
 	"David Holm <dholm@iname.com>",
 	""
 };
-LIBVO_EXTERN (dxr3)
+const LIBVO_EXTERN (dxr3)
 
 /* Resolutions and positions */
 static int v_width, v_height;
@@ -167,7 +74,7 @@ static int osd_w, osd_h;
 static int img_format;
 
 /* Configuration values
- * Don't declare these static, they 
+ * Don't declare these static, they
  * should be accessible from the gui.
  */
 int dxr3_prebuf = 0;
@@ -261,7 +168,7 @@ static int overlay_signalmode(overlay_t *o, int mode);
 /* End overlay.h */
 
 
-#ifdef HAVE_X11
+#ifdef CONFIG_X11
 #define KEY_COLOR 0x80a040
 static XWindowAttributes xwin_attribs;
 static overlay_t *overlay_data;
@@ -271,23 +178,18 @@ static overlay_t *overlay_data;
 /* Functions for working with the em8300's internal clock */
 /* End of internal clock functions */
 
-static int control(uint32_t request, void *data, ...)
+static int control(uint32_t request, void *data)
 {
 	switch (request) {
 	case VOCTRL_GUISUPPORT:
-		return VO_TRUE;
-	case VOCTRL_GUI_NOWINDOW:
-		if (dxr3_overlay) {
-			return VO_FALSE;
-		}
-		return VO_TRUE;
+		return dxr3_overlay ? VO_TRUE : VO_FALSE;
 	case VOCTRL_SET_SPU_PALETTE:
 		if (ioctl(fd_spu, EM8300_IOCTL_SPU_SETPALETTE, data) < 0) {
 			mp_msg(MSGT_VO,MSGL_ERR, MSGTR_LIBVO_DXR3_UnableToLoadNewSPUPalette);
 			return VO_ERROR;
 		}
 		return VO_TRUE;
-#ifdef HAVE_X11
+#ifdef CONFIG_X11
 	case VOCTRL_ONTOP:
 		vo_x11_ontop();
 		return VO_TRUE;
@@ -309,7 +211,7 @@ static int control(uint32_t request, void *data, ...)
 				pts_offset = 0;
 			}
 		}
-		
+
 		if (dxr3_prebuf) {
 			ioval = EM8300_PLAYMODE_PLAY;
 			if (ioctl(fd_control, EM8300_IOCTL_SET_PLAYMODE, &ioval) < 0) {
@@ -349,49 +251,39 @@ static int control(uint32_t request, void *data, ...)
 	    }
 	case VOCTRL_SET_EQUALIZER:
 	    {
-		va_list ap;
-		int value;
+		vf_equalizer_t *eq=data;
 		em8300_bcs_t bcs;
-		
-		va_start(ap, data);
-		value = va_arg(ap, int);
-		va_end(ap);
 
 		if (ioctl(fd_control, EM8300_IOCTL_GETBCS, &bcs) < 0)
 		    return VO_FALSE;
-		if (!strcasecmp(data, "brightness"))
-		    bcs.brightness = (value+100)*5;
-		else if (!strcasecmp(data, "contrast"))
-		    bcs.contrast = (value+100)*5;
-		else if (!strcasecmp(data, "saturation"))
-		    bcs.saturation = (value+100)*5;
+		if (!strcasecmp(eq->item, "brightness"))
+		    bcs.brightness = (eq->value+100)*5;
+		else if (!strcasecmp(eq->item, "contrast"))
+		    bcs.contrast = (eq->value+100)*5;
+		else if (!strcasecmp(eq->item, "saturation"))
+		    bcs.saturation = (eq->value+100)*5;
 		else return VO_FALSE;
-        
+
 		if (ioctl(fd_control, EM8300_IOCTL_SETBCS, &bcs) < 0)
 		    return VO_FALSE;
 		return VO_TRUE;
 	    }
 	case VOCTRL_GET_EQUALIZER:
 	    {
-		va_list ap;
-		int *value;
+		vf_equalizer_t *eq=data;
 		em8300_bcs_t bcs;
-		
-		va_start(ap, data);
-		value = va_arg(ap, int*);
-		va_end(ap);
 
 		if (ioctl(fd_control, EM8300_IOCTL_GETBCS, &bcs) < 0)
 		    return VO_FALSE;
-		
-		if (!strcasecmp(data, "brightness"))
-		    *value = (bcs.brightness/5)-100;
-		else if (!strcasecmp(data, "contrast"))
-		    *value = (bcs.contrast/5)-100;
-		else if (!strcasecmp(data, "saturation"))
-		    *value = (bcs.saturation/5)-100;
+
+		if (!strcasecmp(eq->item, "brightness"))
+		    eq->value = (bcs.brightness/5)-100;
+		else if (!strcasecmp(eq->item, "contrast"))
+		    eq->value = (bcs.contrast/5)-100;
+		else if (!strcasecmp(eq->item, "saturation"))
+		    eq->value = (bcs.saturation/5)-100;
 		else return VO_FALSE;
-        
+
 		return VO_TRUE;
 	    }
 	}
@@ -403,12 +295,12 @@ void calculate_cvals(unsigned long mask, int *shift, int *prec)
 	/* Calculate shift and precision */
 	(*shift) = 0;
 	(*prec) = 0;
-	
+
 	while (!(mask & 0x1)) {
 		(*shift)++;
 		mask >>= 1;
 	}
-	
+
 	while (mask & 0x1) {
 		(*prec)++;
 		mask >>= 1;
@@ -419,7 +311,6 @@ static int config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_
 {
 	int tmp1, tmp2, size;
 	em8300_register_t reg;
-	extern float monitor_aspect;
 
 	/* Softzoom turned on, downscale */
 	/* This activates the subpicture processor, you can safely disable this and still send */
@@ -437,7 +328,7 @@ static int config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_
 	if (ioctl(fd_control, EM8300_IOCTL_SET_PLAYMODE, &ioval) < 0) {
 		mp_msg(MSGT_VO,MSGL_WARN, MSGTR_LIBVO_DXR3_UnableToSetPlaymode);
 	}
-	
+
 	/* Start em8300 prebuffering and sync engine */
 	reg.microcode_register = 1;
 	reg.reg = 0;
@@ -470,7 +361,7 @@ static int config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_
 		mp_msg(MSGT_VO,MSGL_WARN, MSGTR_LIBVO_DXR3_UnableToGetTVNorm);
 		old_vmode = -1;
 	}
-	
+
 	/* adjust TV norm */
 	if (dxr3_norm != 0) {
 	    if (dxr3_norm == 5) {
@@ -485,10 +376,10 @@ static int config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_
 			} else {
 			    ioval = EM8300_VIDEOMODE_PAL;
 			}
-			
+
 			mp_msg(MSGT_VO,MSGL_INFO, MSGTR_LIBVO_DXR3_AutoSelectedTVNormByFrameRate);
 			ioval == EM8300_VIDEOMODE_PAL60 ? mp_msg(MSGT_VO,MSGL_INFO, "PAL-60") : mp_msg(MSGT_VO,MSGL_INFO, "PAL");
-			printf(".\n"); 
+			printf(".\n");
 		} else {
 			if (vo_fps > 28) {
 			    ioval = EM8300_VIDEOMODE_NTSC;
@@ -498,17 +389,17 @@ static int config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_
 
 			mp_msg(MSGT_VO,MSGL_INFO, MSGTR_LIBVO_DXR3_AutoSelectedTVNormByFrameRate);
 			ioval == EM8300_VIDEOMODE_NTSC ? mp_msg(MSGT_VO,MSGL_INFO, "NTSC") : mp_msg(MSGT_VO,MSGL_INFO, "PAL");
-			printf(".\n"); 
+			printf(".\n");
 	    }
-	
+
 		if (old_vmode != ioval) {
 	    	if (ioctl(fd_control, EM8300_IOCTL_SET_VIDEOMODE, &ioval) < 0) {
 				mp_msg(MSGT_VO,MSGL_WARN, MSGTR_LIBVO_DXR3_UnableToSetTVNorm);
 	    	}
 		}
 	}
-	
-	
+
+
 	/* libavcodec requires a width and height that is x|16 */
 	aspect_save_orig(width, height);
 	aspect_save_prescale(d_width, d_height);
@@ -523,7 +414,7 @@ static int config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_
 	aspect(&s_width, &s_height, A_ZOOM);
 	s_width -= s_width % 16;
 	s_height -= s_height % 16;
-	
+
 	/* Try to figure out whether to use widescreen output or not */
 	/* Anamorphic widescreen modes makes this a pain in the ass */
 	tmp1 = abs(d_height - ((d_width / 4) * 3));
@@ -538,7 +429,7 @@ static int config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_
 	ioctl(fd_control, EM8300_IOCTL_SET_ASPECTRATIO, &ioval);
 
 #ifdef SPU_SUPPORT
-#ifdef HAVE_FREETYPE
+#ifdef CONFIG_FREETYPE
 	if (ioval == EM8300_ASPECTRATIO_16_9) {
 		s_width *= d_height*1.78/s_height*(d_width*1.0/d_height)/2.35;
 	} else {
@@ -555,13 +446,13 @@ static int config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_
 		mp_msg(MSGT_VO,MSGL_ERR, MSGTR_LIBVO_DXR3_OutOfMemory);
 		return -1;
 	}
-	spued = (encodedata *) malloc(sizeof(encodedata));
+	spued = malloc(sizeof(encodedata));
 	if (spued == NULL) {
 	        free( osdpicbuf );
 		mp_msg(MSGT_VO,MSGL_ERR, MSGTR_LIBVO_DXR3_OutOfMemory);
 		return -1;
 	}
-	spubuf = (encodedata *) malloc(sizeof(encodedata));
+	spubuf = malloc(sizeof(encodedata));
 	if (spubuf == NULL) {
 	        free( osdpicbuf );
 		free( spued );
@@ -572,13 +463,13 @@ static int config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_
 	osd_h = s_height;
 	osdpicbuf_w = s_width;
 	osdpicbuf_h = s_height;
-	
+
 	spubuf->count=0;
 	pixbuf_encode_rle( 0,0,osdpicbuf_w,osdpicbuf_h - 1,osdpicbuf,osdpicbuf_w,spubuf );
 
 #endif
 
-#ifdef HAVE_X11
+#ifdef CONFIG_X11
 	if (dxr3_overlay) {
 		XVisualInfo vinfo;
 		XSetWindowAttributes xswa;
@@ -596,44 +487,24 @@ static int config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_
 		vo_dy = (vo_screenheight - d_height) / 2;
 		vo_dwidth = d_width;
 		vo_dheight = d_height;
-#ifdef HAVE_NEW_GUI
-		if (use_gui) {
-			guiGetEvent(guiSetShVideo, 0);
-			XSetWindowBackground(mDisplay, vo_window, KEY_COLOR);
-			XClearWindow(mDisplay, vo_window);
-			XGetWindowAttributes(mDisplay, DefaultRootWindow(mDisplay), &xwin_attribs);
-			depth = xwin_attribs.depth;
-			if (depth != 15 && depth != 16 && depth != 24 && depth != 32) {
-				depth = 24;
-			}
-			XMatchVisualInfo(mDisplay, mScreen, depth, TrueColor, &vinfo);
-		} else
+#ifdef CONFIG_GUI
+		if (use_gui)
+			gui(GUI_SETUP_VIDEO_WINDOW, 0);
 #endif
-		{
-			XGetWindowAttributes(mDisplay, DefaultRootWindow(mDisplay), &xwin_attribs);
-			depth = xwin_attribs.depth;
-			if (depth != 15 && depth != 16 && depth != 24 && depth != 32) {
-				depth = 24;
-			}
-			XMatchVisualInfo(mDisplay, mScreen, depth, TrueColor, &vinfo);
-			xswa.background_pixel = KEY_COLOR;
-			xswa.border_pixel = 0;
-			xswamask = CWBackPixel | CWBorderPixel;
-			hint.y = vo_dy;
-			hint.x = vo_dx;
-			hint.base_width = hint.width = vo_dwidth;
-			hint.base_height = hint.height = vo_dheight;
-			hint.flags = PPosition | PSize;
-			vo_window = XCreateWindow(mDisplay, mRootWin, hint.x, hint.y, hint.width, hint.height, 0, depth, CopyFromParent, vinfo.visual, xswamask, &xswa);
-			vo_x11_classhint(mDisplay, vo_window, "Viewing Window");
-			vo_hidecursor(mDisplay, vo_window);
-			vo_x11_selectinput_witherr(mDisplay, vo_window, StructureNotifyMask | KeyPressMask | PropertyChangeMask);
-			XSetStandardProperties(mDisplay, vo_window, "DXR3 Overlay", "DXR3 Overlay", None, NULL, 0, &hint);
-			XSetWMNormalHints(mDisplay, vo_window, &hint);
-			XMapWindow(mDisplay, vo_window);
-			XSync(mDisplay, False);
+		XGetWindowAttributes(mDisplay, DefaultRootWindow(mDisplay), &xwin_attribs);
+		depth = xwin_attribs.depth;
+		if (depth != 15 && depth != 16 && depth != 24 && depth != 32) {
+			depth = 24;
 		}
-		
+		XMatchVisualInfo(mDisplay, mScreen, depth, TrueColor, &vinfo);
+		vo_x11_create_vo_window(&vinfo, vo_dx, vo_dy,
+			d_width, d_height, flags,
+			CopyFromParent, "Viewing Window", title);
+		xswa.background_pixel = KEY_COLOR;
+		xswa.border_pixel = 0;
+		xswamask = CWBackPixel | CWBorderPixel;
+		XChangeWindowAttributes(mDisplay, vo_window, xswamask, &xswa);
+
 		/* Start setting up overlay */
 		XGetWindowAttributes(mDisplay, mRootWin, &xwin_attribs);
 		overlay_set_screen(overlay_data, xwin_attribs.width, xwin_attribs.height, xwin_attribs.depth);
@@ -644,7 +515,7 @@ static int config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_
 		calculate_cvals(vinfo.red_mask, &red_shift, &red_prec);
 		calculate_cvals(vinfo.green_mask, &green_shift, &green_prec);
 		calculate_cvals(vinfo.blue_mask, &blue_shift, &blue_prec);
-		
+
 		key_color.red = ((KEY_COLOR >> 16) & 0xff) * 256;
 		key_color.green = ((KEY_COLOR >> 8) & 0xff) * 256;
 		key_color.blue = (KEY_COLOR & 0xff) * 256;
@@ -656,12 +527,12 @@ static int config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_
 			mp_msg(MSGT_VO,MSGL_ERR, MSGTR_LIBVO_DXR3_UnableToAllocateKeycolor);
 			return -1;
 		}
-		
+
 		acq_color = ((key_color.red / 256) << 16) | ((key_color.green / 256) << 8) | key_color.blue;
 		if (key_color.pixel != KEY_COLOR) {
-			mp_msg(MSGT_VO,MSGL_WARN, MSGTR_LIBVO_DXR3_UnableToAllocateExactKeycolor, key_color.pixel);	
+			mp_msg(MSGT_VO,MSGL_WARN, MSGTR_LIBVO_DXR3_UnableToAllocateExactKeycolor, key_color.pixel);
 		}
-		
+
 		/* Set keycolor and activate overlay */
 		XSetWindowBackground(mDisplay, vo_window, key_color.pixel);
 		XClearWindow(mDisplay, vo_window);
@@ -669,9 +540,6 @@ static int config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_
 		overlay_set_mode(overlay_data, EM8300_OVERLAY_MODE_OVERLAY);
 		overlay_set_mode(overlay_data, EM8300_OVERLAY_MODE_RECTANGLE);
 	}
-
-	if (vo_ontop) vo_x11_setlayer(mDisplay, vo_window, vo_ontop);
-
 #endif
 
 	return 0;
@@ -684,8 +552,8 @@ static void draw_alpha(int x, int y, int w, int h, unsigned char* src, unsigned 
 	int by = 0;
 	register int lx, ly;
 	register int stride = 0;
-	
-	for (ly = 0; ly < h - 1; ly++) 
+
+	for (ly = 0; ly < h - 1; ly++)
 	 {
 	  for(lx = 0; lx < w; lx++ )
 	   if ( ( srca[stride + lx] )&&( src[stride + lx] >= 128 ) ) buf[by + lx] = 3;
@@ -696,16 +564,13 @@ static void draw_alpha(int x, int y, int w, int h, unsigned char* src, unsigned 
 #endif
 }
 
-extern int vo_osd_changed_flag;
-extern mp_osd_obj_t* vo_osd_list;
-
 static void draw_osd(void)
 {
 #ifdef SPU_SUPPORT
  static int cleared = 0;
         int changed = 0;
 
-	if ((disposd % 15) == 0) 
+	if ((disposd % 15) == 0)
 	{
 		{
 		 mp_osd_obj_t* obj = vo_osd_list;
@@ -727,7 +592,7 @@ static void draw_osd(void)
 		    if ( !cleared )
 		     {
 		      spued->count=spubuf->count;
-		      memcpy( spued->data,spubuf->data,DATASIZE );
+		      fast_memcpy( spued->data,spubuf->data,DATASIZE );
 		      cleared=1;
 		     }
 		   }
@@ -739,9 +604,7 @@ static void draw_osd(void)
 		 */
 /*		Subpics are not stable yet =(
 		expect lockups if you enable */
-#if 1
 		write(fd_spu, spued->data, spued->count);
-#endif
 	}
 	disposd++;
 #endif
@@ -763,7 +626,7 @@ static int draw_frame(uint8_t * src[])
 
 static void flip_page(void)
 {
-#ifdef HAVE_X11
+#ifdef CONFIG_X11
 	if (dxr3_overlay) {
 		int event = vo_x11_check_events(mDisplay);
 		if (event & VO_EVENT_RESIZE) {
@@ -809,27 +672,15 @@ static void flip_page(void)
 	}
 }
 
-static int draw_slice(uint8_t *srcimg[], int stride[], int w, int h, int x0, int y0)
-{
-	return -1;
-}
-
 static void uninit(void)
 {
 	mp_msg(MSGT_VO,MSGL_INFO, MSGTR_LIBVO_DXR3_Uninitializing);
-#ifdef HAVE_X11
+#ifdef CONFIG_X11
 	if (dxr3_overlay) {
 		overlay_set_mode(overlay_data, EM8300_OVERLAY_MODE_OFF);
 		overlay_release(overlay_data);
-		
-#ifdef HAVE_NEW_GUI
-		if (!use_gui) {
-#endif
-			vo_x11_uninit();
 
-#ifdef HAVE_NEW_GUI
-		}
-#endif
+		vo_x11_uninit();
 	}
 #endif
 	if (old_vmode != -1) {
@@ -837,23 +688,19 @@ static void uninit(void)
 			mp_msg(MSGT_VO,MSGL_WARN, MSGTR_LIBVO_DXR3_FailedRestoringTVNorm);
 		}
 	}
-	
-	if (fd_video) {
+
+	if (fd_video != -1) {
 		close(fd_video);
 	}
-	if (fd_spu) {
+	if (fd_spu != -1) {
 		close(fd_spu);
 	}
-	if (fd_control) {
+	if (fd_control != -1) {
 		close(fd_control);
 	}
 #ifdef SPU_SUPPORT
-	if(osdpicbuf) {
-		free(osdpicbuf);
-	}
-	if(spued) {
-		free(spued);
-	}
+	free(osdpicbuf);
+	free(spued);
 #endif
 }
 
@@ -875,7 +722,7 @@ static int preinit(const char *arg)
 			mp_msg(MSGT_VO,MSGL_INFO, MSGTR_LIBVO_DXR3_UsingNewSyncEngine);
 			dxr3_newsync = 1;
 		} else if (!strncmp("overlay", arg, 7) && !dxr3_overlay) {
-#ifdef HAVE_X11
+#ifdef CONFIG_X11
 			mp_msg(MSGT_VO,MSGL_INFO, MSGTR_LIBVO_DXR3_UsingOverlay);
 			dxr3_overlay = 1;
 #else
@@ -887,7 +734,7 @@ static int preinit(const char *arg)
 			// but maybe someone changes this in the future
 
 			mp_msg(MSGT_VO,MSGL_INFO, MSGTR_LIBVO_DXR3_WillSetTVNormTo);
-			
+
 			if (*arg == '5') {
 			    dxr3_norm = 5;
 			    mp_msg(MSGT_VO,MSGL_INFO, "NTSC");
@@ -910,18 +757,18 @@ static int preinit(const char *arg)
 			    dxr3_norm = 0;
 			    mp_msg(MSGT_VO,MSGL_INFO, MSGTR_LIBVO_DXR3_UseUnknownNormSuppliedCurrentNorm);
 			}
-			
+
 			mp_msg(MSGT_VO,MSGL_INFO, ".\n");
 		} else if (arg[0] == '0' || arg[0] == '1' || arg[0] == '2' || arg[0] == '3') {
 			dxr3_device_num = arg[0];
 		}
-		
+
 		arg = strchr(arg, ':');
 		if (arg) {
 			arg++;
 		}
 	}
-	
+
 
 	/* Open the control interface */
 	sprintf(devname, "/dev/em8300-%d", dxr3_device_num);
@@ -956,7 +803,7 @@ static int preinit(const char *arg)
 		mp_msg(MSGT_VO,MSGL_INFO, MSGTR_LIBVO_DXR3_Opened, devname);
 	}
 	strcpy(fdv_name, devname);
-	
+
 	/* Open the subpicture interface */
 	sprintf(devname, "/dev/em8300_sp-%d", dxr3_device_num);
 	fd_spu = open(devname, fdflags);
@@ -974,10 +821,10 @@ static int preinit(const char *arg)
 		mp_msg(MSGT_VO,MSGL_INFO, MSGTR_LIBVO_DXR3_Opened, devname);
 	}
 	strcpy(fds_name, devname);
-	
-#ifdef HAVE_X11
+
+#ifdef CONFIG_X11
 	if (dxr3_overlay) {
-	
+
 		/* Fucked up hack needed to enable overlay.
 		 * Will be removed as soon as I figure out
 		 * how to make it work like it should
@@ -985,7 +832,7 @@ static int preinit(const char *arg)
 		Display *dpy;
 		overlay_t *ov;
 		XWindowAttributes attribs;
-		
+
 		dpy = XOpenDisplay(NULL);
 	    	if (!dpy) {
 			mp_msg(MSGT_VO,MSGL_ERR, MSGTR_LIBVO_DXR3_UnableToOpenDisplayDuringHackSetup);
@@ -1001,19 +848,13 @@ static int preinit(const char *arg)
 		overlay_release(ov);
 		XCloseDisplay(dpy);
 		/* End of fucked up hack */
-		
+
 		/* Initialize overlay and X11 */
 		overlay_data = overlay_init(fd_control);
-#ifdef HAVE_NEW_GUI
-		if (!use_gui) {
-#endif
-			if (!vo_init()) {
-				mp_msg(MSGT_VO,MSGL_ERR, MSGTR_LIBVO_DXR3_UnableToInitX11);
-				return -1;
-			}
-#ifdef HAVE_NEW_GUI
+		if (!vo_init()) {
+			mp_msg(MSGT_VO,MSGL_ERR, MSGTR_LIBVO_DXR3_UnableToInitX11);
+			return -1;
 		}
-#endif
 	}
 #endif
 
@@ -1042,7 +883,7 @@ static int update_parameters(overlay_t *o)
 static int overlay_set_attribute(overlay_t *o, int attribute, int value)
 {
     em8300_attribute_t attr;
-    
+
     attr.attribute = attribute;
     attr.value = value;
     if (ioctl(o->dev, EM8300_IOCTL_OVERLAY_SET_ATTRIBUTE, &attr)==-1)
@@ -1058,7 +899,7 @@ static overlay_t *overlay_init(int dev)
 {
     overlay_t *o;
 
-    o = (overlay_t *) malloc(sizeof(overlay_t));
+    o = malloc(sizeof(overlay_t));
 
     if(!o)
 	return NULL;
@@ -1074,9 +915,7 @@ static overlay_t *overlay_init(int dev)
 
 static int overlay_release(overlay_t *o)
 {
-    if(o)
-	free(o);
-
+    free(o);
     return 0;
 }
 #define TYPE_INT 1
@@ -1132,21 +971,21 @@ static int overlay_read_state(overlay_t *o, char *p)
     void *ptr;
     int type;
     int j;
-	
+
     if(!p) {
-	strlcpy(fname, getenv("HOME"), sizeof( fname ));
-	strlcat(fname,"/.overlay", sizeof( fname ));	    
+	av_strlcpy(fname, getenv("HOME"), sizeof( fname ));
+	av_strlcat(fname,"/.overlay", sizeof( fname ));
     } else
-	strlcpy(fname, p, sizeof( fname ));
-    
+	av_strlcpy(fname, p, sizeof( fname ));
+
     sprintf(tmp,"/res_%dx%dx%d",o->xres,o->yres,o->depth);
-    strlcat(fname, tmp, sizeof( fname ));
+    av_strlcat(fname, tmp, sizeof( fname ));
 
     if(!(fp=fopen(fname,"r")))
 	return -1;
 
     lut = new_lookuptable(o);
-    
+
     while(!feof(fp)) {
 	if(!fgets(line,256,fp))
 	    break;
@@ -1170,14 +1009,14 @@ static int overlay_read_state(overlay_t *o, char *p)
 		    sscanf(tok,"%f",&((struct coeff *)ptr)[j].m);
 		    tok=strtok(NULL," ");
 		}
-		break;	    
+		break;
 	    }
-	    
-	}	
+
+	}
     }
 
     update_parameters(o);
-    
+
     free(lut);
     fclose(fp);
     return 0;
@@ -1187,7 +1026,7 @@ static void overlay_update_params(overlay_t *o) {
     update_parameters(o);
 }
 
-static int overlay_write_state(overlay_t *o, char *p)	
+static int overlay_write_state(overlay_t *o, char *p)
 {
     char *a;
     char path[128],fname[128],tmp[128];
@@ -1195,27 +1034,27 @@ static int overlay_write_state(overlay_t *o, char *p)
     char line[256],*tok;
     struct lut_entry *lut;
     int i,j;
-	
+
     if(!p) {
-	strlcpy(fname, getenv("HOME"), sizeof( fname ));
-	strlcat(fname,"/.overlay", sizeof( fname ));	    
+	av_strlcpy(fname, getenv("HOME"), sizeof( fname ));
+	av_strlcat(fname,"/.overlay", sizeof( fname ));
     } else
-	strlcpy(fname, p, sizeof( fname ));
+	av_strlcpy(fname, p, sizeof( fname ));
 
     if(access(fname, W_OK|X_OK|R_OK)) {
 	if(mkdir(fname,0766))
 	    return -1;
-    }	
-    
+    }
+
     sprintf(tmp,"/res_%dx%dx%d",o->xres,o->yres,o->depth);
-    strlcat(fname, tmp, sizeof( fname ));
-    
+    av_strlcat(fname, tmp, sizeof( fname ));
+
     if(!(fp=fopen(fname,"w")))
 	return -1;
-    
+
     lut = new_lookuptable(o);
 
-    for(i=0; lut[i].name; i++) {	
+    for(i=0; lut[i].name; i++) {
 	fprintf(fp,"%s ",lut[i].name);
 	switch(lut[i].type) {
 	case TYPE_INT:
@@ -1228,11 +1067,11 @@ static int overlay_write_state(overlay_t *o, char *p)
 	    fprintf(fp,"%f\n",*(float *)lut[i].ptr);
 	    break;
 	case TYPE_COEFF:
-	    for(j=0;j<3;j++) 
+	    for(j=0;j<3;j++)
 		fprintf(fp,"%f %f ",((struct coeff *)lut[i].ptr)[j].k,
 			((struct coeff *)lut[i].ptr)[j].m);
 	    fprintf(fp,"\n");
-	    break;	    
+	    break;
 	}
     }
 
@@ -1250,7 +1089,7 @@ static int overlay_set_screen(overlay_t *o, int xres, int yres, int depth)
 
    scr.xsize = xres;
    scr.ysize = yres;
-   
+
    if (ioctl(o->dev, EM8300_IOCTL_OVERLAY_SETSCREEN, &scr)==-1)
         {
             mp_msg(MSGT_VO,MSGL_WARN, MSGTR_LIBVO_DXR3_FailedSettingOverlayScreen);
@@ -1325,7 +1164,7 @@ static int overlay_set_keycolor(overlay_t *o, int color) {
     rl = r-o->color_interval;
     gl = g-o->color_interval;
     bl = b-o->color_interval;
-    
+
     upper = (col_interp(ru, o->colcal_upper[0]) << 16) |
 	    (col_interp(gu, o->colcal_upper[1]) << 8) |
 	    (col_interp(bu, o->colcal_upper[2]));

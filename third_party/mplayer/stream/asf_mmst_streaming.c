@@ -21,13 +21,12 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 
-#include "config.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,43 +34,35 @@
 #include <errno.h>
 #include <inttypes.h>
 
+#include "libavutil/attributes.h"
+
+#include "config.h"
 
 #include "mp_msg.h"
 #include "help_mp.h"
+#include "mpcommon.h"
 
-#ifndef HAVE_WINSOCK2
-#define closesocket close
-#else
+#if HAVE_WINSOCK2_H
 #include <winsock2.h>
 #endif
 
-#ifndef USE_SETLOCALE
-#undef USE_ICONV
-#endif
-
-#ifdef USE_ICONV
+#ifdef CONFIG_ICONV
 #include <iconv.h>
-#ifdef USE_LANGINFO
-#include <langinfo.h>
-#endif
 #endif
 
 #include "url.h"
 #include "libmpdemux/asf.h"
 
 #include "stream.h"
-
+#include "asf_mmst_streaming.h"
 #include "network.h"
 #include "tcp.h"
-
-extern int audio_id;
-extern int video_id;
 
 #define BUF_SIZE 102400
 #define HDR_BUF_SIZE 8192
 #define MAX_STREAMS 20
 
-typedef struct 
+typedef struct
 {
   uint8_t buf[BUF_SIZE];
   int     num_bytes;
@@ -84,7 +75,7 @@ static int stream_ids[MAX_STREAMS];
 
 static int get_data (int s, char *buf, size_t count);
 
-static void put_32 (command_t *cmd, uint32_t value) 
+static void put_32 (command_t *cmd, uint32_t value)
 {
   cmd->buf[cmd->num_bytes  ] = value % 256;
   value = value >> 8;
@@ -97,7 +88,7 @@ static void put_32 (command_t *cmd, uint32_t value)
   cmd->num_bytes += 4;
 }
 
-static uint32_t get_32 (unsigned char *cmd, int offset) 
+static uint32_t get_32 (unsigned char *cmd, int offset)
 {
   uint32_t ret;
 
@@ -109,9 +100,9 @@ static uint32_t get_32 (unsigned char *cmd, int offset)
   return ret;
 }
 
-static void send_command (int s, int command, uint32_t switches, 
+static void send_command (int s, int command, uint32_t switches,
 			  uint32_t extra, int length,
-			  char *data) 
+			  char *data)
 {
   command_t  cmd;
   int        len8;
@@ -143,13 +134,13 @@ static void send_command (int s, int command, uint32_t switches,
   }
 }
 
-#ifdef USE_ICONV
+#ifdef CONFIG_ICONV
 static iconv_t url_conv;
 #endif
 
 static void string_utf16(char *dest, char *src, int len) {
     int i;
-#ifdef USE_ICONV
+#ifdef CONFIG_ICONV
     size_t len1, len2;
     char *ip, *op;
 
@@ -172,12 +163,12 @@ static void string_utf16(char *dest, char *src, int len) {
 	/* trailing zeroes */
 	dest[i*2] = 0;
 	dest[i*2+1] = 0;
-#ifdef USE_ICONV
+#ifdef CONFIG_ICONV
     }
 #endif
 }
 
-static void get_answer (int s) 
+static void get_answer (int s)
 {
   char  data[BUF_SIZE];
   int   command = 0x1b;
@@ -193,12 +184,12 @@ static void get_answer (int s)
 
     command = get_32 (data, 36) & 0xFFFF;
 
-    if (command == 0x1b) 
+    if (command == 0x1b)
       send_command (s, 0x1b, 0, 0, 0, data);
   }
 }
 
-static int get_data (int s, char *buf, size_t count) 
+static int get_data (int s, char *buf, size_t count)
 {
   ssize_t  len;
   size_t total = 0;
@@ -225,7 +216,7 @@ static int get_data (int s, char *buf, size_t count)
 
 }
 
-static int get_header (int s, uint8_t *header, streaming_ctrl_t *streaming_ctrl) 
+static int get_header (int s, uint8_t *header, streaming_ctrl_t *streaming_ctrl)
 {
   unsigned char  pre_header[8];
   int            header_len;
@@ -238,9 +229,9 @@ static int get_header (int s, uint8_t *header, streaming_ctrl_t *streaming_ctrl)
       return 0;
     }
     if (pre_header[4] == 0x02) {
-      
+
       int packet_len;
-      
+
       packet_len = (pre_header[7] << 8 | pre_header[6]) - 8;
 
 //      mp_msg(MSGT_NETWORK,MSGL_INFO,"asf header packet detected, len=%d\n", packet_len);
@@ -258,7 +249,7 @@ static int get_header (int s, uint8_t *header, streaming_ctrl_t *streaming_ctrl)
       header_len += packet_len;
 
       if ( (header[header_len-1] == 1) && (header[header_len-2]==1)) {
-	
+
 
      if( streaming_bufferize( streaming_ctrl, header, header_len )<0 ) {
 				return -1;
@@ -266,9 +257,9 @@ static int get_header (int s, uint8_t *header, streaming_ctrl_t *streaming_ctrl)
 
      //	mp_msg(MSGT_NETWORK,MSGL_INFO,"get header packet finished\n");
 
-	return (header_len);
+	return header_len;
 
-      } 
+      }
 
     } else {
 
@@ -280,9 +271,9 @@ static int get_header (int s, uint8_t *header, streaming_ctrl_t *streaming_ctrl)
 	mp_msg(MSGT_NETWORK,MSGL_ERR,MSGTR_MPDEMUX_MMST_packet_lenReadFailed);
 	return 0;
       }
-      
+
       packet_len = get_32 ((unsigned char*)&packet_len, 0) + 4;
-      
+
 //      mp_msg(MSGT_NETWORK,MSGL_INFO,"command packet detected, len=%d\n", packet_len);
 
       if (packet_len < 0 || packet_len > BUF_SIZE) {
@@ -290,26 +281,26 @@ static int get_header (int s, uint8_t *header, streaming_ctrl_t *streaming_ctrl)
                 MSGTR_MPDEMUX_MMST_InvalidRTSPPacketSize);
         return 0;
       }
-      
+
       if (!get_data (s, data, packet_len)) {
 	mp_msg(MSGT_NETWORK,MSGL_ERR,MSGTR_MPDEMUX_MMST_CmdDataReadFailed);
 	return 0;
       }
-      
+
       command = get_32 (data, 24) & 0xFFFF;
-      
+
 //      mp_msg(MSGT_NETWORK,MSGL_INFO,"command: %02x\n", command);
-      
-      if (command == 0x1b) 
+
+      if (command == 0x1b)
 	send_command (s, 0x1b, 0, 0, 0, data);
-      
+
     }
 
 //    mp_msg(MSGT_NETWORK,MSGL_INFO,"get header packet succ\n");
   }
 }
 
-static int interp_header (uint8_t *header, int header_len) 
+static int interp_header (uint8_t *header, int header_len)
 {
   int i;
   int packet_length=-1;
@@ -320,24 +311,24 @@ static int interp_header (uint8_t *header, int header_len)
 
   i = 30;
   while (i<header_len) {
-    
+
     uint64_t  guid_1, guid_2, length;
 
-    guid_2 = (uint64_t)header[i] | ((uint64_t)header[i+1]<<8) 
+    guid_2 = (uint64_t)header[i] | ((uint64_t)header[i+1]<<8)
       | ((uint64_t)header[i+2]<<16) | ((uint64_t)header[i+3]<<24)
       | ((uint64_t)header[i+4]<<32) | ((uint64_t)header[i+5]<<40)
       | ((uint64_t)header[i+6]<<48) | ((uint64_t)header[i+7]<<56);
     i += 8;
 
-    guid_1 = (uint64_t)header[i] | ((uint64_t)header[i+1]<<8) 
+    guid_1 = (uint64_t)header[i] | ((uint64_t)header[i+1]<<8)
       | ((uint64_t)header[i+2]<<16) | ((uint64_t)header[i+3]<<24)
       | ((uint64_t)header[i+4]<<32) | ((uint64_t)header[i+5]<<40)
       | ((uint64_t)header[i+6]<<48) | ((uint64_t)header[i+7]<<56);
     i += 8;
-    
+
 //    mp_msg(MSGT_NETWORK,MSGL_INFO,"guid found: %016llx%016llx\n", guid_1, guid_2);
 
-    length = (uint64_t)header[i] | ((uint64_t)header[i+1]<<8) 
+    length = (uint64_t)header[i] | ((uint64_t)header[i+1]<<8)
       | ((uint64_t)header[i+2]<<16) | ((uint64_t)header[i+3]<<24)
       | ((uint64_t)header[i+4]<<32) | ((uint64_t)header[i+5]<<40)
       | ((uint64_t)header[i+6]<<48) | ((uint64_t)header[i+7]<<56);
@@ -368,7 +359,7 @@ static int interp_header (uint8_t *header, int header_len)
       } else {
         mp_msg(MSGT_NETWORK,MSGL_ERR,MSGTR_MPDEMUX_MMST_2ManyStreamID);
       }
-      
+
     } else {
 #if 0
       int b = i;
@@ -422,7 +413,7 @@ static int get_media_packet (int s, int padding, streaming_ctrl_t *stream_ctrl) 
       mp_msg(MSGT_NETWORK, MSGL_FATAL, MSGTR_MPDEMUX_MMST_InvalidRTSPPacketSize);
       return 0;
     }
-      
+
     if (!get_data (s, data, packet_len)) {
       mp_msg(MSGT_NETWORK,MSGL_ERR,MSGTR_MPDEMUX_MMST_MediaDataReadFailed);
       return 0;
@@ -463,7 +454,7 @@ static int get_media_packet (int s, int padding, streaming_ctrl_t *stream_ctrl) 
 
 //    mp_msg(MSGT_NETWORK,MSGL_INFO,"\ncommand packet detected, len=%d  cmd=0x%X\n", packet_len, command);
 
-    if (command == 0x1b) 
+    if (command == 0x1b)
       send_command (s, 0x1b, 0, 0, 0, data);
     else if (command == 0x1e) {
       mp_msg(MSGT_NETWORK,MSGL_INFO,MSGTR_MPDEMUX_MMST_PatentedTechnologyJoke);
@@ -488,10 +479,10 @@ static int get_media_packet (int s, int padding, streaming_ctrl_t *stream_ctrl) 
 
 static int packet_length1;
 
-static int asf_mmst_streaming_read( int fd, char *buffer, int size, streaming_ctrl_t *stream_ctrl ) 
+static int asf_mmst_streaming_read( int fd, char *buffer, int size, streaming_ctrl_t *stream_ctrl )
 {
   int len;
-  
+
   while( stream_ctrl->buffer_size==0 ) {
           // buffer is empty - fill it!
 	  int ret = get_media_packet( fd, packet_length1, stream_ctrl);
@@ -501,7 +492,7 @@ static int asf_mmst_streaming_read( int fd, char *buffer, int size, streaming_ct
 	  } else if (ret==0) //EOF?
 		  return ret;
   }
-  
+
 	  len = stream_ctrl->buffer_size-stream_ctrl->buffer_pos;
 	  if(len>size) len=size;
 	  memcpy( buffer, (stream_ctrl->buffer)+(stream_ctrl->buffer_pos), len );
@@ -516,13 +507,9 @@ static int asf_mmst_streaming_read( int fd, char *buffer, int size, streaming_ct
 
 }
 
-static int asf_mmst_streaming_seek( int fd, off_t pos, streaming_ctrl_t *streaming_ctrl ) 
+static int asf_mmst_streaming_seek( int av_unused fd, int64_t av_unused pos, streaming_ctrl_t * av_unused streaming_ctrl )
 {
 	return -1;
-	// Shut up gcc warning
-	fd++;
-	pos++;
-	streaming_ctrl=NULL;
 }
 
 int asf_mmst_streaming_start(stream_t *stream)
@@ -540,7 +527,7 @@ int asf_mmst_streaming_start(stream_t *stream)
 	  closesocket( stream->fd );
 	  stream->fd = -1;
   }
-  
+
   /* parse url */
   path = strchr(url1->file,'/') + 1;
 
@@ -550,11 +537,11 @@ int asf_mmst_streaming_start(stream_t *stream)
   unescpath=malloc(strlen(path)+1);
   if (!unescpath) {
 	mp_msg(MSGT_NETWORK,MSGL_FATAL,MSGTR_MemAllocFailed);
-	return -1; 
+	return -1;
   }
   url_unescape_string(unescpath,path);
   path=unescpath;
-  
+
 
   if( url1->port==0 ) {
 	url1->port=1755;
@@ -565,22 +552,18 @@ int asf_mmst_streaming_start(stream_t *stream)
 	  return s;
   }
   mp_msg(MSGT_NETWORK,MSGL_INFO,MSGTR_MPDEMUX_MMST_Connected);
-  
+
   seq_num=0;
 
   /*
-  * Send the initial connect info including player version no. Client GUID (random) and the host address being connected to. 
-  * This command is sent at the very start of protocol initiation. It sends local information to the serve 
-  * cmd 1 0x01 
+  * Send the initial connect info including player version no. Client GUID (random) and the host address being connected to.
+  * This command is sent at the very start of protocol initiation. It sends local information to the serve
+  * cmd 1 0x01
   * */
 
   /* prepare for the url encoding conversion */
-#ifdef USE_ICONV
-#ifdef USE_LANGINFO
-  url_conv = iconv_open("UTF-16LE",nl_langinfo(CODESET));
-#else
-  url_conv = iconv_open("UTF-16LE", NULL);
-#endif
+#ifdef CONFIG_ICONV
+  url_conv = iconv_open("UTF-16LE", "UTF-8");
 #endif
 
   snprintf (str, 1023, "\034\003NSPlayer/7.0.0.1956; {33715801-BAB3-9D85-24E9-03B90328270A}; Host: %s", url1->hostname);
@@ -590,7 +573,7 @@ int asf_mmst_streaming_start(stream_t *stream)
 
   len = recv (s, data, BUF_SIZE, 0) ;
 
-  /*This sends details of the local machine IP address to a Funnel system at the server. 
+  /*This sends details of the local machine IP address to a Funnel system at the server.
   * Also, the TCP or UDP transport selection is sent.
   *
   * here 192.168.0.1 is local ip address TCP/UDP states the tronsport we r using
@@ -614,8 +597,8 @@ int asf_mmst_streaming_start(stream_t *stream)
 
   get_answer (s);
 
-  /* The ASF header chunk request. Includes ?session' variable for pre header value. 
-  * After this command is sent, 
+  /* The ASF header chunk request. Includes ?session' variable for pre header value.
+  * After this command is sent,
   * the server replies with 0x11 command and then the header chunk with header data follows.
   * 0x15 */
 
@@ -636,14 +619,14 @@ int asf_mmst_streaming_start(stream_t *stream)
   packet_length = interp_header (asf_header, asf_header_len);
 
 
-  /* 
-  * This command is the media stream MBR selector. Switches are always 6 bytes in length.  
-  * After all switch elements, data ends with bytes [00 00] 00 20 ac 40 [02]. 
-  * Where:  
-  * [00 00] shows 0x61 0x00 (on the first 33 sent) or 0xff 0xff for ASF files, and with no ending data for WMV files. 
-  * It is not yet understood what all this means. 
-  * And the last [02] byte is probably the header ?session' value. 
-  *  
+  /*
+  * This command is the media stream MBR selector. Switches are always 6 bytes in length.
+  * After all switch elements, data ends with bytes [00 00] 00 20 ac 40 [02].
+  * Where:
+  * [00 00] shows 0x61 0x00 (on the first 33 sent) or 0xff 0xff for ASF files, and with no ending data for WMV files.
+  * It is not yet understood what all this means.
+  * And the last [02] byte is probably the header ?session' value.
+  *
   *  0x33 */
 
   memset (data, 0, 40);
@@ -666,10 +649,10 @@ int asf_mmst_streaming_start(stream_t *stream)
 
   get_answer (s);
 
-  /* Start sending file from packet xx. 
-  * This command is also used for resume downloads or requesting a lost packet. 
-  * Also used for seeking by sending a play point value which seeks to the media time point. 
-  * Includes ?session' value in pre header and the maximum media stream time. 
+  /* Start sending file from packet xx.
+  * This command is also used for resume downloads or requesting a lost packet.
+  * Also used for seeking by sending a play point value which seeks to the media time point.
+  * Includes ?session' value in pre header and the maximum media stream time.
   * 0x07 */
 
   memset (data, 0, 40);
@@ -690,7 +673,7 @@ int asf_mmst_streaming_start(stream_t *stream)
   packet_length1 = packet_length;
   mp_msg(MSGT_NETWORK,MSGL_INFO,"mmst packet_length = %d\n", packet_length);
 
-#ifdef USE_ICONV
+#ifdef CONFIG_ICONV
   if (url_conv != (iconv_t)(-1))
     iconv_close(url_conv);
 #endif

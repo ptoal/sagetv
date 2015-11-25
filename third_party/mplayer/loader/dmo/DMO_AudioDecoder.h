@@ -1,7 +1,10 @@
-#ifndef AVIFILE_DMO_AUDIODECODER_H
-#define AVIFILE_DMO_AUDIODECODER_H
+#ifndef MPLAYER_DMO_AUDIODECODER_H
+#define MPLAYER_DMO_AUDIODECODER_H
 
-typedef struct _DMO_AudioDecoder DMO_AudioDecoder;
+#include "loader/com.h"
+#include "loader/wine/mmreg.h"
+
+typedef struct DMO_AudioDecoder DMO_AudioDecoder;
 
 //DMO_AudioDecoder * DMO_AudioDecoder_Create(const CodecInfo * info, const WAVEFORMATEX* wf);
 DMO_AudioDecoder * DMO_AudioDecoder_Open(char* dllname, GUID* guid, WAVEFORMATEX* wf,int out_channels);
@@ -14,4 +17,4 @@ int DMO_AudioDecoder_Convert(DMO_AudioDecoder *this, const void* in_data, unsign
 
 int DMO_AudioDecoder_GetSrcSize(DMO_AudioDecoder *this, int dest_size);
 
-#endif // AVIFILE_DMO_AUDIODECODER_H
+#endif /* MPLAYER_DMO_AUDIODECODER_H */

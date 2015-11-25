@@ -1,23 +1,21 @@
-/* 
- *  vo_tdfx_vid.c
+/*
+ * copyright (C) 2003 Alban Bedel
  *
- *	Copyright (C) Alban Bedel - 03/2003
+ * This file is part of MPlayer.
  *
- *  This file is part of MPlayer, a free movie player.
- *	
- *  MPlayer is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2, or (at your option)
- *  any later version.
- *   
- *  MPlayer is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *   
- *  You should have received a copy of the GNU General Public License along
- *  with MPlayer; if not, write to the Free Software Foundation, Inc.,
- *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include <stdio.h>
@@ -41,7 +39,7 @@
 #include "drivers/tdfx_vid.h"
 
 
-static vo_info_t info = 
+static const vo_info_t info =
 {
 	"tdfx vid",
 	"tdfx_vid",
@@ -51,7 +49,7 @@ static vo_info_t info =
 
 //#define VERBOSE
 
-LIBVO_EXTERN(tdfx_vid)
+const LIBVO_EXTERN(tdfx_vid)
 
 static tdfx_vid_config_t tdfx_cfg;
 
@@ -75,11 +73,12 @@ static int use_overlay = 1;
 static tdfx_vid_overlay_t tdfx_ov;
 
 // FIXME
+#if 0
 static void clear_screen(void) {
   tdfx_vid_agp_move_t mov;
 
   memset(agp_mem,0,tdfx_cfg.screen_width*dst_bpp*tdfx_cfg.screen_height);
-  
+
   mov.move2 = TDFX_VID_MOVE_2_PACKED;
   mov.width = tdfx_cfg.screen_width*dst_bpp;
   mov.height = tdfx_cfg.screen_height;
@@ -92,8 +91,9 @@ static void clear_screen(void) {
 
   if(ioctl(tdfx_fd,TDFX_VID_AGP_MOVE,&mov))
     mp_msg(MSGT_VO,MSGL_WARN, MSGTR_LIBVO_TDFXVID_AGPMoveFailedToClearTheScreen);
-  
+
 }
+#endif
 
 static int draw_slice(uint8_t *image[], int stride[], int w,int h,int x,int y)
 {
@@ -111,7 +111,7 @@ static int draw_slice(uint8_t *image[], int stride[], int w,int h,int x,int y)
   case IMGFMT_BGR32:
     // copy :( to agp_mem
     // still faster than tdfxfb wich directly copy to the video mem :)
-    mem2agpcpy_pic(agp_mem + current_buffer * buffer_size + 
+    mem2agpcpy_pic(agp_mem + current_buffer * buffer_size +
 	       y*buffer_stride[0] + x * src_bpp,
 	       image[0],
 	       src_bpp*w,h,buffer_stride[0],stride[0]);
@@ -131,7 +131,7 @@ static int draw_slice(uint8_t *image[], int stride[], int w,int h,int x,int y)
 		   buffer_stride[2],stride[2]);
     return 0;
   }
-    
+
   return 1;
 }
 
@@ -149,7 +149,7 @@ flip_page(void)
   printf("Flip\n");
 #endif
   if(use_overlay) {
-    // TDFX_VID_OVERLAY_ON does nothing if the overlay is alredy on
+    // TDFX_VID_OVERLAY_ON does nothing if the overlay is already on
     if(!ioctl(tdfx_fd,TDFX_VID_OVERLAY_ON)) { // X11 killed the overlay :(
       if(ioctl(tdfx_fd,TDFX_VID_SET_OVERLAY,&tdfx_ov))
 	mp_msg(MSGT_VO, MSGL_ERR, "tdfx_vid: set_overlay failed\n");
@@ -167,7 +167,7 @@ flip_page(void)
       blit.src_w = src_width;
       blit.src_h = src_height;
       blit.src_format = src_fmt;
-      
+
       blit.dst = front_buffer;
       blit.dst_stride = dst_stride;
       blit.dst_x = 0;
@@ -243,11 +243,11 @@ config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uin
       vo_screenwidth = tdfx_cfg.screen_width;
     if(!vo_screenheight)
       vo_screenheight = tdfx_cfg.screen_height;
-    
+
     aspect_save_orig(width,height);
     aspect_save_prescale(d_width,d_height);
     aspect_save_screenres(vo_screenwidth,vo_screenheight);
-    
+
     if(flags&VOFLAG_FULLSCREEN) { /* -fs */
       aspect(&d_width,&d_height,A_ZOOM);
       vo_fs = VO_TRUE;
@@ -267,9 +267,10 @@ config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uin
   case IMGFMT_BGR32:
     if(use_overlay)
       mp_msg(MSGT_VO,MSGL_INFO, MSGTR_LIBVO_TDFXVID_NonNativeOverlayFormatNeedConversion);
+    /* Fallthrough */
   case IMGFMT_BGR15:
   case IMGFMT_BGR16:
-    src_bpp = ((format & 0x3F)+7)/8; 
+    src_bpp = (IMGFMT_BGR_DEPTH(format)+7)/8;
     break;
   case IMGFMT_YV12:
   case IMGFMT_I420:
@@ -277,8 +278,9 @@ config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uin
     buffer_stride[0] = ((src_width+1)/2)*2;
     buffer_stride[1] = buffer_stride[2] = buffer_stride[0]/2;
     src_fmt = TDFX_VID_FORMAT_YUY2;
+    /* TODO: is src_bpp == 2 really correct?? */
   case IMGFMT_YUY2:
-  case IMGFMT_UYVY: 
+  case IMGFMT_UYVY:
     src_bpp = 2;
     break;
   default:
@@ -351,7 +353,7 @@ config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uin
       }
       use_overlay++;
     }
-    
+
     mp_msg(MSGT_VO,MSGL_INFO, MSGTR_LIBVO_TDFXVID_OverlayReady,
 	   src_width,src_stride,src_height,src_bpp,
 	   dst_width,dst_stride,dst_height,dst_bpp);
@@ -362,7 +364,7 @@ config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uin
     mp_msg(MSGT_VO,MSGL_INFO, MSGTR_LIBVO_TDFXVID_TextureBlitReady,
 	   src_width,src_stride,src_height,src_bpp,
 	   dst_width,dst_stride,dst_height,dst_bpp);
-  
+
   return 0;
 }
 
@@ -385,7 +387,7 @@ static void check_events(void)
 
 static int preinit(const char *arg)
 {
- 
+
   tdfx_fd = open(arg ? arg : "/dev/tdfx_vid", O_RDWR);
   if(tdfx_fd < 0) {
     mp_msg(MSGT_VO,MSGL_WARN, MSGTR_LIBVO_TDFXVID_CantOpen,arg ? arg : "/dev/tdfx_vid",
@@ -416,7 +418,7 @@ static int preinit(const char *arg)
     mp_msg(MSGT_VO,MSGL_WARN, MSGTR_LIBVO_TDFXVID_MemmapFailed);
     return 1;
   }
-  
+
   memset(agp_mem,0,1024*768*4);
 
   return 0;
@@ -470,7 +472,7 @@ static uint32_t get_image(mp_image_t *mpi) {
   }
   mpi->flags |= MP_IMGFLAG_DIRECT;
   mpi->priv = (void*)buf;
-  
+
   return VO_TRUE;
 }
 
@@ -494,7 +496,6 @@ static uint32_t draw_image(mp_image_t *mpi){
   tdfx_vid_yuv_t yuv;
   int p;
   uint8_t* planes[3];
-  int stride[3];
 
 #ifdef VERBOSE
   printf("Draw image %d\n",buf);
@@ -527,10 +528,10 @@ static uint32_t draw_image(mp_image_t *mpi){
     mov.height = mpi->height;
     mov.src = planes[0] - agp_mem;
     mov.src_stride = buffer_stride[0];
-  
+
     mov.dst = back_buffer;
     mov.dst_stride = src_stride;
-	 
+
     if(ioctl(tdfx_fd,TDFX_VID_AGP_MOVE,&mov))
       mp_msg(MSGT_VO,MSGL_WARN, MSGTR_LIBVO_TDFXVID_AgpMoveFailed);
     break;
@@ -564,7 +565,7 @@ static uint32_t draw_image(mp_image_t *mpi){
       mp_msg(MSGT_VO,MSGL_WARN, MSGTR_LIBVO_TDFXVID_SetYuvFailed);
       break;
     }
-    
+
 
     // Now agp move that
     // Y
@@ -645,7 +646,7 @@ static uint32_t set_colorkey(mp_colorkey_t* colork) {
   return VO_TRUE;
 }
 
-static int control(uint32_t request, void *data, ...)
+static int control(uint32_t request, void *data)
 {
   switch (request) {
   case VOCTRL_QUERY_FORMAT:
@@ -667,4 +668,3 @@ static int control(uint32_t request, void *data, ...)
   }
   return VO_NOTIMPL;
 }
-

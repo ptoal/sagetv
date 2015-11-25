@@ -1,23 +1,21 @@
 /*
- *  stream_vstream.c
+ * Copyright (C) Joey Parrish
  *
- *	Copyright (C) Joey Parrish
+ * This file is part of MPlayer.
  *
- *  This file is part of MPlayer, a free movie player.
- *	
- *  MPlayer is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2, or (at your option)
- *  any later version.
- *   
- *  MPlayer is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *   
- *  You should have received a copy of the GNU General Public License
- *  along with MPlayer; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 /*
@@ -59,7 +57,7 @@ void vstream_error(const char *format, ...) {
     va_start(va, format);
     vsnprintf(buf, 1024, format, va);
     va_end(va);
-    mp_msg(MSGT_STREAM, MSGL_ERR, buf);
+    mp_msg(MSGT_STREAM, MSGL_ERR, "%s", buf);
 }
 
 static struct stream_priv_s {
@@ -72,13 +70,13 @@ static struct stream_priv_s {
 
 #define ST_OFF(f) M_ST_OFF(struct stream_priv_s,f)
 /// URL definition
-static m_option_t stream_opts_fields[] = {
+static const m_option_t stream_opts_fields[] = {
   {"hostname", ST_OFF(host), CONF_TYPE_STRING, 0, 0 ,0, NULL},
   {"filename", ST_OFF(fsid), CONF_TYPE_STRING, 0, 0 ,0, NULL},
   { NULL, NULL, 0, 0, 0, 0,  NULL }
 };
 
-static struct m_struct_st stream_opts = {
+static const struct m_struct_st stream_opts = {
   "vstream",
   sizeof(struct stream_priv_s),
   &stream_priv_dflts,
@@ -92,16 +90,16 @@ static int fill_buffer(stream_t *s, char* buffer, int max_len){
   return len;
 }
 
-static int seek(stream_t *s,off_t newpos) {
+static int seek(stream_t *s, int64_t newpos) {
   s->pos = newpos;
   return 1;
 }
 
-static int control(struct stream_st *s,int cmd,void* arg) {
-  return STREAM_UNSUPORTED;
+static int control(struct stream *s, int cmd, void *arg) {
+  return STREAM_UNSUPPORTED;
 }
 
-static void close_s(struct stream_st *s) {
+static void close_s(struct stream *s) {
 }
 
 static int open_s(stream_t *stream, int mode, void* opts, int* file_format) {
@@ -109,7 +107,7 @@ static int open_s(stream_t *stream, int mode, void* opts, int* file_format) {
   struct stream_priv_s* p = (struct stream_priv_s*)opts;
 
   if(mode != STREAM_READ)
-    return STREAM_UNSUPORTED;
+    return STREAM_UNSUPPORTED;
 
   if(!p->host) {
     mp_msg(MSGT_OPEN, MSGL_ERR, "We need a host name (ex: tivo://hostname/fsid)\n");
@@ -152,10 +150,10 @@ static int open_s(stream_t *stream, int mode, void* opts, int* file_format) {
     m_struct_free(&stream_opts, opts);
     return STREAM_ERROR;
   }
-  
+
   stream->start_pos = 0;
   stream->end_pos = vstream_streamsize();
-  mp_msg(MSGT_OPEN, MSGL_DBG2, "Tivo stream size is %d\n", stream->end_pos);
+  mp_msg(MSGT_OPEN, MSGL_DBG2, "Tivo stream size is %"PRIu64"\n", stream->end_pos);
 
   stream->priv = p;
   stream->fill_buffer = fill_buffer;
@@ -167,7 +165,7 @@ static int open_s(stream_t *stream, int mode, void* opts, int* file_format) {
   return STREAM_OK;
 }
 
-stream_info_t stream_info_vstream = {
+const stream_info_t stream_info_vstream = {
   "vstream client",
   "vstream",
   "Joey",

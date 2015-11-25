@@ -1,20 +1,33 @@
+/*
+ * copyright (C) 2001 Zoltan Ponekker
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 //#define SHOW_TIME
-
-/*
- *    vo_xmga.c
- *
- *      Copyright (C) Zoltan Ponekker - Jan 2001
- *
- */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "config.h"
-
+#include "mp_msg.h"
 #include "video_out.h"
+#define NO_DRAW_FRAME
 #include "video_out_internal.h"
 
 
@@ -29,12 +42,12 @@
 #include <X11/Xutil.h>
 #include <errno.h>
 
-#ifdef HAVE_XINERAMA
+#ifdef CONFIG_XINERAMA
 #include <X11/extensions/Xinerama.h>
 #endif
 
 #include "x11_common.h"
-#include "sub.h"
+#include "sub/sub.h"
 #include "aspect.h"
 
 #ifdef SHOW_TIME
@@ -43,19 +56,14 @@ static unsigned int timer = 0;
 static unsigned int timerd = 0;
 #endif
 
-#ifdef HAVE_NEW_GUI
-#include "Gui/interface.h"
-#endif
-
-static vo_info_t info = {
+static const vo_info_t info = {
     "Matrox G200/G4x0/G550 overlay in X11 window (using /dev/mga_vid)",
     "xmga",
     "Zoltan Ponekker <pontscho@makacs.poliod.hu>",
     ""
 };
 
-LIBVO_EXTERN(xmga)
-static XGCValues wGCV;
+const LIBVO_EXTERN(xmga)
 
 static uint32_t mDepth;
 static XWindowAttributes attribs;
@@ -64,14 +72,12 @@ static int colorkey;
 static uint32_t mvHeight;
 static uint32_t mvWidth;
 
-static Window mRoot;
-
 static XSetWindowAttributes xWAttribs;
 
-static int inited = 0;
+static int initialized = 0;
 
 #define VO_XMGA
-#include "mga_common.c"
+#include "mga_template.c"
 #undef  VO_XMGA
 
 static void mDrawColorKey(void)
@@ -88,13 +94,10 @@ static void check_events(void)
 {
     int e = vo_x11_check_events(mDisplay);
 
-    if (!(e & VO_EVENT_RESIZE) && !(e & VO_EVENT_EXPOSE))
-        return;
-    set_window();
-    mDrawColorKey();
-    if (ioctl(f, MGA_VID_CONFIG, &mga_vid_config))
-        mp_msg(MSGT_VO, MSGL_WARN,
-               "Error in mga_vid_config ioctl (wrong mga_vid.o version?)");
+    if (e & (VO_EVENT_RESIZE | VO_EVENT_MOVE))
+        set_window();
+    if (e & (VO_EVENT_RESIZE | VO_EVENT_EXPOSE))
+        mDrawColorKey();
 }
 
 static void flip_page(void)
@@ -117,7 +120,6 @@ static int config(uint32_t width, uint32_t height, uint32_t d_width,
                        uint32_t d_height, uint32_t flags, char *title,
                        uint32_t format)
 {
-    char *mTitle = (title == NULL) ? "XMGA render" : title;
     XVisualInfo vinfo;
     unsigned long xswamask;
     int r, g, b;
@@ -125,25 +127,8 @@ static int config(uint32_t width, uint32_t height, uint32_t d_width,
     if (mga_init(width, height, format))
         return -1;              // ioctl errors?
 
-    aspect_save_orig(width, height);
-    aspect_save_prescale(d_width, d_height);
-    update_xinerama_info();
-
     mvWidth = width;
     mvHeight = height;
-
-    vo_panscan_x = vo_panscan_y = vo_panscan_amount = 0;
-
-    aspect(&d_width, &d_height, A_NOZOOM);
-    vo_dx = (vo_screenwidth - d_width) / 2;
-    vo_dy = (vo_screenheight - d_height) / 2;
-    geometry(&vo_dx, &vo_dy, &d_width, &d_height, vo_screenwidth,
-             vo_screenheight);
-    vo_dx += xinerama_x;
-    vo_dy += xinerama_y;
-    vo_dwidth = d_width;
-    vo_dheight = d_height;
-    vo_mouse_autohide = 1;
 
     r = (vo_colorkey & 0x00ff0000) >> 16;
     g = (vo_colorkey & 0x0000ff00) >> 8;
@@ -170,16 +155,7 @@ static int config(uint32_t width, uint32_t height, uint32_t d_width,
     }
     mp_msg(MSGT_VO, MSGL_V, "Using colorkey: %x\n", colorkey);
 
-    inited = 1;
-
-#ifdef HAVE_NEW_GUI
-    if (use_gui)
-        guiGetEvent(guiSetShVideo, 0);  // the GUI will set up / resize the window
-    else
-#endif
-    {
-        if (flags & VOFLAG_FULLSCREEN)
-            aspect(&dwidth, &dheight, A_ZOOM);
+    initialized = 1;
 
         XGetWindowAttributes(mDisplay, mRootWin, &attribs);
         mDepth = attribs.depth;
@@ -190,79 +166,11 @@ static int config(uint32_t width, uint32_t height, uint32_t d_width,
             XCreateColormap(mDisplay, mRootWin, vinfo.visual, AllocNone);
         xWAttribs.background_pixel = 0;
         xWAttribs.border_pixel = 0;
-        xWAttribs.event_mask =
-            StructureNotifyMask | ExposureMask | KeyPressMask |
-            ((WinID ==
-              0) ? 0 : (ButtonPressMask | ButtonReleaseMask |
-                        PointerMotionMask | PropertyChangeMask));
-        xswamask = CWBackPixel | CWBorderPixel | CWColormap | CWEventMask;
+        xswamask = CWBackPixel | CWBorderPixel | CWColormap;
 
-        if (WinID >= 0)
-        {
-
-            vo_window = WinID ? ((Window) WinID) : mRootWin;
-            if (WinID)
-            {
-                XUnmapWindow(mDisplay, vo_window);
-                XChangeWindowAttributes(mDisplay, vo_window, xswamask,
-                                        &xWAttribs);
-                vo_x11_selectinput_witherr(mDisplay, vo_window,
-                                           StructureNotifyMask |
-                                           KeyPressMask |
-                                           PropertyChangeMask |
-                                           PointerMotionMask |
-                                           ButtonPressMask |
-                                           ButtonReleaseMask |
-                                           ExposureMask);
-                XMapWindow(mDisplay, vo_window);
-            } else
-                XSelectInput(mDisplay, vo_window, ExposureMask);
-
-        } else
-        {
-
-            if (vo_window == None)
-            {
-                vo_window = XCreateWindow(mDisplay, mRootWin,
-                                          vo_dx, vo_dy,
-                                          vo_dwidth, vo_dheight,
-                                          xWAttribs.border_pixel,
-                                          mDepth,
-                                          InputOutput,
-                                          vinfo.visual, xswamask,
-                                          &xWAttribs);
-
-                vo_x11_classhint(mDisplay, vo_window, "xmga");
-                vo_hidecursor(mDisplay, vo_window);
-                vo_x11_sizehint(vo_dx, vo_dy, vo_dwidth, vo_dheight, 0);
-
-                XStoreName(mDisplay, vo_window, mTitle);
-                XMapWindow(mDisplay, vo_window);
-                vo_x11_nofs_sizepos(vo_dx, vo_dy, vo_dwidth, vo_dheight);
-
-                if (flags & VOFLAG_FULLSCREEN)
-                    vo_x11_fullscreen();
-
-            } else
-                vo_x11_nofs_sizepos(vo_dx, vo_dy, vo_dwidth, vo_dheight);
-        }
-
-        if (vo_gc != None)
-            XFreeGC(mDisplay, vo_gc);
-        vo_gc = XCreateGC(mDisplay, vo_window, GCForeground, &wGCV);
-
-    }                           // !GUI
-
-    if ((flags & VOFLAG_FULLSCREEN) && (!WinID))
-    {
-        vo_dx = 0;
-        vo_dy = 0;
-        vo_dwidth = vo_screenwidth;
-        vo_dheight = vo_screenheight;
-        vo_fs = 1;
-    }
-
-    panscan_calc();
+            vo_x11_create_vo_window(&vinfo, vo_dx, vo_dy, d_width, d_height,
+                    flags, xWAttribs.colormap, "xmga", title);
+            XChangeWindowAttributes(mDisplay, vo_window, xswamask, &xWAttribs);
 
     mga_vid_config.colkey_on = 1;
     mga_vid_config.colkey_red = r;
@@ -270,9 +178,6 @@ static int config(uint32_t width, uint32_t height, uint32_t d_width,
     mga_vid_config.colkey_blue = b;
 
     set_window();               // set up mga_vid_config.dest_width etc
-
-    if (vo_ontop)
-        vo_x11_setlayer(mDisplay, vo_window, vo_ontop);
 
     XSync(mDisplay, False);
 
@@ -285,8 +190,8 @@ static void uninit(void)
 {
     mp_msg(MSGT_VO, MSGL_V, "vo: uninit!\n");
     mga_uninit();
-    if (!inited)
+    if (!initialized)
         return;                 // no window?
-    inited = 0;
+    initialized = 0;
     vo_x11_uninit();            // destroy the window
 }

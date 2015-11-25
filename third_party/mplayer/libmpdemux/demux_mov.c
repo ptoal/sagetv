@@ -1,23 +1,43 @@
-//  QuickTime MOV file parser by A'rpi
-//  additional work by Atmos
-//  based on TOOLS/movinfo.c by A'rpi & Al3x
-//  compressed header support from moov.c of the openquicktime lib.
-//  References: http://openquicktime.sf.net/, http://www.heroinewarrior.com/
-//  http://www.geocities.com/SiliconValley/Lakes/2160/fformats/files/mov.pdf
-//  (above url no longer works, file mirrored somewhere? ::atmos)
-//  The QuickTime File Format PDF from Apple:
-//  http://developer.apple.com/techpubs/quicktime/qtdevdocs/PDF/QTFileFormat.pdf
-//  (Complete list of documentation at http://developer.apple.com/quicktime/)
-//  MP4-Lib sources from http://mpeg4ip.sf.net/ might be useful for .mp4
-//  as well as .mov specific stuff.
-//  All sort of Stuff about MPEG4:
-//  http://www.cmlab.csie.ntu.edu.tw/~pkhsiao/thesis.html
-//  I really recommend N4270-1.doc and N4270-2.doc which are exact specs
-//  of the MP4-File Format and the MPEG4 Specific extensions. ::atmos
-//  TSGS#15(02)0088
-//  http://www.3gpp.org/ftp/tsg_sa/TSG_SA/TSGS_15/Docs/pdf/SP-020088.pdf
-//  http://www.3gpp2.org/Public_html/specs/C.S0050-0_v1.0_121503.pdf
-#include "config.h"
+/*
+ * QuickTime MOV file parser
+ * copyright(c) 2001 A'rpi
+ * additional work by Atmos
+ * based on TOOLS/movinfo.c by A'rpi & Al3x
+ * compressed header support from moov.c of the openquicktime lib.
+ *
+ * references: http://openquicktime.sf.net/, http://www.heroinewarrior.com/
+ * http://www.geocities.com/SiliconValley/Lakes/2160/fformats/files/mov.pdf
+ * (above URL no longer works, file mirrored somewhere? ::atmos)
+ * The QuickTime File Format PDF from Apple:
+ * http://developer.apple.com/techpubs/quicktime/qtdevdocs/PDF/QTFileFormat.pdf
+ * (Complete list of documentation at http://developer.apple.com/quicktime/)
+ * MP4-Lib sources from http://mpeg4ip.sf.net/ might be useful for .mp4
+ * as well as .mov specific stuff.
+ *
+ * All sort of Stuff about MPEG4:
+ * http://www.cmlab.csie.ntu.edu.tw/~pkhsiao/thesis.html
+ * I really recommend N4270-1.doc and N4270-2.doc which are exact specs
+ * of the MP4-File Format and the MPEG4 Specific extensions. ::atmos
+ * TSGS#15(02)0088
+ * http://www.3gpp.org/ftp/tsg_sa/TSG_SA/TSGS_15/Docs/pdf/SP-020088.pdf
+ * http://www.3gpp2.org/Public_html/specs/C.S0050-0_v1.0_121503.pdf
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,7 +46,7 @@
 
 #include "config.h"
 
-#ifdef MACOSX
+#ifdef CONFIG_QUICKTIME
 #include <QuickTime/QuickTime.h>
 #include <QuickTime/ImageCompression.h>
 #include <QuickTime/ImageCodec.h>
@@ -41,13 +61,17 @@
 #include "demuxer.h"
 #include "stheader.h"
 
-#include "libvo/sub.h"
-extern subtitle *vo_sub;
+#include "libmpcodecs/img_format.h"
+#include "libavutil/common.h"
+#include "libavutil/intreadwrite.h"
 
+#include "sub/sub.h"
+
+#include "demux_mov.h"
 #include "qtpalette.h"
 #include "parse_mp4.h" // .MP4 specific stuff
 
-#ifdef HAVE_ZLIB
+#if CONFIG_ZLIB
 #include <zlib.h>
 #endif
 
@@ -55,15 +79,8 @@ extern subtitle *vo_sub;
 #include <fcntl.h>
 #endif
 
-#define BE_16(x) (((unsigned char *)(x))[0] <<  8 | \
-		  ((unsigned char *)(x))[1])
-#define BE_32(x) (((unsigned char *)(x))[0] << 24 | \
-		  ((unsigned char *)(x))[1] << 16 | \
-		  ((unsigned char *)(x))[2] <<  8 | \
-		  ((unsigned char *)(x))[3])
-
-#define char2short(x,y)	BE_16(&(x)[(y)])
-#define char2int(x,y) 	BE_32(&(x)[(y)])
+#define char2short(x,y)	AV_RB16(&(x)[(y)])
+#define char2int(x,y) 	AV_RB32(&(x)[(y)])
 
 typedef struct {
     unsigned int pts; // duration
@@ -124,7 +141,7 @@ typedef struct {
     unsigned int nchannels;
     unsigned int samplebytes;
     //
-    int tkdata_len;  // track data 
+    int tkdata_len;  // track data
     unsigned char* tkdata;
     int stdata_len;  // stream data
     unsigned char* stdata;
@@ -149,7 +166,7 @@ typedef struct {
     void* desc; // image/sound/etc description (pointer to ImageDescription etc)
 } mov_track_t;
 
-void mov_build_index(mov_track_t* trak,int timescale){
+static void mov_build_index(mov_track_t* trak,int timescale){
     int i,j,s;
     int last=trak->chunks_size;
     unsigned int pts=0;
@@ -158,11 +175,11 @@ void mov_build_index(mov_track_t* trak,int timescale){
     if (trak->chunks_size <= 0)
     {
 	mp_msg(MSGT_DEMUX, MSGL_WARN, "No chunk offset table, trying to build one!\n");
-	
+
 	trak->chunks_size = trak->samples_size; /* XXX: FIXME ! */
 	// audit: this code will be vulnerable if it is reenabled (currently #if 0)
 	trak->chunks = realloc(trak->chunks, sizeof(mov_chunk_t)*trak->chunks_size);
-	
+
 	for (i=0; i < trak->chunks_size; i++)
 	    trak->chunks[i].pos = -1;
     }
@@ -175,11 +192,12 @@ void mov_build_index(mov_track_t* trak,int timescale){
     i=trak->chunkmap_size;
     while(i>0){
 	--i;
-	for(j=trak->chunkmap[i].first;j<last;j++){
+	j=trak->chunkmap[i].first;
+	for(;j>=0 && j<last;j++){
 	    trak->chunks[j].desc=trak->chunkmap[i].sdid;
 	    trak->chunks[j].size=trak->chunkmap[i].spc;
 	}
-	last=trak->chunkmap[i].first;
+	last=FFMIN(trak->chunkmap[i].first, trak->chunks_size);
     }
 
 #if 0
@@ -210,9 +228,9 @@ void mov_build_index(mov_track_t* trak,int timescale){
 
     // workaround for fixed-size video frames (dv and uncompressed)
     if(!trak->samples_size && trak->type!=MOV_TRAK_AUDIO){
-	trak->samples_size=s;
 	trak->samples=calloc(s, sizeof(mov_sample_t));
-	for(i=0;i<s;i++)
+	trak->samples_size=trak->samples ? s : 0;
+	for(i=0;i<trak->samples_size;i++)
 	    trak->samples[i].size=trak->samplesize;
 	trak->samplesize=0;
     }
@@ -224,30 +242,35 @@ void mov_build_index(mov_track_t* trak,int timescale){
 	} else mp_msg(MSGT_DEMUX, MSGL_ERR, "*** constant samplesize & variable duration not yet supported! ***\nContact the author if you have such sample file!\n");
 	return;
     }
-    
+
     if (trak->samples_size < s) {
       mp_msg(MSGT_DEMUX, MSGL_WARN,
              "MOV: durmap or chunkmap bigger than sample count (%i vs %i)\n",
              s, trak->samples_size);
-      trak->samples_size = s;
-      trak->samples = realloc_struct(trak->samples, s, sizeof(mov_sample_t));
+      free(trak->samples);
+      trak->samples = calloc(s, sizeof(mov_sample_t));
+      trak->samples_size = trak->samples ? s : 0;
     }
 
     // calc pts:
     s=0;
     for(j=0;j<trak->durmap_size;j++){
 	for(i=0;i<trak->durmap[j].num;i++){
+	    if (s >= trak->samples_size)
+		break;
 	    trak->samples[s].pts=pts;
 	    ++s;
 	    pts+=trak->durmap[j].dur;
 	}
     }
-    
+
     // calc sample offsets
     s=0;
     for(j=0;j<trak->chunks_size;j++){
 	off_t pos=trak->chunks[j].pos;
 	for(i=0;i<trak->chunks[j].size;i++){
+	    if (s >= trak->samples_size)
+		break;
 	    trak->samples[s].pos=pos;
 	    mp_msg(MSGT_DEMUX, MSGL_DBG3, "Sample %5d: pts=%8d  off=0x%08X  size=%d\n",s,
 		trak->samples[s].pts,
@@ -315,13 +338,12 @@ typedef struct {
 static int mov_check_file(demuxer_t* demuxer){
     int flags=0;
     int no=0;
-    mov_priv_t* priv=malloc(sizeof(mov_priv_t));
-    
+    mov_priv_t* priv=calloc(1, sizeof(mov_priv_t));
+
     mp_msg(MSGT_DEMUX,MSGL_V,"Checking for MOV\n");
-    
-    memset(priv,0,sizeof(mov_priv_t));
+
     priv->current_sub = -1;
-    
+
     while(1){
 	int i;
 	int skipped=8;
@@ -346,12 +368,12 @@ static int mov_check_file(demuxer_t* demuxer){
 	    goto skip_chunk;
 	}
 #endif
-	else if(len<8) break; // invalid chunk
+	if(len<8) break; // invalid chunk
 
 	switch(id){
 	case MOV_FOURCC('f','t','y','p'): {
 	  unsigned int tmp;
-	  // File Type Box (ftyp): 
+	  // File Type Box (ftyp):
 	  // char[4]  major_brand	   (eg. 'isom')
 	  // int      minor_version	   (eg. 0x00000000)
 	  // char[4]  compatible_brands[]  (eg. 'mp41')
@@ -397,7 +419,7 @@ static int mov_check_file(demuxer_t* demuxer){
 	      mp_msg(MSGT_DEMUX,MSGL_INFO,"ISO: File Type Major Brand: Mobile ISO/IEC 14496-1 (MPEG-4 system)\n");
      	      break;
 	    default:
-	      tmp = be2me_32(tmp);  
+	      tmp = be2me_32(tmp);
 	      mp_msg(MSGT_DEMUX,MSGL_WARN,"ISO: Unknown File Type Major Brand: %.4s\n",(char *)&tmp);
 	  }
 	  mp_msg(MSGT_DEMUX,MSGL_V,"ISO: File Type Minor Version: %d\n",
@@ -409,7 +431,7 @@ static int mov_check_file(demuxer_t* demuxer){
 	    mp_msg(MSGT_DEMUX,MSGL_V,"ISO: File Type Compatible Brand #%d: %.4s\n",i,(char *)&tmp);
 	    skipped += 4;
 	  }
-#endif	  
+#endif
 	  } break;
 	case MOV_FOURCC('m','o','o','v'):
 //	case MOV_FOURCC('c','m','o','v'):
@@ -435,19 +457,19 @@ static int mov_check_file(demuxer_t* demuxer){
 		  case MOV_FOURCC('r','m','d','a'):
 		      continue;
 		  case MOV_FOURCC('r','d','r','f'): {
-		      int tmp=stream_read_dword(demuxer->stream);
-		      int type=stream_read_dword_le(demuxer->stream);
+		      av_unused int tmp=stream_read_dword(demuxer->stream);
+		      av_unused int type=stream_read_dword_le(demuxer->stream);
 	              int slen=stream_read_dword(demuxer->stream);
 		      //char* s=malloc(slen+1);
 		      //stream_read(demuxer->stream,s,slen);
-		      
+
 		      //FIXME: also store type & data_rate ?
-		      ds_read_packet(demuxer->video, 
+		      ds_read_packet(demuxer->video,
 			demuxer->stream,
 			slen,
 			0,
 			stream_tell(demuxer->stream),
-			0 // no flags 
+			0 // no flags
 		      );
 		      flags|=4;
 		      mp_msg(MSGT_DEMUX,MSGL_V,"Added reference to playlist\n");
@@ -456,7 +478,7 @@ static int mov_check_file(demuxer_t* demuxer){
 		      len-=12+slen;i-=12+slen; break;
 		    }
 		  case MOV_FOURCC('r','m','d','r'): {
-		      int flags=stream_read_dword(demuxer->stream);
+		      av_unused int flags=stream_read_dword(demuxer->stream);
 		      int rate=stream_read_dword(demuxer->stream);
 		      mp_msg(MSGT_DEMUX,MSGL_V,"  min. data rate: %d bits/sec\n",rate);
 		      len-=8; i-=8; break;
@@ -503,7 +525,7 @@ static int mov_check_file(demuxer_t* demuxer){
 	  id = be2me_32(id);
 	  mp_msg(MSGT_DEMUX,MSGL_V,"MOV: unknown chunk: %.4s %d\n",(char *)&id,(int)len);
 	}
-skip_chunk:
+//skip_chunk:
 	if(!stream_skip(demuxer->stream,len-skipped)) break;
 	++no;
     }
@@ -564,81 +586,25 @@ unsigned int store_ughvlc(unsigned char *s, unsigned int v){
 }
 
 static void init_vobsub(sh_sub_t *sh, mov_track_t *trak) {
-  int i;
-  uint8_t *pal = trak->stdata;
   sh->type = 'v';
   if (trak->stdata_len < 106)
     return;
-  sh->has_palette = 1;
-  pal += 42;
-  for (i = 0; i < 16; i++) {
-    sh->palette[i] = BE_32(pal);
-    pal += 4;
-  }
+  sh->extradata_len = 16*4;
+  sh->extradata = malloc(sh->extradata_len);
+  memcpy(sh->extradata, trak->stdata + 42, sh->extradata_len);
 }
 
 static int lschunks_intrak(demuxer_t* demuxer, int level, unsigned int id,
                            off_t pos, off_t len, mov_track_t* trak);
 
-static void lschunks(demuxer_t* demuxer,int level,off_t endpos,mov_track_t* trak){
-    mov_priv_t* priv=demuxer->priv;
-//    printf("lschunks (level=%d,endpos=%x)\n", level, endpos);
-    while(1){
-	off_t pos;
-	off_t len;
-	unsigned int id;
-	//
-	pos=stream_tell(demuxer->stream);
-//	printf("stream_tell==%d\n",pos);
-	if(pos>=endpos) return; // END
-	len=stream_read_dword(demuxer->stream);
-//	printf("len==%d\n",len);
-	if(len<8) return; // error
-	len-=8;
-	id=stream_read_dword(demuxer->stream);
-	//
-	mp_msg(MSGT_DEMUX,MSGL_DBG2,"lschunks %.4s  %d\n",(char *)&id,(int)len);
-	//
-	if(trak){
-	  if (lschunks_intrak(demuxer, level, id, pos, len, trak) < 0)
-	    return;
-	} else { /* not in track */
-	  switch(id) {
-	    case MOV_FOURCC('m','v','h','d'): {
-		int version = stream_read_char(demuxer->stream);
-		stream_skip(demuxer->stream, (version == 1) ? 19 : 11);
-		priv->timescale=stream_read_dword(demuxer->stream);
-		if (version == 1)
-		    priv->duration=stream_read_qword(demuxer->stream);
-		else
-		    priv->duration=stream_read_dword(demuxer->stream);
-		mp_msg(MSGT_DEMUX, MSGL_V,"MOV: %*sMovie header (%d bytes): tscale=%d  dur=%d\n",level,"",(int)len,
-		    (int)priv->timescale,(int)priv->duration);
-		break;
-	    }
-	    case MOV_FOURCC('t','r','a','k'): {
-//	    if(trak) printf("MOV: Warning! trak in trak?\n");
-	    if(priv->track_db>=MOV_MAX_TRACKS){
-		mp_msg(MSGT_DEMUX,MSGL_WARN,MSGTR_MOVtooManyTrk);
-		return;
-	    }
-	    if(!priv->track_db) mp_msg(MSGT_DEMUX, MSGL_V, "--------------\n");
-	    trak=malloc(sizeof(mov_track_t));
-	    memset(trak,0,sizeof(mov_track_t));
-	    mp_msg(MSGT_DEMUX,MSGL_V,"MOV: Track #%d:\n",priv->track_db);
-	    trak->id=priv->track_db;
-	    priv->tracks[priv->track_db]=trak;
-	    lschunks(demuxer,level+1,pos+len,trak);
-	    mov_build_index(trak,priv->timescale);
-	    switch(trak->type){
-	    case MOV_TRAK_AUDIO: {
-#if 0				   
+static int gen_sh_audio(sh_audio_t* sh, mov_track_t* trak, int timescale) {
+#if 0
 		struct {
 		   int16_t version;		// 0 or 1 (version 1 is qt3.0+)
 		   int16_t revision;		// 0
 		   int32_t vendor_id;		// 0
 		   int16_t channels;		// 1 or 2  (Mono/Stereo)
-		   int16_t samplesize;		// 8 or 16 (8Bit/16Bit)	
+		   int16_t samplesize;		// 8 or 16 (8Bit/16Bit)
 		   int16_t compression_id;	// if version 0 then 0
 		  				// if version 1 and vbr then -2 else 0
 		   int16_t packet_size;		// 0
@@ -655,17 +621,16 @@ static void lschunks(demuxer_t* demuxer,int level,off_t endpos,mov_track_t* trak
 		   // ---
 		   // optional additional atom-based fields
 		   // ([int32_t size,int32_t type,some data ],repeat)
-		} my_stdata;		  
-#endif		
-		int version, adjust;
+		} my_stdata;
+#endif
+		int version = 0, adjust;
 		int is_vorbis = 0;
-		sh_audio_t* sh=new_sh_audio(demuxer,priv->track_db);
 		sh->format=trak->fourcc;
 
 		// crude audio delay from editlist0 hack ::atm
 		if(trak->editlist_size>=1) {
 		    if(trak->editlist[0].pos == -1) {
-			sh->stream_delay = (float)trak->editlist[0].dur/(float)priv->timescale;
+			sh->stream_delay = (float)trak->editlist[0].dur/(float)timescale;
 	    		mp_msg(MSGT_DEMUX,MSGL_V,"MOV: Initial Audio-Delay: %.3f sec\n", sh->stream_delay);
 		    }
 		}
@@ -678,7 +643,7 @@ static void lschunks(demuxer_t* demuxer,int level,off_t endpos,mov_track_t* trak
 			trak->nchannels=sh->channels=1;
 			sh->samplerate=8000;
 			break;
-			
+
 		    case 0x62776173: /* sawb */
 			/* amr wideband */
 			trak->samplebytes=sh->samplesize=1;
@@ -687,11 +652,11 @@ static void lschunks(demuxer_t* demuxer,int level,off_t endpos,mov_track_t* trak
 			break;
 
 		    default:
-			
+
 // assumptions for below table: short is 16bit, int is 32bit, intfp is 16bit
-// XXX: 32bit fixed point numbers (intfp) are only 2 Byte!		
-// short values are usually one byte leftpadded by zero		
-//   int values are usually two byte leftpadded by zero		
+// XXX: 32bit fixed point numbers (intfp) are only 2 Byte!
+// short values are usually one byte leftpadded by zero
+//   int values are usually two byte leftpadded by zero
 //  stdata[]:
 //	8   short	version
 //	10  short	revision
@@ -708,13 +673,17 @@ static void lschunks(demuxer_t* demuxer,int level,off_t endpos,mov_track_t* trak
 //	36  int		bytes_per_frame
 //	40  int		bytes_per_sample
 // there may be additional atoms following at 28 (version 0)
-// or 44 (version 1), eg. esds atom of .MP4 files		
+// or 44 (version 1), eg. esds atom of .MP4 files
 // esds atom:
 //      28  int		atom size (bytes of int size, int type and data)
-//      32  char[4]	atom type (fourc charater code -> esds)		
+//      32  char[4]	atom type (fourc charater code -> esds)
 //      36  char[]  	atom data (len=size-8)
 
 // TODO: fix parsing for files using version 2.
+		if (trak->stdata_len < 26) {
+		  mp_msg(MSGT_DEMUX, MSGL_WARN, "MOV: broken (too small) sound atom!\n");
+		  return 0;
+		}
 		version=char2short(trak->stdata,8);
 		if (version > 1)
 		  mp_msg(MSGT_DEMUX, MSGL_WARN, "MOV: version %d sound atom may not parse correctly!\n", version);
@@ -756,8 +725,8 @@ static void lschunks(demuxer_t* demuxer,int level,off_t endpos,mov_track_t* trak
 			  "assuming 44.1kHz (got %d)\n",
 			  char2short(trak->stdata,24)/trak->durmap[0].dur);
 		      sh->samplerate = 44100;
-		  }  
-		}  
+		  }
+		}
 		}
 		mp_msg(MSGT_DEMUX, MSGL_V, "Audio bits: %d  chans: %d  rate: %d\n",
 		    sh->samplesize*8,sh->channels,sh->samplerate);
@@ -773,7 +742,7 @@ static void lschunks(demuxer_t* demuxer,int level,off_t endpos,mov_track_t* trak
 		    int fcc=char2int(trak->stdata,48);
 		    // we have extra audio headers!!!
 		    mp_msg(MSGT_DEMUX,MSGL_V,"Audio extra header: len=%d  fcc=0x%X\n",len,fcc);
-		    if((len >= 4) && 
+		    if((len >= 4) &&
 		       (char2int(trak->stdata,52) >= 12) &&
 		       (char2int(trak->stdata,52+4) == MOV_FOURCC('f','r','m','a'))) {
 			switch(char2int(trak->stdata,52+8)) {
@@ -799,13 +768,15 @@ static void lschunks(demuxer_t* demuxer,int level,off_t endpos,mov_track_t* trak
 		         default:
 			  if (len > 8 && len + 44 <= trak->stdata_len) {
 				sh->codecdata_len = len-8;
-				sh->codecdata = trak->stdata+44+8;
+				sh->codecdata = malloc(sh->codecdata_len);
+				memcpy(sh->codecdata, trak->stdata+44+8, sh->codecdata_len);
 			  }
 		        }
 		    } else {
 		      if (len > 8 && len + 44 <= trak->stdata_len) {
 		    sh->codecdata_len = len-8;
-		    sh->codecdata = trak->stdata+44+8;
+		    sh->codecdata = malloc(sh->codecdata_len);
+		    memcpy(sh->codecdata, trak->stdata+44+8, sh->codecdata_len);
 		      }
 		    }
 		  }
@@ -824,11 +795,12 @@ static void lschunks(demuxer_t* demuxer,int level,off_t endpos,mov_track_t* trak
 		}
 		if (trak->stdata_len >= 36 + adjust) {
 		    int atom_len = char2int(trak->stdata,28+adjust);
+		    if (atom_len < 0 || atom_len > trak->stdata_len - 28 - adjust) atom_len = trak->stdata_len - 28 - adjust;
 		    switch(char2int(trak->stdata,32+adjust)) { // atom type
 		      case MOV_FOURCC('e','s','d','s'): {
 			mp_msg(MSGT_DEMUX, MSGL_V, "MOV: Found MPEG4 audio Elementary Stream Descriptor atom (%d)!\n", atom_len);
 			if(atom_len > 8) {
-			  esds_t esds; 				  
+			  esds_t esds;
 			  if(!mp4_parse_esds(&trak->stdata[36+adjust], atom_len-8, &esds)) {
 			    /* 0xdd is a "user private" id, not an official allocated id (see http://www.mp4ra.org/object.html),
 			       so perform some extra checks to be sure that this is really vorbis audio */
@@ -862,12 +834,12 @@ static void lschunks(demuxer_t* demuxer,int level,off_t endpos,mov_track_t* trak
 					sh->codecdata_len = len + len/255 + 64;
 					sh->codecdata = malloc(sh->codecdata_len);
 					ptr = sh->codecdata;
-					
+
 					ptr[0] = 2;
 					offset = 1;
 					offset += store_ughvlc(&ptr[offset], sizes[0]);
 					offset += store_ughvlc(&ptr[offset], sizes[1]);
-					for(k = 0; k < 3; k++) 
+					for(k = 0; k < 3; k++)
 					{
 						memcpy(&ptr[offset], buf[k], sizes[k]);
 						offset += sizes[k];
@@ -880,7 +852,7 @@ static void lschunks(demuxer_t* demuxer,int level,off_t endpos,mov_track_t* trak
 quit_vorbis_block:
 					sh->format = mmioFOURCC('v', 'r', 'b', 's');
 				}
-			    sh->i_bps = esds.avgBitrate/8; 
+			    sh->i_bps = esds.avgBitrate/8;
 
 //			    printf("######## audio format = %d ########\n",esds.objectTypeId);
 			    if(esds.objectTypeId==MP4OTI_MPEG1Audio || esds.objectTypeId==MP4OTI_MPEG2AudioPart3)
@@ -909,7 +881,7 @@ quit_vorbis_block:
 	  		  { FILE* f=fopen("esds.dat","wb");
 			  fwrite(&trak->stdata[36],atom_len-8,1,f);
 			  fclose(f); }
-#endif			  
+#endif
 			}
 		      } break;
 		      case MOV_FOURCC('a','l','a','c'): {
@@ -934,7 +906,7 @@ quit_vorbis_block:
 			    trak->stdata[32+adjust],trak->stdata[33+adjust],trak->stdata[34+adjust],trak->stdata[35+adjust],
 			    atom_len);
 		    }
-		}  
+		}
 		mp_msg(MSGT_DEMUX, MSGL_V, "Fourcc: %.4s\n",(char *)&trak->fourcc);
 #if 0
 		{ FILE* f=fopen("stdata.dat","wb");
@@ -945,8 +917,7 @@ quit_vorbis_block:
 		  fclose(f); }
 #endif
 		// Emulate WAVEFORMATEX struct:
-		sh->wf=malloc(sizeof(WAVEFORMATEX) + (is_vorbis ? sh->codecdata_len : 0));
-		memset(sh->wf,0,sizeof(WAVEFORMATEX));
+		sh->wf=calloc(1, sizeof(*sh->wf) + (is_vorbis ? sh->codecdata_len : 0));
 		sh->wf->nChannels=sh->channels;
 		sh->wf->wBitsPerSample=(trak->stdata[18]<<8)+trak->stdata[19];
 		// sh->wf->nSamplesPerSec=trak->timescale;
@@ -973,23 +944,23 @@ quit_vorbis_block:
 //		if(demuxer->audio->id==-1 || demuxer->audio->id==priv->track_db){
 //		    // (auto)selected audio track:
 //		    demuxer->audio->id=priv->track_db;
-//		    demuxer->audio->sh=sh; sh->ds=demuxer->audio;
+//		    demuxer->audio->sh=sh;
 //		}
-		break;
-	    }
-	    case MOV_TRAK_VIDEO: {
-		int i, entry;
+    return 1;
+}
+
+static int gen_sh_video(sh_video_t* sh, mov_track_t* trak, int timescale) {
+		int depth, i, entry;
 		int flag, start, count_flag, end, palette_count, gray;
 		int hdr_ptr = 76;  // the byte just after depth
 		unsigned char *palette_map;
-		sh_video_t* sh=new_sh_video(demuxer,priv->track_db);
-		int depth;
-		sh->format=trak->fourcc;
+
+		    sh->format=trak->fourcc;
 
 		// crude video delay from editlist0 hack ::atm
 		if(trak->editlist_size>=1) {
 		    if(trak->editlist[0].pos == -1) {
-			sh->stream_delay = (float)trak->editlist[0].dur/(float)priv->timescale;
+			sh->stream_delay = (float)trak->editlist[0].dur/(float)timescale;
 	    		mp_msg(MSGT_DEMUX,MSGL_V,"MOV: Initial Video-Delay: %.3f sec\n", sh->stream_delay);
 		    }
 		}
@@ -999,9 +970,13 @@ quit_vorbis_block:
 		  mp_msg(MSGT_DEMUXER, MSGL_WARN,
 		  "MOV: Invalid (%d bytes instead of >= 78) video trak desc\n",
 		  trak->stdata_len);
-		  break;
+		  return 0;
 		}
+
 		depth = trak->stdata[75] | (trak->stdata[74] << 8);
+		if (trak->fourcc == mmioFOURCC('r', 'a', 'w', ' '))
+		    sh->format = IMGFMT_RGB | depth;
+
 //  stdata[]:
 //	8   short	version
 //	10  short	revision
@@ -1087,9 +1062,9 @@ quit_vorbis_block:
 		      // beginning at stdata[86] to some variable to pass it
 		      // on to the decoder ::atmos
 		      if(atom_len > 8) {
-      			esds_t esds; 				  
+      			esds_t esds;
 			if(!mp4_parse_esds(trak->stdata+pos+8, atom_len-8, &esds)) {
-    
+
 			  if(esds.objectTypeId==MP4OTI_MPEG2VisualSimple || esds.objectTypeId==MP4OTI_MPEG2VisualMain ||
 			     esds.objectTypeId==MP4OTI_MPEG2VisualSNR || esds.objectTypeId==MP4OTI_MPEG2VisualSpatial ||
 			     esds.objectTypeId==MP4OTI_MPEG2VisualHigh || esds.objectTypeId==MP4OTI_MPEG2Visual422)
@@ -1103,7 +1078,7 @@ quit_vorbis_block:
 			  memcpy(trak->stream_header, esds.decoderConfig, trak->stream_header_len);
 			}
 			mp4_free_esds(&esds); // freeup esds mem
-		      }	      
+		      }
 		      break;
 		    case MOV_FOURCC('a','v','c','C'):
 		      // AVC decoder configuration record
@@ -1122,21 +1097,21 @@ quit_vorbis_block:
 		        mp_msg(MSGT_DEMUX, MSGL_V, "MOV: avcC number of sequence param sets: %d\n", cnt = (*(trak->stdata+pos+13) & 0x1f));
 		        poffs = pos + 14;
 		        for (i = 0; i < cnt; i++) {
-		          mp_msg(MSGT_DEMUX, MSGL_V, "MOV: avcC sps %d have length %d\n", i, BE_16(trak->stdata+poffs));
-		          poffs += BE_16(trak->stdata+poffs) + 2;
+		          mp_msg(MSGT_DEMUX, MSGL_V, "MOV: avcC sps %d have length %d\n", i, AV_RB16(trak->stdata+poffs));
+		          poffs += AV_RB16(trak->stdata+poffs) + 2;
 		        }
 		        mp_msg(MSGT_DEMUX, MSGL_V, "MOV: avcC number of picture param sets: %d\n", *(trak->stdata+poffs));
 		        poffs++;
 		        for (i = 0; i < cnt; i++) {
-		          mp_msg(MSGT_DEMUX, MSGL_V, "MOV: avcC pps %d have length %d\n", i, BE_16(trak->stdata+poffs));
-		          poffs += BE_16(trak->stdata+poffs) + 2;
+		          mp_msg(MSGT_DEMUX, MSGL_V, "MOV: avcC pps %d have length %d\n", i, AV_RB16(trak->stdata+poffs));
+		          poffs += AV_RB16(trak->stdata+poffs) + 2;
 		        }
 		        // Copy avcC for the AVC decoder
 		        // This data will be put in extradata below, where BITMAPINFOHEADER is created
 		        trak->stream_header_len = atom_len-8;
 		        trak->stream_header = malloc(trak->stream_header_len);
 		        memcpy(trak->stream_header, trak->stdata+pos+8, trak->stream_header_len);
-		      }	      
+		      }
 		      break;
                     case MOV_FOURCC('d','2','6','3'):
                       mp_msg(MSGT_DEMUX, MSGL_V, "MOV: Found H.263 decoder atom %c%c%c%c (%d)!\n", trak->stdata[pos+4],trak->stdata[pos+5],trak->stdata[pos+6],trak->stdata[pos+7],atom_len);
@@ -1161,16 +1136,18 @@ quit_vorbis_block:
 
 		sh->disp_w=trak->stdata[25]|(trak->stdata[24]<<8);
 		sh->disp_h=trak->stdata[27]|(trak->stdata[26]<<8);
-		// if image size is zero, fallback to display size
-		if(!sh->disp_w && !sh->disp_h) {
-		  sh->disp_w=trak->tkdata[77]|(trak->tkdata[76]<<8);
-		  sh->disp_h=trak->tkdata[81]|(trak->tkdata[80]<<8);
-		} else if(sh->disp_w!=(trak->tkdata[77]|(trak->tkdata[76]<<8))){
-		  // codec and display width differ... use display one for aspect
-		  sh->aspect=trak->tkdata[77]|(trak->tkdata[76]<<8);
-		  sh->aspect/=trak->tkdata[81]|(trak->tkdata[80]<<8);
+		if(trak->tkdata_len>81) {
+		  // if image size is zero, fallback to display size
+		  if(!sh->disp_w && !sh->disp_h) {
+		    sh->disp_w=trak->tkdata[77]|(trak->tkdata[76]<<8);
+		    sh->disp_h=trak->tkdata[81]|(trak->tkdata[80]<<8);
+		  } else if(sh->disp_w!=(trak->tkdata[77]|(trak->tkdata[76]<<8))){
+		    // codec and display width differ... use display one for aspect
+		    sh->original_aspect=trak->tkdata[77]|(trak->tkdata[76]<<8);
+		    sh->original_aspect/=trak->tkdata[81]|(trak->tkdata[80]<<8);
+		  }
 		}
-		
+
 		if(depth>32+8) mp_msg(MSGT_DEMUX, MSGL_INFO,"*** depth = 0x%X\n",depth);
 
 		// palettized?
@@ -1184,17 +1161,16 @@ quit_vorbis_block:
 		// emulate BITMAPINFOHEADER:
 		if (palette_count)
 		{
-		  sh->bih=malloc(sizeof(BITMAPINFOHEADER) + palette_count * 4);
-		  memset(sh->bih,0,sizeof(BITMAPINFOHEADER) + palette_count * 4);
+		  sh->bih=calloc(1, sizeof(*sh->bih) + palette_count * 4);
 		  sh->bih->biSize=40 + palette_count * 4;
 		  // fetch the relevant fields
-		  flag = BE_16(&trak->stdata[hdr_ptr]);
+		  flag = AV_RB16(&trak->stdata[hdr_ptr]);
 		  hdr_ptr += 2;
-		  start = BE_32(&trak->stdata[hdr_ptr]);
+		  start = AV_RB32(&trak->stdata[hdr_ptr]);
 		  hdr_ptr += 4;
-		  count_flag = BE_16(&trak->stdata[hdr_ptr]);
+		  count_flag = AV_RB16(&trak->stdata[hdr_ptr]);
 		  hdr_ptr += 2;
-		  end = BE_16(&trak->stdata[hdr_ptr]);
+		  end = AV_RB16(&trak->stdata[hdr_ptr]);
 		  hdr_ptr += 2;
 		  palette_map = (unsigned char *)sh->bih + 40;
 		  mp_msg(MSGT_DEMUX, MSGL_V, "Allocated %d entries for palette\n",
@@ -1242,20 +1218,20 @@ quit_vorbis_block:
 		    mp_msg(MSGT_DEMUX, MSGL_V, "Loading palette from file\n");
 		    for (i = start; i <= end; i++)
 		    {
-		      entry = BE_16(&trak->stdata[hdr_ptr]);
+		      entry = AV_RB16(&trak->stdata[hdr_ptr]);
 		      hdr_ptr += 2;
 		      // apparently, if count_flag is set, entry is same as i
 		      if (count_flag & 0x8000)
 		        entry = i;
 		      // only care about top 8 bits of 16-bit R, G, or B value
-		      if (entry <= palette_count && entry >= 0)
+		      if (entry < palette_count && entry >= 0)
 		      {
 		        palette_map[entry * 4 + 2] = trak->stdata[hdr_ptr + 0];
 		        palette_map[entry * 4 + 1] = trak->stdata[hdr_ptr + 2];
 		        palette_map[entry * 4 + 0] = trak->stdata[hdr_ptr + 4];
 		        mp_dbg(MSGT_DEMUX, MSGL_DBG2, "QT palette: added entry: %d of %d (colors: R:%x G:%x B:%x)\n",
 			    entry, palette_count,
-			    palette_map[entry * 4 + 2], 
+			    palette_map[entry * 4 + 2],
 			    palette_map[entry * 4 + 1],
 			    palette_map[entry * 4 + 0]);
 		      }
@@ -1269,20 +1245,18 @@ quit_vorbis_block:
 		else
 		{
 		 if (trak->fourcc == mmioFOURCC('a','v','c','1')) {
-		  if (trak->stream_header_len > 0xffffffff - sizeof(BITMAPINFOHEADER)) {
+		  if (trak->stream_header_len > 0xffffffff - sizeof(*sh->bih)) {
 		    mp_msg(MSGT_DEMUXER, MSGL_ERR, "Invalid extradata size %d, skipping\n",trak->stream_header_len);
 		    trak->stream_header_len = 0;
 		  }
-		  sh->bih=malloc(sizeof(BITMAPINFOHEADER) + trak->stream_header_len);
-		  memset(sh->bih,0,sizeof(BITMAPINFOHEADER) + trak->stream_header_len);
+		  sh->bih=calloc(1, sizeof(*sh->bih) + trak->stream_header_len);
 		  sh->bih->biSize=40  + trak->stream_header_len;
 		  memcpy(((unsigned char *)sh->bih)+40,  trak->stream_header, trak->stream_header_len);
 		  free (trak->stream_header);
 		  trak->stream_header_len = 0;
 		  trak->stream_header = NULL;
 		 } else {
-		  sh->bih=malloc(sizeof(BITMAPINFOHEADER));
-		  memset(sh->bih,0,sizeof(BITMAPINFOHEADER));
+		  sh->bih=calloc(1, sizeof(*sh->bih));
 		  sh->bih->biSize=40;
 		 }
 		}
@@ -1299,23 +1273,89 @@ quit_vorbis_block:
 		    trak->tkdata[77]|(trak->tkdata[76]<<8),
 		    trak->tkdata[81]|(trak->tkdata[80]<<8));
 		mp_msg(MSGT_DEMUX, MSGL_V, "Fourcc: %.4s  Codec: '%.*s'\n",(char *)&trak->fourcc,trak->stdata[42]&31,trak->stdata+43);
-		
+
 //		if(demuxer->video->id==-1 || demuxer->video->id==priv->track_db){
 //		    // (auto)selected video track:
 //		    demuxer->video->id=priv->track_db;
-//		    demuxer->video->sh=sh; sh->ds=demuxer->video;
+//		    demuxer->video->sh=sh;
 //		}
+    return 1;
+}
+
+static void lschunks(demuxer_t* demuxer,int level,off_t endpos,mov_track_t* trak){
+    mov_priv_t* priv=demuxer->priv;
+//    printf("lschunks (level=%d,endpos=%x)\n", level, endpos);
+    while(1){
+	off_t pos;
+	off_t len;
+	unsigned int id;
+	//
+	pos=stream_tell(demuxer->stream);
+//	printf("stream_tell==%d\n",pos);
+	if(pos>=endpos) return; // END
+	len=stream_read_dword(demuxer->stream);
+//	printf("len==%d\n",len);
+	if(len<8) return; // error
+	len-=8;
+	id=stream_read_dword(demuxer->stream);
+	//
+	mp_msg(MSGT_DEMUX,MSGL_DBG2,"lschunks %.4s  %d\n",(char *)&id,(int)len);
+	//
+	if(trak){
+	  if (lschunks_intrak(demuxer, level, id, pos, len, trak) < 0)
+	    return;
+	} else { /* not in track */
+	  switch(id) {
+	    case MOV_FOURCC('m','v','h','d'): {
+		int version = stream_read_char(demuxer->stream);
+		stream_skip(demuxer->stream, (version == 1) ? 19 : 11);
+		priv->timescale=stream_read_dword(demuxer->stream);
+		if (version == 1)
+		    priv->duration=stream_read_qword(demuxer->stream);
+		else
+		    priv->duration=stream_read_dword(demuxer->stream);
+		mp_msg(MSGT_DEMUX, MSGL_V,"MOV: %*sMovie header (%d bytes): tscale=%d  dur=%d\n",level,"",(int)len,
+		    (int)priv->timescale,(int)priv->duration);
+		break;
+	    }
+	    case MOV_FOURCC('t','r','a','k'): {
+//	    if(trak) printf("MOV: Warning! trak in trak?\n");
+	    if(priv->track_db>=MOV_MAX_TRACKS){
+		mp_msg(MSGT_DEMUX,MSGL_WARN,MSGTR_MOVtooManyTrk);
+		return;
+	    }
+	    if(!priv->track_db) mp_msg(MSGT_DEMUX, MSGL_V, "--------------\n");
+	    trak=calloc(1, sizeof(mov_track_t));
+	    mp_msg(MSGT_DEMUX,MSGL_V,"MOV: Track #%d:\n",priv->track_db);
+	    trak->id=priv->track_db;
+	    priv->tracks[priv->track_db]=trak;
+	    lschunks(demuxer,level+1,pos+len,trak);
+	    mov_build_index(trak,priv->timescale);
+	    switch(trak->type){
+	    case MOV_TRAK_AUDIO: {
+		sh_audio_t* sh=new_sh_audio(demuxer,priv->track_db, NULL);
+		mp_msg(MSGT_DEMUX, MSGL_INFO, MSGTR_AudioID, "mov", priv->track_db);
+		gen_sh_audio(sh, trak, priv->timescale);
+		break;
+	    }
+	    case MOV_TRAK_VIDEO: {
+		sh_video_t* sh=new_sh_video(demuxer,priv->track_db);
+		mp_msg(MSGT_DEMUX, MSGL_INFO, MSGTR_VideoID, "mov", priv->track_db);
+		gen_sh_video(sh, trak, priv->timescale);
 		break;
 	    }
 	    case MOV_TRAK_GENERIC:
 		if (trak->fourcc == mmioFOURCC('m','p','4','s') ||
 		    trak->fourcc == mmioFOURCC('t','x','3','g') ||
 		    trak->fourcc == mmioFOURCC('t','e','x','t')) {
-			sh_sub_t *sh = new_sh_sub(demuxer, priv->track_db);
+			sh_sub_t *sh = new_sh_sub(demuxer, priv->track_db, NULL);
+			mp_msg(MSGT_DEMUX, MSGL_INFO, MSGTR_SubtitleID, "mov", priv->track_db);
 			if (trak->fourcc == mmioFOURCC('m','p','4','s'))
 				init_vobsub(sh, trak);
-			else
-				sh->type = 't';
+			else {
+				sh->type = 'm';
+				sub_utf8 = 1;
+			}
 		} else
 		mp_msg(MSGT_DEMUX, MSGL_V, "Generic track - not completely understood! (id: %d)\n",
 		    trak->id);
@@ -1327,7 +1367,7 @@ quit_vorbis_block:
 		int i;
 		int fd;
 		char name[20];
-	
+
 		for (i=0; i<trak->samples_size; i++)
 		{
 		    char buf[trak->samples[i].size];
@@ -1351,7 +1391,7 @@ quit_vorbis_block:
 		 if (trak->samplesize > 0)
 		 {
 		    char *buf;
-		    
+
 		    buf = malloc(trak->samplesize);
 		    stream_seek(demuxer->stream, trak->chunks[0].pos);
 		    snprintf((char *)&name[0], 20, "trak%d", trak->id);
@@ -1361,7 +1401,7 @@ quit_vorbis_block:
 		    close(fd);
 		 }
 		 stream_seek(demuxer->stream, pos);
-	    }		
+	    }
 #endif
 		break;
 	    default:
@@ -1373,7 +1413,7 @@ quit_vorbis_block:
 	    trak=NULL;
 	    break;
 	}
-#ifndef HAVE_ZLIB
+#if !CONFIG_ZLIB
 	case MOV_FOURCC('c','m','o','v'): {
 	    mp_msg(MSGT_DEMUX,MSGL_ERR,MSGTR_MOVcomprhdr);
 	    return;
@@ -1401,7 +1441,7 @@ quit_vorbis_block:
 	    z_stream zstrm;
 	    stream_t* backup;
 
-	    if (moov_sz > SIZE_MAX - 16) {
+	    if (moov_sz > UINT_MAX - 16) {
               mp_msg(MSGT_DEMUX, MSGL_ERR, "Invalid cmvd atom size %d\n", moov_sz);
               break;
             }
@@ -1418,7 +1458,7 @@ quit_vorbis_block:
 	      zstrm.avail_in        = cmov_sz;
 	      zstrm.next_out        = moov_buf;
 	      zstrm.avail_out       = moov_sz;
-	    
+
 	      zret = inflateInit(&zstrm);
 	      if (zret != Z_OK)
 		{ mp_msg(MSGT_DEMUX, MSGL_ERR, "QT cmov: inflateInit err %d\n",zret);
@@ -1440,7 +1480,7 @@ quit_vorbis_block:
 	      if(moov_sz != zstrm.total_out)
 	        mp_msg(MSGT_DEMUX, MSGL_WARN, "Warning! moov size differs cmov: %d  zlib: %ld\n",moov_sz,zstrm.total_out);
 	      zret = inflateEnd(&zstrm);
-	      
+
 	      backup=demuxer->stream;
 	       demuxer->stream=new_memory_stream(moov_buf,moov_sz);
 	       stream_skip(demuxer->stream,8);
@@ -1448,7 +1488,7 @@ quit_vorbis_block:
 	       //free_stream(demuxer->stream);
 	      demuxer->stream=backup;
 	      free(cmov_buf);
-	      free(moov_buf);	    
+	      free(moov_buf);
 	      break;
 	}
 #endif
@@ -1457,7 +1497,7 @@ quit_vorbis_block:
 	    unsigned int udta_id;
 	    off_t udta_len;
 	    off_t udta_size = len;
-	
+
 	    mp_msg(MSGT_DEMUX, MSGL_DBG2, "mov: user data record found\n");
 	    mp_msg(MSGT_DEMUX, MSGL_V, "Quicktime Clip Info:\n");
 
@@ -1505,7 +1545,7 @@ quit_vorbis_block:
 				break;
 			    case MOV_FOURCC('n','a','m','e'):
 			    case MOV_FOURCC(0xa9,'n','a','m'):
-				demux_info_add(demuxer, "name", &text[2]);
+				demux_info_add(demuxer, "title", &text[2]);
 				mp_msg(MSGT_DEMUX, MSGL_V, " Name: %s\n", &text[2]);
 				break;
 			    case MOV_FOURCC(0xa9,'A','R','T'):
@@ -1558,8 +1598,7 @@ quit_vorbis_block:
 			if( udta_len>udta_size)
 				udta_len=udta_size;
 			{
-			char dump[udta_len-4];
-			stream_read(demuxer->stream, (char *)&dump, udta_len-4-4);
+			stream_skip(demuxer->stream, udta_len-4-4);
 			udta_size -= udta_len;
 			}
 		    }
@@ -1637,12 +1676,12 @@ static int lschunks_intrak(demuxer_t* demuxer, int level, unsigned int id,
       break;
     }
     case MOV_FOURCC('h','d','l','r'): {
-      unsigned int tmp = stream_read_dword(demuxer->stream);
+      av_unused unsigned int tmp = stream_read_dword(demuxer->stream);
       unsigned int type = stream_read_dword_le(demuxer->stream);
       unsigned int subtype = stream_read_dword_le(demuxer->stream);
       unsigned int manufact = stream_read_dword_le(demuxer->stream);
-      unsigned int comp_flags = stream_read_dword(demuxer->stream);
-      unsigned int comp_mask = stream_read_dword(demuxer->stream);
+      av_unused unsigned int comp_flags = stream_read_dword(demuxer->stream);
+      av_unused unsigned int comp_mask = stream_read_dword(demuxer->stream);
       int len = stream_read_char(demuxer->stream);
       char* str = malloc(len + 1);
       stream_read(demuxer->stream, str, len);
@@ -1722,16 +1761,17 @@ static int lschunks_intrak(demuxer_t* demuxer, int level, unsigned int id,
       break;
     }
     case MOV_FOURCC('s','t','t','s'): {
-      int temp = stream_read_dword(demuxer->stream);
+      av_unused int temp = stream_read_dword(demuxer->stream);
       int len = stream_read_dword(demuxer->stream);
       int i;
       unsigned int pts = 0;
       mp_msg(MSGT_DEMUX, MSGL_V,
              "MOV: %*sSample duration table! (%d blocks)\n", level, "",
              len);
+      free(trak->durmap);
       trak->durmap = calloc(len, sizeof(mov_durmap_t));
-      trak->durmap_size = len;
-      for (i = 0; i < len; i++) {
+      trak->durmap_size = trak->durmap ? len : 0;
+      for (i = 0; i < trak->durmap_size; i++) {
         trak->durmap[i].num = stream_read_dword(demuxer->stream);
         trak->durmap[i].dur = stream_read_dword(demuxer->stream);
         pts += trak->durmap[i].num * trak->durmap[i].dur;
@@ -1751,9 +1791,10 @@ static int lschunks_intrak(demuxer_t* demuxer, int level, unsigned int id,
              "MOV: %*sSample->Chunk mapping table!  (%d blocks) (ver:%d,flags:%d)\n", level, "",
              len, ver, flags);
       // read data:
-      trak->chunkmap_size = len;
+      free(trak->chunkmap);
       trak->chunkmap = calloc(len, sizeof(mov_chunkmap_t));
-      for (i = 0; i < len; i++) {
+      trak->chunkmap_size = trak->chunkmap ? len : 0;
+      for (i = 0; i < trak->chunkmap_size; i++) {
         trak->chunkmap[i].first = stream_read_dword(demuxer->stream) - 1;
         trak->chunkmap[i].spc = stream_read_dword(demuxer->stream);
         trak->chunkmap[i].sdid = stream_read_dword(demuxer->stream);
@@ -1773,32 +1814,34 @@ static int lschunks_intrak(demuxer_t* demuxer, int level, unsigned int id,
       trak->samplesize = ss;
       if (!ss) {
         // variable samplesize
-        trak->samples = realloc_struct(trak->samples, entries, sizeof(mov_sample_t));
-        trak->samples_size = entries;
-        for (i = 0; i < entries; i++)
+        free(trak->samples);
+        trak->samples = calloc(entries, sizeof(mov_sample_t));
+        trak->samples_size = trak->samples ? entries : 0;
+        for (i = 0; i < trak->samples_size; i++)
           trak->samples[i].size = stream_read_dword(demuxer->stream);
       }
       break;
     }
     case MOV_FOURCC('s','t','c','o'): {
-      int temp = stream_read_dword(demuxer->stream);
+      av_unused int temp = stream_read_dword(demuxer->stream);
       int len = stream_read_dword(demuxer->stream);
       int i;
-      mp_msg(MSGT_DEMUX, MSGL_V, 
+      mp_msg(MSGT_DEMUX, MSGL_V,
              "MOV: %*sChunk offset table! (%d chunks)\n", level, "",
              len);
       // extend array if needed:
       if (len > trak->chunks_size) {
-        trak->chunks = realloc_struct(trak->chunks, len, sizeof(mov_chunk_t));
-        trak->chunks_size = len;
+        free(trak->chunks);
+        trak->chunks = calloc(len, sizeof(mov_chunk_t));
+        trak->chunks_size = trak->chunks ? len : 0;
       }
       // read elements:
-      for(i = 0; i < len; i++)
+      for(i = 0; i < trak->chunks_size; i++)
         trak->chunks[i].pos = stream_read_dword(demuxer->stream);
       break;
     }
     case MOV_FOURCC('c','o','6','4'): {
-      int temp = stream_read_dword(demuxer->stream);
+      av_unused int temp = stream_read_dword(demuxer->stream);
       int len = stream_read_dword(demuxer->stream);
       int i;
       mp_msg(MSGT_DEMUX, MSGL_V,
@@ -1806,11 +1849,12 @@ static int lschunks_intrak(demuxer_t* demuxer, int level, unsigned int id,
              len);
       // extend array if needed:
       if (len > trak->chunks_size) {
-        trak->chunks = realloc_struct(trak->chunks, len, sizeof(mov_chunk_t));
-        trak->chunks_size = len;
+        free(trak->chunks);
+        trak->chunks = calloc(len, sizeof(mov_chunk_t));
+        trak->chunks_size = trak->chunks ? len : 0;
       }
       // read elements:
-      for (i = 0; i < len; i++) {
+      for (i = 0; i < trak->chunks_size; i++) {
 #ifndef	_LARGEFILE_SOURCE
         if (stream_read_dword(demuxer->stream) != 0)
           mp_msg(MSGT_DEMUX, MSGL_WARN, "Chunk %d has got 64bit address, but you've MPlayer compiled without LARGEFILE support!\n", i);
@@ -1830,9 +1874,10 @@ static int lschunks_intrak(demuxer_t* demuxer, int level, unsigned int id,
       mp_msg(MSGT_DEMUX, MSGL_V,
              "MOV: %*sSyncing samples (keyframes) table! (%d entries) (ver:%d,flags:%d)\n", level, "",
              entries, ver, flags);
-      trak->keyframes_size = entries;
+      free(trak->keyframes);
       trak->keyframes = calloc(entries, sizeof(unsigned int));
-      for (i = 0; i < entries; i++)
+      trak->keyframes_size = trak->keyframes ? entries : 0;
+      for (i = 0; i < trak->keyframes_size; i++)
         trak->keyframes[i] = stream_read_dword(demuxer->stream) - 1;
       break;
     }
@@ -1866,9 +1911,10 @@ static int lschunks_intrak(demuxer_t* demuxer, int level, unsigned int id,
              "MOV: %*sEdit list table (%d entries) (ver:%d,flags:%d)\n", level, "",
              entries, ver, flags);
 #if 1
-      trak->editlist_size = entries;
-      trak->editlist = calloc(trak->editlist_size, sizeof(mov_editlist_t));
-      for (i = 0; i < entries; i++) {
+      free(trak->editlist);
+      trak->editlist = calloc(entries, sizeof(mov_editlist_t));
+      trak->editlist_size = trak->editlist ? entries : 0;
+      for (i = 0; i < trak->editlist_size; i++) {
         int dur = stream_read_dword(demuxer->stream);
         int mt = stream_read_dword(demuxer->stream);
         int mr = stream_read_dword(demuxer->stream); // 16.16fp
@@ -1899,10 +1945,10 @@ static demuxer_t* mov_read_header(demuxer_t* demuxer){
     int t_no;
     int best_a_id=-1, best_a_len=0;
     int best_v_id=-1, best_v_len=0;
-    
+
     mp_msg(MSGT_DEMUX, MSGL_DBG3, "mov_read_header!\n");
 
-    // Parse header:    
+    // Parse header:
     stream_reset(demuxer->stream);
     if(!stream_seek(demuxer->stream,priv->moov_start))
     {
@@ -1930,12 +1976,12 @@ static demuxer_t* mov_read_header(demuxer_t* demuxer){
 	best_a_id,best_a_len,best_v_id,best_v_len);
     if(demuxer->audio->id==-1 && best_a_id>=0) demuxer->audio->id=best_a_id;
     if(demuxer->video->id==-1 && best_v_id>=0) demuxer->video->id=best_v_id;
-    
+
     // setup sh pointers:
     if(demuxer->audio->id>=0){
 	sh_audio_t* sh=demuxer->a_streams[demuxer->audio->id];
 	if(sh){
-	    demuxer->audio->sh=sh; sh->ds=demuxer->audio;
+	    demuxer->audio->sh=sh;
 	} else {
 	    mp_msg(MSGT_DEMUX, MSGL_ERR, "MOV: selected audio stream (%d) does not exist\n",demuxer->audio->id);
 	    demuxer->audio->id=-2;
@@ -1944,7 +1990,7 @@ static demuxer_t* mov_read_header(demuxer_t* demuxer){
     if(demuxer->video->id>=0){
 	sh_video_t* sh=demuxer->v_streams[demuxer->video->id];
 	if(sh){
-	    demuxer->video->sh=sh; sh->ds=demuxer->video;
+	    demuxer->video->sh=sh;
 	} else {
 	    mp_msg(MSGT_DEMUX, MSGL_ERR, "MOV: selected video stream (%d) does not exist\n",demuxer->video->id);
 	    demuxer->video->id=-2;
@@ -1967,7 +2013,7 @@ static demuxer_t* mov_read_header(demuxer_t* demuxer){
             if(trak->media_handler == MOV_FOURCC('M','P','E','G')) {
                 stream_t *s;
                 demuxer_t *od;
-    
+
                 demuxer->video->id = t_no;
                 s = new_ds_stream(demuxer->video);
                 od = demux_open(s, DEMUXER_TYPE_MPEG_PS, -1, -1, -1, NULL);
@@ -2002,10 +2048,10 @@ static demuxer_t* mov_read_header(demuxer_t* demuxer){
 //		    }
 		    if( //trak->media_handler==MOV_FOURCC('s','p','r','t') &&
 			trak->stdata_len>=16 &&
-			char2int(trak->stdata,12)==MOV_FOURCC('z','l','i','b') 
+			char2int(trak->stdata,12)==MOV_FOURCC('z','l','i','b')
 		    ){
 			int newlen=stream_read_dword(demuxer->stream);
-#ifdef HAVE_ZLIB
+#if CONFIG_ZLIB
 			// unzip:
 			z_stream zstrm;
 			int zret;
@@ -2026,7 +2072,7 @@ static demuxer_t* mov_read_header(demuxer_t* demuxer){
 			zret = inflate(&zstrm, Z_NO_FLUSH);
 			if(newlen != zstrm.total_out)
 	    		    mp_msg(MSGT_DEMUX, MSGL_WARN, "Warning! unzipped frame size differs hdr: %d  zlib: %ld\n",newlen,zstrm.total_out);
-			
+
 			write(fd, buf2, newlen);
 		    } else {
 #else
@@ -2070,7 +2116,7 @@ static int demux_mov_fill_buffer(demuxer_t *demuxer,demux_stream_t* ds){
     float pts;
     int x;
     off_t pos;
-    
+
     if (ds->eof) return 0;
     trak = stream_track(priv, ds);
     if (!trak) return 0;
@@ -2153,7 +2199,7 @@ if(trak->pos==0 && trak->stream_header_len>0){
     ds_add_packet(ds,dp);
 } else
     ds_read_packet(ds,demuxer->stream,x,pts,pos,0);
-    
+
     ++trak->pos;
 
     trak = NULL;
@@ -2170,43 +2216,35 @@ if(trak->pos==0 && trak->stream_header_len>0){
       if (samplenr < 0)
         vo_sub = NULL;
       else if (samplenr != priv->current_sub) {
-        sh_sub_t *sh = demuxer->sub->sh;
         off_t pos = trak->samples[samplenr].pos;
         int len = trak->samples[samplenr].size;
         double subpts = (double)trak->samples[samplenr].pts / (double)trak->timescale;
         stream_seek(demuxer->stream, pos);
-        if (sh->type != 'v') {
-          stream_skip(demuxer->stream, 2); // size
-          len -= 2;
-          if (len < 0) len = 0;
-          if (len > MOV_MAX_SUBLEN) len = MOV_MAX_SUBLEN;
-          sub_utf8 = 1;
-        }
         ds_read_packet(demuxer->sub, demuxer->stream, len, subpts, pos, 0);
         priv->current_sub = samplenr;
       }
     }
 
     return 1;
-    
+
 }
 
 static float mov_seek_track(mov_track_t* trak,float pts,int flags){
 
 //    printf("MOV track seek called  %5.3f  \n",pts);
-    if(flags&2) pts*=trak->length; else pts*=(float)trak->timescale;
+    if(flags&SEEK_FACTOR) pts*=trak->length; else pts*=(float)trak->timescale;
 
 if(trak->samplesize){
     int sample=pts/trak->duration;
 //    printf("MOV track seek - chunk: %d  (pts: %5.3f  dur=%d)  \n",sample,pts,trak->duration);
-    if(!(flags&1)) sample+=trak->chunks[trak->pos].sample; // relative
+    if(!(flags&SEEK_ABSOLUTE)) sample+=trak->chunks[trak->pos].sample; // relative
     trak->pos=0;
     while(trak->pos<trak->chunks_size && trak->chunks[trak->pos].sample<sample) ++trak->pos;
     if (trak->pos == trak->chunks_size) return -1;
     pts=(float)(trak->chunks[trak->pos].sample*trak->duration)/(float)trak->timescale;
 } else {
     unsigned int ipts;
-    if(!(flags&1)) pts+=trak->samples[trak->pos].pts;
+    if(!(flags&SEEK_ABSOLUTE)) pts+=trak->samples[trak->pos].pts;
     if(pts<0) pts=0;
     ipts=pts;
     //printf("MOV track seek - sample: %d  \n",ipts);
@@ -2240,7 +2278,7 @@ static void demux_seek_mov(demuxer_t *demuxer,float pts,float audio_delay,int fl
     mov_track_t* trak;
 
 //    printf("MOV seek called  %5.3f  flag=%d  \n",pts,flags);
-    
+
     ds=demuxer->video;
     trak = stream_track(priv, ds);
     if (trak) {
@@ -2295,7 +2333,7 @@ static int demux_mov_control(demuxer_t *demuxer, int cmd, void *arg){
 }
 
 
-demuxer_desc_t demuxer_desc_mov = {
+const demuxer_desc_t demuxer_desc_mov = {
   "Quicktime/MP4 demuxer",
   "mov",
   "Quicktime/MOV",

@@ -1,7 +1,7 @@
-#ifndef DMO_GUIDS_H
-#define DMO_GUIDS_H
+#ifndef MPLAYER_DMO_GUIDS_H
+#define MPLAYER_DMO_GUIDS_H
 
-#include "dshow/guids.h"
+#include "loader/dshow/guids.h"
 
 extern const GUID IID_IMediaBuffer;
 extern const GUID IID_IMediaObject;
@@ -32,4 +32,4 @@ extern const GUID DMOCATEGORY_AUDIO_NOISE_SUPPRESS;
 extern const GUID DMOCATEGORY_AGC;
 */
 
-#endif
+#endif /* MPLAYER_DMO_GUIDS_H */

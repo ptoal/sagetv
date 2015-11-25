@@ -1,13 +1,29 @@
 /*
- * mach64.h
- * This	software has been released under the terms of the GNU Public
- * license. See	http://www.gnu.org/copyleft/gpl.html for details.
+ * VIDIX driver for ATI Mach64 and 3DRage chipsets.
  *
- * It's	based on radeonfb, X11,	GATOS sources
-*/
+ * Copyright (C) 2002 Nick Kurshev
+ * This file is based on sources from
+ *  radeonfb, GATOS (gatos.sf.net) and X11 (www.xfree86.org)
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-#ifndef __MACH64_INCLUDED
-#define __MACH64_INCLUDED 1
+#ifndef MPLAYER_MACH64_H
+#define MPLAYER_MACH64_H
 
 /* Note: this model of accessing to IO space is based on MMIO technology.
 This means that this sources don't support ISA and VLB cards */
@@ -1617,7 +1633,7 @@ This means that this sources don't support ISA and VLB cards */
 #	define GRAPHIC_KEY_FN_EQ		0x00000050L // EQ and NE are exchanged relative to radeon
 #	define CMP_MIX_MASK			0x00000100L
 #	define CMP_MIX_OR			0x00000000L
-#	define CMP_MIX_AND			0x00000100L   
+#	define CMP_MIX_AND			0x00000100L
 /*	?			BlockIOTag(0x107u) */
 #define OVERLAY_SCALE_INC	BlockIOTag(0x108u)
 #define OVERLAY_SCALE_CNTL	BlockIOTag(0x109u)
@@ -2478,4 +2494,4 @@ This means that this sources don't support ISA and VLB cards */
 #define MIX_FN_PAINT			MIX_SRC
 
 
-#endif
+#endif /* MPLAYER_MACH64_H */

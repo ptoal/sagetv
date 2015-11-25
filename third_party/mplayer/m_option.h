@@ -1,13 +1,33 @@
-#ifndef _M_OPTION_H
-#define _M_OPTION_H
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-/// \defgroup Options
+#ifndef MPLAYER_M_OPTION_H
+#define MPLAYER_M_OPTION_H
+
+#include <string.h>
+
+/// \defgroup options Options
 /// m_option allows to parse, print and copy data of various types.
 /// It is the base of the \ref OptionsStruct, \ref Config and
 /// \ref Properties APIs.
 ///@{
 
-/// \file m_option.h
+/// \file
 
 /// \ingroup OptionTypes
 typedef struct m_option_type m_option_type_t;
@@ -21,39 +41,41 @@ struct m_struct_st;
 ///////////////////////////// Options types declarations ////////////////////////////
 
 // Simple types
-extern m_option_type_t m_option_type_flag;
-extern m_option_type_t m_option_type_int;
-extern m_option_type_t m_option_type_float;
-extern m_option_type_t m_option_type_double;
-extern m_option_type_t m_option_type_string;
-extern m_option_type_t m_option_type_string_list;
-extern m_option_type_t m_option_type_position;
-extern m_option_type_t m_option_type_time;
-extern m_option_type_t m_option_type_time_size;
+extern const m_option_type_t m_option_type_flag;
+extern const m_option_type_t m_option_type_int;
+extern const m_option_type_t m_option_type_int64;
+extern const m_option_type_t m_option_type_float;
+extern const m_option_type_t m_option_type_double;
+extern const m_option_type_t m_option_type_string;
+extern const m_option_type_t m_option_type_string_list;
+extern const m_option_type_t m_option_type_position;
+extern const m_option_type_t m_option_type_time;
+extern const m_option_type_t m_option_type_time_size;
 
-extern m_option_type_t m_option_type_print;
-extern m_option_type_t m_option_type_print_indirect;
-extern m_option_type_t m_option_type_print_func;
-extern m_option_type_t m_option_type_subconfig;
-extern m_option_type_t m_option_type_imgfmt;
-extern m_option_type_t m_option_type_afmt;
+extern const m_option_type_t m_option_type_print;
+extern const m_option_type_t m_option_type_print_indirect;
+extern const m_option_type_t m_option_type_print_func;
+extern const m_option_type_t m_option_type_subconfig;
+extern const m_option_type_t m_option_type_imgfmt;
+extern const m_option_type_t m_option_type_afmt;
 
 // Func-based types
-extern m_option_type_t m_option_type_func_full;
-extern m_option_type_t m_option_type_func_param;
-extern m_option_type_t m_option_type_func;
+extern const m_option_type_t m_option_type_func_full;
+extern const m_option_type_t m_option_type_func_param;
+extern const m_option_type_t m_option_type_func_param_immediate;
+extern const m_option_type_t m_option_type_func;
 
 /// Callback used to reset func options.
-typedef void (*m_opt_default_func_t)(m_option_t *, char*);
+typedef void (*m_opt_default_func_t)(const m_option_t *, const char*);
 
 /// Callback used by m_option_type_func_full options.
-typedef int (*m_opt_func_full_t)(m_option_t *, char *, char *);
+typedef int (*m_opt_func_full_t)(const m_option_t *, const char *, const char *);
 
 /// Callback used by m_option_type_func_param options.
-typedef int (*m_opt_func_param_t)(m_option_t *, char *);
+typedef int (*m_opt_func_param_t)(const m_option_t *, const char *);
 
 /// Callback used by m_option_type_func options.
-typedef int (*m_opt_func_t)(m_option_t *);
+typedef int (*m_opt_func_t)(const m_option_t *);
 
 // Backwards compatibility
 typedef m_opt_default_func_t cfg_default_func_t;
@@ -95,18 +117,18 @@ typedef struct m_obj_settings {
  *  field (\ref m_option::priv) must point to a \ref m_obj_list_t describing
  *  the available object types.
  */
-extern m_option_type_t m_option_type_obj_settings_list;
+extern const m_option_type_t m_option_type_obj_settings_list;
 
 /// Extra definition needed for \ref m_option_type_obj_presets options.
 typedef struct {
   /// Description of the struct holding the presets.
-  struct m_struct_st* in_desc;
+  const struct m_struct_st* in_desc;
   /// Description of the struct that should be set by the presets.
-  struct m_struct_st* out_desc;
+  const struct m_struct_st* out_desc;
   /// Pointer to an array of structs defining the various presets.
-  void* presets;
+  const void* presets;
   /// Offset of the preset's name inside the in_struct.
-  void* name_off;
+  const void* name_off;
 } m_obj_presets_t;
 
 /// Set several fields in a struct at once.
@@ -116,18 +138,18 @@ typedef struct {
  *  The option priv field (\ref m_option::priv) must point to a correctly
  *  filled \ref m_obj_presets_t.
  */
-extern m_option_type_t m_option_type_obj_presets;
+extern const m_option_type_t m_option_type_obj_presets;
 
 /// Parse an URL into a struct.
 /** The option priv field (\ref m_option::priv) must point to a
  *  \ref m_struct_st describing which fields of the URL must be used.
  */
-extern m_option_type_t m_option_type_custom_url;
+extern const m_option_type_t m_option_type_custom_url;
 
 /// Extra definition needed for \ref m_option_type_obj_params options.
 typedef struct {
   /// Field descriptions.
-  struct m_struct_st* desc;
+  const struct m_struct_st* desc;
   /// Field separator to use.
   char separator;
 } m_obj_params_t;
@@ -137,24 +159,26 @@ typedef struct {
  *  successively sets a field from the struct. The option priv field
  *  (\ref m_option::priv) must point to a \ref m_obj_params_t.
  */
-extern m_option_type_t m_option_type_obj_params;
+extern const m_option_type_t m_option_type_obj_params;
 
 typedef struct {
   int start;
   int end;
 } m_span_t;
 /// Ready made settings to parse a \ref m_span_t with a start-end syntax.
-extern m_obj_params_t m_span_params_def;
+extern const m_obj_params_t m_span_params_def;
 
 
 // FIXME: backward compatibility
 #define CONF_TYPE_FLAG		(&m_option_type_flag)
 #define CONF_TYPE_INT		(&m_option_type_int)
+#define CONF_TYPE_INT64		(&m_option_type_int64)
 #define CONF_TYPE_FLOAT		(&m_option_type_float)
 #define CONF_TYPE_DOUBLE	(&m_option_type_double)
 #define CONF_TYPE_STRING	(&m_option_type_string)
 #define CONF_TYPE_FUNC		(&m_option_type_func)
 #define CONF_TYPE_FUNC_PARAM	(&m_option_type_func_param)
+#define CONF_TYPE_FUNC_PARAM_IMMEDIATE (&m_option_type_func_param_immediate)
 #define CONF_TYPE_PRINT		(&m_option_type_print)
 #define CONF_TYPE_PRINT_INDIRECT (&m_option_type_print_indirect)
 #define CONF_TYPE_PRINT_FUNC	(&m_option_type_print_func)
@@ -176,17 +200,17 @@ extern m_obj_params_t m_span_params_def;
 
 /// Option type description
 struct m_option_type {
-  char* name;
+  const char* name;
   /// Syntax description, etc
-  char* comments;
+  const char* comments;
   /// Size needed for the data.
   unsigned int size;
   /// See \ref OptionTypeFlags.
   unsigned int flags;
-  
+
   /// Parse the data from a string.
   /** It is the only required function, all others can be NULL.
-   * 
+   *
    *  \param opt The option that is parsed.
    *  \param name The full option name.
    *  \param param The parameter to parse.
@@ -196,15 +220,15 @@ struct m_option_type {
    *  \return On error a negative value is returned, on success the number of arguments
    *          consumed. For details see \ref OptionParserReturn.
    */
-  int (*parse)(m_option_t* opt,char *name, char *param, void* dst, int src);
-  
+  int (*parse)(const m_option_t* opt,const char *name, const char *param, void* dst, int src);
+
   /// Print back a value in string form.
   /** \param opt The option to print.
    *  \param val Pointer to the memory holding the data to be printed.
    *  \return An allocated string containing the text value or (void*)-1
    *          on error.
    */
-  char* (*print)(m_option_t* opt,  void* val);
+  char* (*print)(const m_option_t* opt, const void* val);
 
   /** \name
    *  These functions are called to save/set/restore the status of the
@@ -219,21 +243,21 @@ struct m_option_type {
    *  \param dst Pointer to the destination memory.
    *  \param src Pointer to the source memory.
    */
-  void (*save)(m_option_t* opt,void* dst, void* src);
-  
+  void (*save)(const m_option_t* opt,void* dst, const void* src);
+
   /// Set the value in the program (dst) from a save slot.
   /** \param opt The option to copy.
    *  \param dst Pointer to the destination memory.
    *  \param src Pointer to the source memory.
    */
-  void (*set)(m_option_t* opt,void* dst, void* src);
+  void (*set)(const m_option_t* opt,void* dst, const void* src);
 
   /// Copy the data between two save slots. If NULL and size is > 0 a memcpy will be used.
   /** \param opt The option to copy.
    *  \param dst Pointer to the destination memory.
    *  \param src Pointer to the source memory.
    */
-  void (*copy)(m_option_t* opt,void* dst, void* src);
+  void (*copy)(const m_option_t* opt,void* dst, const void* src);
   //@}
 
   /// Free the data allocated for a save slot.
@@ -251,21 +275,21 @@ struct m_option_type {
  */
 struct m_option {
   /// Option name.
-  char *name;
-  
+  const char *name;
+
   /// Reserved for higher level APIs, it shouldn't be used by parsers.
   /** The suboption parser and func types do use it. They should instead
    *  use the priv field but this was inherited from older versions of the
    *  config code.
    */
   void *p;
-  
+
   /// Option type.
-  m_option_type_t* type;
-  
+  const m_option_type_t* type;
+
   /// See \ref OptionFlags.
   unsigned int flags;
-  
+
   /// \brief Mostly useful for numeric types, the \ref M_OPT_MIN flags must
   /// also be set.
   double min;
@@ -273,7 +297,7 @@ struct m_option {
   /// \brief Mostly useful for numeric types, the \ref M_OPT_MAX flags must
   /// also be set.
   double max;
-  
+
   /// Type dependent data (for all kinds of extended settings).
   /** This used to be a function pointer to hold a 'reverse to defaults' func.
    *  Now it can be used to pass any type of extra args needed by the parser.
@@ -282,6 +306,12 @@ struct m_option {
   void* priv;
 };
 
+
+/// \defgroup PrivFlags Private data
+/// @{
+/// Don't exit after printing a CONF_TYPE_PRINT option.
+#define PRIV_NO_EXIT (void *)-1
+///@}
 
 /// \defgroup OptionFlags Option flags
 ///@{
@@ -319,6 +349,9 @@ struct m_option {
 /// option only if it was set by the user.
 #define M_OPT_OLD		(1<<6)
 
+/// The option should be set during command line pre-parsing
+#define M_OPT_PRE_PARSE		(1<<7)
+
 /// \defgroup OldOptionFlags Backward compatibility
 ///
 /// These are kept for compatibility with older code.
@@ -331,6 +364,7 @@ struct m_option {
 #define CONF_GLOBAL		M_OPT_GLOBAL
 #define CONF_NOSAVE		M_OPT_NOSAVE
 #define CONF_OLD		M_OPT_OLD
+#define CONF_PRE_PARSE		M_OPT_PRE_PARSE
 ///@}
 
 ///@}
@@ -393,6 +427,8 @@ struct m_option {
 #define M_CONFIG_FILE 0
 /// Set when parsing command line arguments.
 #define M_COMMAND_LINE 1
+/// Set when pre-parsing the command line
+#define M_COMMAND_LINE_PRE_PARSE 2
 
 ///@}
 
@@ -417,7 +453,7 @@ struct m_option {
 /// Returned when the given parameter couldn't be parsed.
 #define M_OPT_INVALID		-3
 
-/// \brief Returned if the value is "out of range". The exact meaning may 
+/// \brief Returned if the value is "out of range". The exact meaning may
 /// vary from type to type.
 #define M_OPT_OUT_OF_RANGE	-4
 
@@ -446,22 +482,22 @@ struct m_option {
 /** \ingroup Options
  *  This function takes the possible wildcards into account (see
  *  \ref M_OPT_TYPE_ALLOW_WILDCARD).
- * 
+ *
  *  \param list Pointer to an array of \ref m_option.
  *  \param name Name of the option.
  *  \return The matching option or NULL.
  */
-m_option_t* m_option_list_find(m_option_t* list,const char* name);
+const m_option_t* m_option_list_find(const m_option_t* list,const char* name);
 
 /// Helper to parse options, see \ref m_option_type::parse.
-inline static int
-m_option_parse(m_option_t* opt,char *name, char *param, void* dst, int src) {
+static inline int
+m_option_parse(const m_option_t* opt,const char *name, const char *param, void* dst, int src) {
   return opt->type->parse(opt,name,param,dst,src);
 }
 
 /// Helper to print options, see \ref m_option_type::print.
-inline static  char*
-m_option_print(m_option_t* opt,  void* val_ptr) {
+static inline  char*
+m_option_print(const m_option_t* opt, const void* val_ptr) {
   if(opt->type->print)
     return opt->type->print(opt,val_ptr);
   else
@@ -469,22 +505,22 @@ m_option_print(m_option_t* opt,  void* val_ptr) {
 }
 
 /// Helper around \ref m_option_type::save.
-inline static  void
-m_option_save(m_option_t* opt,void* dst, void* src) {
+static inline  void
+m_option_save(const m_option_t* opt,void* dst, const void* src) {
   if(opt->type->save)
     opt->type->save(opt,dst,src);
 }
 
 /// Helper around \ref m_option_type::set.
-inline static  void
-m_option_set(m_option_t* opt,void* dst, void* src) {
+static inline  void
+m_option_set(const m_option_t* opt,void* dst, const void* src) {
   if(opt->type->set)
     opt->type->set(opt,dst,src);
 }
 
 /// Helper around \ref m_option_type::copy.
 inline  static void
-m_option_copy(m_option_t* opt,void* dst, void* src) {
+m_option_copy(const m_option_t* opt,void* dst, const void* src) {
   if(opt->type->copy)
     opt->type->copy(opt,dst,src);
   else if(opt->type->size > 0)
@@ -492,12 +528,23 @@ m_option_copy(m_option_t* opt,void* dst, void* src) {
 }
 
 /// Helper around \ref m_option_type::free.
-inline static void
-m_option_free(m_option_t* opt,void* dst) {
+static inline void
+m_option_free(const m_option_t* opt,void* dst) {
   if(opt->type->free)
     opt->type->free(dst);
 }
 
 /*@}*/
 
-#endif /* _M_OPTION_H */
+/**
+ * Parse a string as a timestamp.
+ *
+ * @param[in]  str      the string to parse.
+ * @param[out] time     parsed time.
+ * @param[in]  endchar  return an error of the next character after the
+ *                      timestamp is neither nul nor endchar.
+ * @return              Number of chars in the timestamp.
+ */
+int parse_timestring(const char *str, double *time, char endchar);
+
+#endif /* MPLAYER_M_OPTION_H */

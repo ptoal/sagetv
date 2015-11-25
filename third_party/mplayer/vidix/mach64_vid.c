@@ -1,10 +1,27 @@
 /*
-   mach64_vid - VIDIX based video driver for Mach64 and 3DRage chips
-   Copyrights 2002 Nick Kurshev. This file is based on sources from
-   GATOS (gatos.sf.net) and X11 (www.xfree86.org)
-   Licence: GPL
-   WARNING: THIS DRIVER IS IN BETTA STAGE
-*/
+ * VIDIX driver for ATI Mach64 and 3DRage chipsets.
+ *
+ * Copyright (C) 2002 Nick Kurshev
+ * This file is based on sources from
+ *  GATOS (gatos.sf.net) and X11 (www.xfree86.org)
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,15 +30,15 @@
 #include <inttypes.h>
 #include <fcntl.h>
 
-#include "../config.h"
-#include "../libavutil/common.h"
-#include "../mpbswap.h"
+#include "config.h"
+#include "libavutil/common.h"
+#include "mpbswap.h"
 #include "vidix.h"
-#include "vidixlib.h"
 #include "fourcc.h"
-#include "../libdha/libdha.h"
-#include "../libdha/pci_ids.h"
-#include "../libdha/pci_names.h"
+#include "dha.h"
+#include "pci_ids.h"
+#include "pci_names.h"
+#include "mp_msg.h"
 
 #include "mach64.h"
 
@@ -36,9 +53,9 @@ static int num_mach64_buffers=-1;
 static int supports_planar=0;
 static int supports_lcd_v_stretch=0;
 
-pciinfo_t pci_info;
+static pciinfo_t pci_info;
 static int probed = 0;
-static int __verbose = 0;
+static int verbosity = 0;
 
 #define VERBOSE_LEVEL 1
 
@@ -62,17 +79,17 @@ typedef struct bes_registers_s
   uint32_t key_cntl;
   uint32_t test;
   /* Configurable stuff */
-  
+
   int brightness;
   int saturation;
-  
+
   int ckey_on;
   uint32_t graphics_key_clr;
   uint32_t graphics_key_msk;
-  
+
   int deinterlace_on;
   uint32_t deinterlace_pattern;
-  
+
 } bes_registers_t;
 
 static bes_registers_t besr;
@@ -84,13 +101,11 @@ typedef struct video_registers_s
   uint32_t value;
 }video_registers_t;
 
-static bes_registers_t besr;
-
 /* Graphic keys */
 static vidix_grkey_t mach64_grkey;
 
 #define DECLARE_VREG(name) { #name, name, 0 }
-static video_registers_t vregs[] = 
+static video_registers_t vregs[] =
 {
   DECLARE_VREG(OVERLAY_SCALE_INC),
   DECLARE_VREG(OVERLAY_Y_X_START),
@@ -146,27 +161,27 @@ static inline uint32_t INREG (uint32_t addr) {
 		OUTREG(addr, _tmp);					\
 	} while (0)
 
-static __inline__ int ATIGetMach64LCDReg(int _Index)
+static inline int ATIGetMach64LCDReg(int _Index)
 {
         OUTREG8(LCD_INDEX, _Index);
         return INREG(LCD_DATA);
 }
 
-static __inline__ uint32_t INPLL(uint32_t addr)
+static inline uint32_t INPLL(uint32_t addr)
 {
     uint32_t res;
     uint32_t in;
-    
+
     in= INREG(CLOCK_CNTL);
     in &= ~((PLL_WR_EN | PLL_ADDR)); //clean some stuff
     OUTREG(CLOCK_CNTL, in | (addr<<10));
-    
+
     /* read the register value */
     res = (INREG(CLOCK_CNTL)>>16)&0xFF;
     return res;
 }
 
-static __inline__ void OUTPLL(uint32_t addr,uint32_t val)
+static inline void OUTPLL(uint32_t addr, uint32_t val)
 {
 //FIXME buggy but its not used
     /* write addr byte */
@@ -184,12 +199,12 @@ static __inline__ void OUTPLL(uint32_t addr,uint32_t val)
 		OUTPLL(addr, _tmp);					\
 	} while (0)
 
-static void mach64_fifo_wait(unsigned n) 
+static void mach64_fifo_wait(unsigned n)
 {
     while ((INREG(FIFO_STAT) & 0xffff) > ((uint32_t)(0x8000 >> n)));
 }
 
-static void mach64_wait_for_idle( void ) 
+static void mach64_wait_for_idle( void )
 {
     mach64_fifo_wait(16);
     while ((INREG(GUI_STAT) & 1)!= 0);
@@ -277,31 +292,31 @@ static int mach64_get_vert_stretch(void)
     int yres= mach64_get_yres();
 
     if(!supports_lcd_v_stretch){
-        if(__verbose>0) printf("[mach64] vertical stretching not supported\n");
+        if(verbosity > 0) mp_msg(MSGT_VO, MSGL_STATUS, "[mach64] vertical stretching not supported\n");
         return 1<<16;
     }
 
     lcd_index= INREG(LCD_INDEX);
-    
+
     vert_stretching= ATIGetMach64LCDReg(LCD_VERT_STRETCHING);
     if(!(vert_stretching&VERT_STRETCH_EN)) ret= 1<<16;
     else
     {
     	int panel_size;
-        
+
 	ext_vert_stretch= ATIGetMach64LCDReg(LCD_EXT_VERT_STRETCH);
 	panel_size= (ext_vert_stretch&VERT_PANEL_SIZE)>>11;
 	panel_size++;
-	
+
 	ret= ((yres<<16) + (panel_size>>1))/panel_size;
     }
-      
+
 //    lcd_gen_ctrl = ATIGetMach64LCDReg(LCD_GEN_CNTL);
-    
+
     OUTREG(LCD_INDEX, lcd_index);
-    
-    if(__verbose>0) printf("[mach64] vertical stretching factor= %d\n", ret);
-    
+
+    if(verbosity > 0) mp_msg(MSGT_VO, MSGL_STATUS, "[mach64] vertical stretching factor= %d\n", ret);
+
     return ret;
 }
 
@@ -323,23 +338,23 @@ static void mach64_vid_make_default(void)
 static void mach64_vid_dump_regs( void )
 {
   size_t i;
-  printf("[mach64] *** Begin of DRIVER variables dump ***\n");
-  printf("[mach64] mach64_mmio_base=%p\n",mach64_mmio_base);
-  printf("[mach64] mach64_mem_base=%p\n",mach64_mem_base);
-  printf("[mach64] mach64_overlay_off=%08X\n",mach64_overlay_offset);
-  printf("[mach64] mach64_ram_size=%08X\n",mach64_ram_size);
-  printf("[mach64] video mode: %ux%u@%u\n",mach64_get_xres(),mach64_get_yres(),mach64_vid_get_dbpp());
-  printf("[mach64] *** Begin of OV0 registers dump ***\n");
+  mp_msg(MSGT_VO, MSGL_STATUS, "[mach64] *** Begin of DRIVER variables dump ***\n");
+  mp_msg(MSGT_VO, MSGL_STATUS, "[mach64] mach64_mmio_base=%p\n",mach64_mmio_base);
+  mp_msg(MSGT_VO, MSGL_STATUS, "[mach64] mach64_mem_base=%p\n",mach64_mem_base);
+  mp_msg(MSGT_VO, MSGL_STATUS, "[mach64] mach64_overlay_off=%08X\n",mach64_overlay_offset);
+  mp_msg(MSGT_VO, MSGL_STATUS, "[mach64] mach64_ram_size=%08X\n",mach64_ram_size);
+  mp_msg(MSGT_VO, MSGL_STATUS, "[mach64] video mode: %ux%u@%u\n",mach64_get_xres(),mach64_get_yres(),mach64_vid_get_dbpp());
+  mp_msg(MSGT_VO, MSGL_STATUS, "[mach64] *** Begin of OV0 registers dump ***\n");
   for(i=0;i<sizeof(vregs)/sizeof(video_registers_t);i++)
   {
 	mach64_wait_for_idle();
-	printf("[mach64] %s = %08X\n",vregs[i].sname,INREG(vregs[i].name));
+	mp_msg(MSGT_VO, MSGL_STATUS, "[mach64] %s = %08X\n",vregs[i].sname,INREG(vregs[i].name));
   }
-  printf("[mach64] *** End of OV0 registers dump ***\n");
+  mp_msg(MSGT_VO, MSGL_STATUS, "[mach64] *** End of OV0 registers dump ***\n");
 }
 
 
-static unsigned short ati_card_ids[] = 
+static unsigned short ati_card_ids[] =
 {
  DEVICE_ATI_215CT_MACH64_CT,
  DEVICE_ATI_210888CX_MACH64_CX,
@@ -396,11 +411,11 @@ static int mach64_probe(int verbose,int force)
   pciinfo_t lst[MAX_PCI_DEVICES];
   unsigned i,num_pci;
   int err;
-  __verbose = verbose;
+  verbosity = verbose;
   err = pci_scan(lst,&num_pci);
   if(err)
   {
-    printf("[mach64] Error occurred during pci scan: %s\n",strerror(err));
+    mp_msg(MSGT_VO, MSGL_STATUS, "[mach64] Error occurred during pci scan: %s\n",strerror(err));
     return err;
   }
   else
@@ -416,17 +431,19 @@ static int mach64_probe(int verbose,int force)
 	if(idx == -1 && force == PROBE_NORMAL) continue;
 	dname = pci_device_name(VENDOR_ATI,lst[i].device);
 	dname = dname ? dname : "Unknown chip";
-	printf("[mach64] Found chip: %s\n",dname);
+	mp_msg(MSGT_VO, MSGL_STATUS, "[mach64] Found chip: %s\n",dname);
+#if 0
 	if ((lst[i].command & PCI_COMMAND_IO) == 0)
 	{
-		printf("[mach64] Device is disabled, ignoring\n");
+		mp_msg(MSGT_VO, MSGL_STATUS, "[mach64] Device is disabled, ignoring\n");
 		continue;
 	}
+#endif
 	if(force > PROBE_NORMAL)
 	{
-	    printf("[mach64] Driver was forced. Was found %sknown chip\n",idx == -1 ? "un" : "");
+	    mp_msg(MSGT_VO, MSGL_STATUS, "[mach64] Driver was forced. Was found %sknown chip\n",idx == -1 ? "un" : "");
 	    if(idx == -1)
-		printf("[mach64] Assuming it as Mach64\n");
+		mp_msg(MSGT_VO, MSGL_STATUS, "[mach64] Assuming it as Mach64\n");
 	}
 	mach64_cap.device_id = lst[i].device;
 	err = 0;
@@ -436,7 +453,7 @@ static int mach64_probe(int verbose,int force)
       }
     }
   }
-  if(err && verbose) printf("[mach64] Can't find chip\n");
+  if(err && verbose) mp_msg(MSGT_VO, MSGL_STATUS, "[mach64] Can't find chip\n");
   return err;
 }
 
@@ -456,11 +473,10 @@ static int mach64_init(void)
   int err;
   if(!probed)
   {
-    printf("[mach64] Driver was not probed but is being initializing\n");
+    mp_msg(MSGT_VO, MSGL_STATUS, "[mach64] Driver was not probed but is being initializing\n");
     return EINTR;
   }
-  if(__verbose>0) printf("[mach64] version %d\n", VIDIX_VERSION);
-  
+
   if((mach64_mmio_base = map_phys_mem(pci_info.base2,0x1000))==(void *)-1) return ENOMEM;
   mach64_wait_for_idle();
   mach64_ram_size = INREG(MEM_CNTL) & CTL_MEM_SIZEB;
@@ -470,14 +486,14 @@ static int mach64_init(void)
   mach64_ram_size *= 0x400; /* KB -> bytes */
   if((mach64_mem_base = map_phys_mem(pci_info.base0,mach64_ram_size))==(void *)-1) return ENOMEM;
   memset(&besr,0,sizeof(bes_registers_t));
-  printf("[mach64] Video memory = %uMb\n",mach64_ram_size/0x100000);
+  mp_msg(MSGT_VO, MSGL_STATUS, "[mach64] Video memory = %uMb\n",mach64_ram_size/0x100000);
   err = mtrr_set_type(pci_info.base0,mach64_ram_size,MTRR_TYPE_WRCOMB);
-  if(!err) printf("[mach64] Set write-combining type of video memory\n");
+  if(!err) mp_msg(MSGT_VO, MSGL_STATUS, "[mach64] Set write-combining type of video memory\n");
 
   /* save this */
   mach64_wait_for_idle();
   SAVED_OVERLAY_GRAPHICS_KEY_CLR = INREG(OVERLAY_GRAPHICS_KEY_CLR);
-  
+
   /* check if planar formats are supported */
   supports_planar=0;
   mach64_wait_for_idle();
@@ -493,9 +509,9 @@ static int mach64_init(void)
 
 	if(INREG(SCALER_BUF0_OFFSET_U)) 	supports_planar=1;
   }
-  if(supports_planar)	printf("[mach64] Planar YUV formats are supported :)\n");
-  else			printf("[mach64] Planar YUV formats are not supported :(\n");
-  
+  if(supports_planar)	mp_msg(MSGT_VO, MSGL_STATUS, "[mach64] Planar YUV formats are supported :)\n");
+  else			mp_msg(MSGT_VO, MSGL_STATUS, "[mach64] Planar YUV formats are not supported :(\n");
+
   if(   mach64_cap.device_id==DEVICE_ATI_RAGE_MOBILITY_P_M
      || mach64_cap.device_id==DEVICE_ATI_RAGE_MOBILITY_P_M2
      || mach64_cap.device_id==DEVICE_ATI_RAGE_MOBILITY_L
@@ -503,11 +519,11 @@ static int mach64_init(void)
          supports_lcd_v_stretch=1;
   else
          supports_lcd_v_stretch=0;
-  
+
   reset_regs();
   mach64_vid_make_default();
 
-  if(__verbose > VERBOSE_LEVEL) mach64_vid_dump_regs();
+  if(verbosity > VERBOSE_LEVEL) mach64_vid_dump_regs();
   return 0;
 }
 
@@ -516,7 +532,7 @@ static void mach64_destroy(void)
   /*restore this*/
   mach64_wait_for_idle();
   OUTREG(OVERLAY_GRAPHICS_KEY_CLR,SAVED_OVERLAY_GRAPHICS_KEY_CLR);
-  
+
   unmap_phys_mem(mach64_mem_base,mach64_ram_size);
   unmap_phys_mem(mach64_mmio_base,0x1000);
 }
@@ -601,7 +617,7 @@ static void mach64_compute_framesize(vidix_playback_t *info)
 		info->frame_size = (awidth*info->src.h);
 		break;
     /* YUY2 YVYU, RGB15, RGB16 */
-    default:	
+    default:
 		awidth = (info->src.w*2 + (pitch-1)) & ~(pitch-1);
 		info->frame_size = (awidth*info->src.h);
 		break;
@@ -627,7 +643,6 @@ static void mach64_vid_stop_video( void )
 
 static void mach64_vid_display_video( void )
 {
-    uint32_t vf;
     mach64_fifo_wait(14);
 
     OUTREG(OVERLAY_Y_X_START,			besr.y_x_start);
@@ -642,7 +657,7 @@ static void mach64_vid_display_video( void )
     OUTREG(SCALER_BUF1_OFFSET_U,		mach64_buffer_base[0][1]);
     OUTREG(SCALER_BUF1_OFFSET_V,		mach64_buffer_base[0][2]);
     mach64_wait_vsync();
-    
+
     mach64_fifo_wait(4);
     OUTREG(OVERLAY_SCALE_CNTL, 0xC4000003);
 // OVERLAY_SCALE_CNTL bits & what they seem to affect
@@ -657,7 +672,7 @@ static void mach64_vid_display_video( void )
 // bit 28-31 nothing interresting just crashed my system when i played with them  :(
 
     mach64_wait_for_idle();
-    vf = INREG(VIDEO_FORMAT);
+    INREG(VIDEO_FORMAT);
 
 // Bits 16-19 seem to select the format
 // 0x0  dunno behaves strange
@@ -698,12 +713,12 @@ static void mach64_vid_display_video( void )
 	case IMGFMT_YUY2:
 	default:           OUTREG(VIDEO_FORMAT, 0x000B0000); break;
     }
-    if(__verbose > VERBOSE_LEVEL) mach64_vid_dump_regs();
+    if(verbosity > VERBOSE_LEVEL) mach64_vid_dump_regs();
 }
 
 static int mach64_vid_init_video( vidix_playback_t *config )
 {
-    uint32_t src_w,src_h,dest_w,dest_h,pitch,h_inc,v_inc,left,leftUV,top,ecp,y_pos;
+    uint32_t src_w,src_h,dest_w,dest_h,pitch,h_inc,v_inc,left,top,ecp,y_pos;
     int is_420,best_pitch,mpitch;
     int src_offset_y, src_offset_u, src_offset_v;
     unsigned int i;
@@ -727,16 +742,16 @@ static int mach64_vid_init_video( vidix_playback_t *config )
 	case IMGFMT_IYUV:
 	case IMGFMT_YV12:
 	case IMGFMT_I420: pitch = (src_w + mpitch) & ~mpitch;
-			  config->dest.pitch.y = 
-			  config->dest.pitch.u = 
+			  config->dest.pitch.y =
+			  config->dest.pitch.u =
 			  config->dest.pitch.v = best_pitch;
 			  besr.vid_buf_pitch= pitch;
 			  break;
 	/* RGB 4:4:4:4 */
 	case IMGFMT_RGB32:
 	case IMGFMT_BGR32: pitch = (src_w*4 + mpitch) & ~mpitch;
-			  config->dest.pitch.y = 
-			  config->dest.pitch.u = 
+			  config->dest.pitch.y =
+			  config->dest.pitch.u =
 			  config->dest.pitch.v = best_pitch;
 			  besr.vid_buf_pitch= pitch>>2;
 			  break;
@@ -753,39 +768,32 @@ static int mach64_vid_init_video( vidix_playback_t *config )
     dest_h = config->dest.h;
     besr.fourcc = config->fourcc;
     ecp = (INPLL(PLL_VCLK_CNTL) & PLL_ECP_DIV) >> 4;
-#if 0
-{
-int i;
-for(i=0; i<32; i++){
-    printf("%X ", INPLL(i));
-}
-}
-#endif
-    if(__verbose>0) printf("[mach64] ecp: %d\n", ecp);
+
+    if(verbosity > 0) mp_msg(MSGT_VO, MSGL_STATUS, "[mach64] ecp: %d\n", ecp);
     v_inc = src_h * mach64_get_vert_stretch();
-    
+
     if(mach64_is_interlace()) v_inc<<=1;
     if(mach64_is_dbl_scan() ) v_inc>>=1;
     v_inc>>=4; // convert 16.16 -> 20.12
     v_inc/= dest_h;
-    
+
     h_inc = (src_w << (12+ecp)) / dest_w;
     /* keep everything in 16.16 */
     config->offsets[0] = 0;
     for(i=1; i<config->num_frames; i++)
         config->offsets[i] = config->offsets[i-1] + config->frame_size;
-    
+
 	/*FIXME the left / top stuff is broken (= zoom a src rectangle from a larger one)
 		1. the framesize isn't known as the outer src rectangle dimensions aren't known
 		2. the mach64 needs aligned addresses so it can't work anyway
 		   -> so we could shift the outer buffer to compensate that but that would mean
 		      alignment problems for the code which writes into it
 	*/
-    
+
     if(is_420)
     {
 	config->offset.y= 0;
-	config->offset.u= (pitch*src_h + 15)&~15; 
+	config->offset.u= (pitch*src_h + 15)&~15;
 	config->offset.v= (config->offset.u + (pitch*src_h>>2) + 15)&~15;
 
 	if(besr.fourcc == IMGFMT_I420 || besr.fourcc == IMGFMT_IYUV)
@@ -795,7 +803,7 @@ for(i=0; i<32; i++){
 	  config->offset.u = config->offset.v;
 	  config->offset.v = tmp;
 	}
-		
+
 	src_offset_y= config->offset.y + top*pitch + left;
 	src_offset_u= config->offset.u + (top*pitch>>2) + (left>>1);
 	src_offset_v= config->offset.v + (top*pitch>>2) + (left>>1);
@@ -803,9 +811,9 @@ for(i=0; i<32; i++){
     else if(besr.fourcc == IMGFMT_YVU9)
     {
 	config->offset.y= 0;
-	config->offset.u= (pitch*src_h + 15)&~15; 
+	config->offset.u= (pitch*src_h + 15)&~15;
 	config->offset.v= (config->offset.u + (pitch*src_h>>4) + 15)&~15;
-	
+
 	src_offset_y= config->offset.y + top*pitch + left;
 	src_offset_u= config->offset.u + (top*pitch>>4) + (left>>1);
 	src_offset_v= config->offset.v + (top*pitch>>4) + (left>>1);
@@ -829,7 +837,6 @@ for(i=0; i<32; i++){
 	mach64_buffer_base[i][2]= (mach64_overlay_offset + config->offsets[i] + src_offset_v)&~15;
     }
 
-    leftUV = (left >> 17) & 15;
     left = (left >> 16) & 15;
     besr.scale_inc = ( h_inc << 16 ) | v_inc;
     y_pos = config->dest.y;
@@ -871,15 +878,10 @@ static int mach64_query_fourcc(vidix_fourcc_t *to)
 {
     if(is_supported_fourcc(to->fourcc))
     {
-	to->depth = VID_DEPTH_1BPP | VID_DEPTH_2BPP |
-		    VID_DEPTH_4BPP | VID_DEPTH_8BPP |
-		    VID_DEPTH_12BPP| VID_DEPTH_15BPP|
-		    VID_DEPTH_16BPP| VID_DEPTH_24BPP|
-		    VID_DEPTH_32BPP;
+	to->depth = VID_DEPTH_ALL;
 	to->flags = VID_CAP_EXPAND | VID_CAP_SHRINK | VID_CAP_COLORKEY;
 	return 0;
     }
-    else  to->depth = to->flags = 0;
     return ENOSYS;
 }
 
@@ -920,7 +922,7 @@ static int mach64_frame_sel(unsigned int frame)
     uint32_t off[6];
     int i;
     int last_frame= (frame-1+num_mach64_buffers) % num_mach64_buffers;
-//printf("Selecting frame %d\n", frame);    
+//mp_msg(MSGT_VO, MSGL_STATUS, "Selecting frame %d\n", frame);
     /*
     buf3-5 always should point onto second buffer for better
     deinterlacing and TV-in
@@ -933,13 +935,6 @@ static int mach64_frame_sel(unsigned int frame)
     	off[i+3]= mach64_buffer_base[last_frame][i];
     }
 
-#if 0 // delay routine so the individual frames can be ssen better
-{
-volatile int i=0;
-for(i=0; i<10000000; i++);
-}
-#endif
-
     mach64_wait_for_idle();
     mach64_fifo_wait(7);
 
@@ -950,8 +945,8 @@ for(i=0; i<10000000; i++);
     OUTREG(SCALER_BUF1_OFFSET_U,	off[4]);
     OUTREG(SCALER_BUF1_OFFSET_V,	off[5]);
     if(num_mach64_buffers==2) mach64_wait_vsync(); //only wait for vsync if we do double buffering
-       
-    if(__verbose > VERBOSE_LEVEL) mach64_vid_dump_regs();
+
+    if(verbosity > VERBOSE_LEVEL) mach64_vid_dump_regs();
     return 0;
 }
 
@@ -992,7 +987,7 @@ static int mach64_set_eq( const vidix_video_eq_t * eq)
 static int mach64_get_gkeys(vidix_grkey_t *grkey)
 {
     memcpy(grkey, &mach64_grkey, sizeof(vidix_grkey_t));
-    return(0);
+    return 0;
 }
 
 static int mach64_set_gkeys(const vidix_grkey_t *grkey)
@@ -1057,7 +1052,7 @@ static int mach64_set_gkeys(const vidix_grkey_t *grkey)
     else
     	OUTREG(OVERLAY_KEY_CNTL,VIDEO_KEY_FN_TRUE|GRAPHIC_KEY_FN_TRUE|CMP_MIX_AND);
 
-    return(0);
+    return 0;
 }
 
 VDXDriver mach64_drv = {

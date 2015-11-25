@@ -1,17 +1,50 @@
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
+#ifndef MPLAYER_MP_CORE_H
+#define MPLAYER_MP_CORE_H
+
+#include "config.h"
+#include "mp_osd.h"
+#include "libao2/audio_out.h"
+#include "playtree.h"
+#include "stream/stream.h"
+#include "libmpdemux/demuxer.h"
+#include "libmpdemux/stheader.h"
+#include "mixer.h"
+#include "libvo/video_out.h"
+#include "sub/subreader.h"
+#include "libavutil/attributes.h"
+
 // definitions used internally by the core player code
 
-#define INITED_VO 1
-#define INITED_AO 2
-#define INITED_GUI 4
-#define INITED_GETCH2 8
-#define INITED_SPUDEC 32
-#define INITED_STREAM 64
-#define INITED_INPUT    128
-#define INITED_VOBSUB  256
-#define INITED_DEMUXER 512
-#define INITED_ACODEC  1024
-#define INITED_VCODEC  2048
-#define INITED_ALL 0xFFFF
+#define INITIALIZED_VO      1
+#define INITIALIZED_AO      2
+#define INITIALIZED_GUI     4
+#define INITIALIZED_GETCH2  8
+#define INITIALIZED_STREAM  64
+#define INITIALIZED_INPUT   128
+#define INITIALIZED_VOBSUB  256
+#define INITIALIZED_DEMUXER 512
+#define INITIALIZED_ACODEC  1024
+#define INITIALIZED_VCODEC  2048
+#define INITIALIZED_SUBS    4096
+#define INITIALIZED_ALL     0xFFFF
 
 
 #define SUB_SOURCE_SUBS 0
@@ -26,31 +59,24 @@
 #define PT_PREV_SRC -2
 #define PT_UP_NEXT 3
 #define PT_UP_PREV -3
+#define PT_STOP 4
 
-
-#define OSD_MSG_TV_CHANNEL              0
-#define OSD_MSG_TEXT                    1
-#define OSD_MSG_SUB_DELAY               2
-#define OSD_MSG_SPEED                   3
-#define OSD_MSG_OSD_STATUS              4
-#define OSD_MSG_BAR                     5
-#define OSD_MSG_PAUSE                   6
-#define OSD_MSG_RADIO_CHANNEL           7
-/// Base id for messages generated from the commmand to property bridge.
-#define OSD_MSG_PROPERTY                0x100
-
-#define MAX_OSD_LEVEL 3
-#define MAX_TERM_OSD_LEVEL 1
-
+enum exit_reason {
+  EXIT_NONE,
+  EXIT_QUIT,
+  EXIT_EOF,
+  EXIT_ERROR
+};
 
 typedef struct MPContext {
     int osd_show_percentage;
     int osd_function;
-    ao_functions_t *audio_out;
+    const ao_functions_t *audio_out;
     play_tree_t *playtree;
     play_tree_iter_t *playtree_iter;
     int eof;
     int play_tree_step;
+    int loop_times;
 
     stream_t *stream;
     demuxer_t *demuxer;
@@ -60,11 +86,16 @@ typedef struct MPContext {
     demux_stream_t *d_video;
     demux_stream_t *d_sub;
     mixer_t mixer;
-    vo_functions_t *video_out;
+    const vo_functions_t *video_out;
     // Frames buffered in the vo ready to flip. Currently always 0 or 1.
     // This is really a vo variable but currently there's no suitable vo
     // struct.
     int num_buffered_frames;
+
+    // used to retry decoding after startup/seeking to compensate for codec delay
+    int startup_decode_retry;
+    // how long until we need to display the "current" frame
+    float time_frame;
 
     // AV sync: the next frame should be shown when the audio out has this
     // much (in seconds) buffered data left. Increased when more data is
@@ -82,22 +113,29 @@ typedef struct MPContext {
     int global_sub_pos; // this encompasses all subtitle sources
     int set_of_sub_pos;
     int set_of_sub_size;
-    int global_sub_indices[SUB_SOURCES];
-#ifdef USE_ASS
+    int sub_counts[SUB_SOURCES];
+#ifdef CONFIG_ASS
     // set_of_ass_tracks[i] contains subtitles from set_of_subtitles[i]
     // parsed by libass or NULL if format unsupported
-    ass_track_t* set_of_ass_tracks[MAX_SUBTITLE_FILES];
+    ASS_Track* set_of_ass_tracks[MAX_SUBTITLE_FILES];
 #endif
     sub_data* set_of_subtitles[MAX_SUBTITLE_FILES];
 
     int file_format;
 
-#ifdef HAS_DVBIN_SUPPORT
+#ifdef CONFIG_DVBIN
     int last_dvb_step;
     int dvbin_reopen;
 #endif
 
     int was_paused;
+
+#ifdef CONFIG_DVDNAV
+    struct mp_image *nav_smpi;   ///< last decoded dvdnav video image
+    unsigned char *nav_buffer;   ///< last read dvdnav video frame
+    unsigned char *nav_start;    ///< pointer to last read video buffer
+    int            nav_in_size;  ///< last read size
+#endif
 } MPContext;
 
 
@@ -108,33 +146,16 @@ extern FILE *edl_fd;
 extern int file_filter;
 // These appear in options list
 extern float playback_speed;
-extern int osd_duration;
-extern int term_osd;
 extern int fixed_vo;
-extern int ass_enabled;
-extern int fixed_vo;
-extern int forced_subs_only;
-
-// These were listed as externs in mplayer.c, should be in some other header
-extern int vo_gamma_gamma;
-extern int vo_gamma_brightness;
-extern int vo_gamma_contrast;
-extern int vo_gamma_saturation;
-extern int vo_gamma_hue;
 
 
-
-int build_afilter_chain(sh_audio_t *sh_audio, ao_data_t *ao_data);
 void uninit_player(unsigned int mask);
 void reinit_audio_chain(void);
-void init_vo_spudec(void);
-void set_osd_bar(int type,const char* name,double min,double max,double val);
-void set_osd_msg(int id, int level, int time, const char* fmt, ...);
 double playing_audio_pts(sh_audio_t *sh_audio, demux_stream_t *d_audio,
-			 ao_functions_t *audio_out);
-void exit_player_with_rc(const char* how, int rc);
-char *get_path(const char *filename);
-void rm_osd_msg(int id);
-void add_subtitles(char *filename, float fps, int silent);
-void mplayer_put_key(int code);
+			 const ao_functions_t *audio_out);
+av_noreturn void exit_player(enum exit_reason how);
+av_noreturn void exit_player_with_rc(enum exit_reason how, int rc);
+void add_subtitles(char *filename, float fps, int noerr);
 int reinit_video_chain(void);
+
+#endif /* MPLAYER_MP_CORE_H */

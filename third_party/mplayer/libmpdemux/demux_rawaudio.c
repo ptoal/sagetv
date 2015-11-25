@@ -1,3 +1,20 @@
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "config.h"
 
@@ -13,14 +30,13 @@
 #include "stheader.h"
 
 
-extern int demuxer_type;
 static int channels = 2;
 static int samplerate = 44100;
 static int samplesize = 2;
 static int bitrate = 0;
 static int format = 0x1; // Raw PCM
 
-m_option_t demux_rawaudio_opts[] = {
+const m_option_t demux_rawaudio_opts[] = {
   { "channels", &channels, CONF_TYPE_INT,CONF_RANGE,1,8, NULL },
   { "rate", &samplerate, CONF_TYPE_INT,CONF_RANGE,1000,8*48000, NULL },
   { "samplesize", &samplesize, CONF_TYPE_INT,CONF_RANGE,1,8, NULL },
@@ -34,8 +50,8 @@ static demuxer_t* demux_rawaudio_open(demuxer_t* demuxer) {
   sh_audio_t* sh_audio;
   WAVEFORMATEX* w;
 
-  sh_audio = new_sh_audio(demuxer,0);
-  sh_audio->wf = w = malloc(sizeof(WAVEFORMATEX));
+  sh_audio = new_sh_audio(demuxer,0, NULL);
+  sh_audio->wf = w = malloc(sizeof(*w));
   w->wFormatTag = sh_audio->format = format;
   w->nChannels = sh_audio->channels = channels;
   w->nSamplesPerSec = sh_audio->samplerate = samplerate;
@@ -53,8 +69,9 @@ static demuxer_t* demux_rawaudio_open(demuxer_t* demuxer) {
   demuxer->movi_start = demuxer->stream->start_pos;
   demuxer->movi_end = demuxer->stream->end_pos;
 
+  demuxer->audio->id = 0;
   demuxer->audio->sh = sh_audio;
-  sh_audio->ds = demuxer->audio;
+  sh_audio->needs_parsing = 1;
 
   return demuxer;
 }
@@ -84,8 +101,8 @@ static void demux_rawaudio_seek(demuxer_t *demuxer,float rel_seek_secs,float aud
   sh_audio_t* sh_audio = demuxer->audio->sh;
   off_t base,pos;
 
-  base = (flags & 1) ? demuxer->movi_start : stream_tell(s);
-  if(flags & 2)
+  base = (flags & SEEK_ABSOLUTE) ? demuxer->movi_start : stream_tell(s);
+  if(flags & SEEK_FACTOR)
     pos = base + ((demuxer->movi_end - demuxer->movi_start)*rel_seek_secs);
   else
     pos = base + (rel_seek_secs*sh_audio->i_bps);
@@ -95,8 +112,7 @@ static void demux_rawaudio_seek(demuxer_t *demuxer,float rel_seek_secs,float aud
 //  printf("demux_rawaudio: streamtell=%d\n",(int)stream_tell(demuxer->stream));
 }
 
-
-demuxer_desc_t demuxer_desc_rawaudio = {
+const demuxer_desc_t demuxer_desc_rawaudio = {
   "Raw audio demuxer",
   "rawaudio",
   "rawaudio",
@@ -109,5 +125,4 @@ demuxer_desc_t demuxer_desc_rawaudio = {
   demux_rawaudio_open,
   NULL,
   demux_rawaudio_seek,
-  NULL
 };

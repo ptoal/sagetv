@@ -1,15 +1,34 @@
-#include "config.h"
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "config.h"
 #include "mp_msg.h"
 #include "cpudetect.h"
 
 #include "img_format.h"
 #include "mp_image.h"
 #include "vf.h"
-
+#include "libavutil/x86/asm.h"
+#include "libmpdemux/demuxer.h"
 #include "libvo/fastmemcpy.h"
 
 struct vf_priv_s {
@@ -20,33 +39,21 @@ struct vf_priv_s {
 	double buffered_pts;
 };
 
-static inline void *my_memcpy_pic(void * dst, void * src, int bytesPerLine, int height, int dstStride, int srcStride)
-{
-	int i;
-	void *retval=dst;
-
-	for(i=0; i<height; i++)
-	{
-		memcpy(dst, src, bytesPerLine);
-		src+= srcStride;
-		dst+= dstStride;
-	}
-
-	return retval;
-}
-
 static void deint(unsigned char *dest, int ds, unsigned char *src, int ss, int w, int h, int field)
 {
 	int x, y;
 	src += ss;
 	dest += ds;
+	h--;
 	if (field) {
+		fast_memcpy(dest - ds, src - ss, w);
 		src += ss;
 		dest += ds;
-		h -= 2;
+		h--;
 	}
-	for (y=h/2; y; y--) {
-		for (x=0; x<w; x++) {
+	for (y=h/2; y > 0; y--) {
+		dest[0] = src[0];
+		for (x=1; x<w-1; x++) {
 			if (((src[x-ss] < src[x]) && (src[x+ss] < src[x])) ||
 				((src[x-ss] > src[x]) && (src[x+ss] > src[x]))) {
 				//dest[x] = (src[x+ss] + src[x-ss])>>1;
@@ -56,24 +63,27 @@ static void deint(unsigned char *dest, int ds, unsigned char *src, int ss, int w
 			}
 			else dest[x] = src[x];
 		}
+		dest[w-1] = src[w-1];
 		dest += ds<<1;
 		src += ss<<1;
 	}
+	if (h & 1)
+		fast_memcpy(dest, src, w);
 }
 
-#ifdef HAVE_3DNOW
+#if HAVE_AMD3DNOW_INLINE
 static void qpel_li_3DNOW(unsigned char *d, unsigned char *s, int w, int h, int ds, int ss, int up)
 {
 	int i, j, ssd=ss;
 	long crap1, crap2;
 	if (up) {
 		ssd = -ss;
-		memcpy(d, s, w);
+		fast_memcpy(d, s, w);
 		d += ds;
 		s += ss;
 	}
 	for (i=h-1; i; i--) {
-		asm volatile(
+		__asm__ volatile(
 			"1: \n\t"
 			"movq (%%"REG_S"), %%mm0 \n\t"
 			"movq (%%"REG_S",%%"REG_a"), %%mm1 \n\t"
@@ -92,24 +102,24 @@ static void qpel_li_3DNOW(unsigned char *d, unsigned char *s, int w, int h, int 
 		d += ds;
 		s += ss;
 	}
-	if (!up) memcpy(d, s, w);
-	asm volatile("emms \n\t" : : : "memory");
+	if (!up) fast_memcpy(d, s, w);
+	__asm__ volatile("emms \n\t" : : : "memory");
 }
 #endif
 
-#ifdef HAVE_MMX2
+#if HAVE_MMXEXT_INLINE
 static void qpel_li_MMX2(unsigned char *d, unsigned char *s, int w, int h, int ds, int ss, int up)
 {
 	int i, j, ssd=ss;
 	long crap1, crap2;
 	if (up) {
 		ssd = -ss;
-		memcpy(d, s, w);
+		fast_memcpy(d, s, w);
 		d += ds;
 		s += ss;
 	}
 	for (i=h-1; i; i--) {
-		asm volatile(
+		__asm__ volatile(
 			"pxor %%mm7, %%mm7 \n\t"
 			"2: \n\t"
 			"movq (%%"REG_S"), %%mm0 \n\t"
@@ -129,24 +139,24 @@ static void qpel_li_MMX2(unsigned char *d, unsigned char *s, int w, int h, int d
 		d += ds;
 		s += ss;
 	}
-	if (!up) memcpy(d, s, w);
-	asm volatile("emms \n\t" : : : "memory");
+	if (!up) fast_memcpy(d, s, w);
+	__asm__ volatile("emms \n\t" : : : "memory");
 }
 #endif
 
-#ifdef HAVE_MMX
+#if HAVE_MMX_INLINE
 static void qpel_li_MMX(unsigned char *d, unsigned char *s, int w, int h, int ds, int ss, int up)
 {
 	int i, j, ssd=ss;
 	int crap1, crap2;
 	if (up) {
 		ssd = -ss;
-		memcpy(d, s, w);
+		fast_memcpy(d, s, w);
 		d += ds;
 		s += ss;
 	}
 	for (i=h-1; i; i--) {
-		asm volatile(
+		__asm__ volatile(
 			"pxor %%mm7, %%mm7 \n\t"
 			"3: \n\t"
 			"movq (%%"REG_S"), %%mm0 \n\t"
@@ -179,10 +189,11 @@ static void qpel_li_MMX(unsigned char *d, unsigned char *s, int w, int h, int ds
 		d += ds;
 		s += ss;
 	}
-	if (!up) memcpy(d, s, w);
-	asm volatile("emms \n\t" : : : "memory");
+	if (!up) fast_memcpy(d, s, w);
+	__asm__ volatile("emms \n\t" : : : "memory");
 }
 
+#if HAVE_EBX_AVAILABLE
 static void qpel_4tap_MMX(unsigned char *d, unsigned char *s, int w, int h, int ds, int ss, int up)
 {
 	int i, j, ssd=ss;
@@ -193,14 +204,14 @@ static void qpel_4tap_MMX(unsigned char *d, unsigned char *s, int w, int h, int 
 	int crap1, crap2;
 	if (up) {
 		ssd = -ss;
-		memcpy(d, s, w);
+		fast_memcpy(d, s, w);
 		d += ds; s += ss;
 	}
 	for (j=0; j<w; j++)
 		d[j] = (s[j+ssd] + 3*s[j])>>2;
 	d += ds; s += ss;
 	for (i=h-3; i; i--) {
-		asm volatile(
+		__asm__ volatile(
 			"pxor %%mm0, %%mm0 \n\t"
 			"movq (%%"REG_d"), %%mm4 \n\t"
 			"movq 8(%%"REG_d"), %%mm5 \n\t"
@@ -220,7 +231,7 @@ static void qpel_4tap_MMX(unsigned char *d, unsigned char *s, int w, int h, int 
 			"pmullw %%mm6, %%mm3 \n\t"
 			"movq (%%"REG_S",%%"REG_a",2), %%mm2 \n\t"
 			"psubusw %%mm3, %%mm1 \n\t"
-			"punpcklbw %%mm0, %%mm2 \n\t"	
+			"punpcklbw %%mm0, %%mm2 \n\t"
 			"pmullw %%mm7, %%mm2 \n\t"
 			"psubusw %%mm2, %%mm1 \n\t"
 			"psrlw $7, %%mm1 \n\t"
@@ -237,12 +248,12 @@ static void qpel_4tap_MMX(unsigned char *d, unsigned char *s, int w, int h, int 
 			"pmullw %%mm6, %%mm3 \n\t"
 			"psubusw %%mm3, %%mm2 \n\t"
 			"movq (%%"REG_S",%%"REG_a",2), %%mm3 \n\t"
-			"punpckhbw %%mm0, %%mm3 \n\t"	
+			"punpckhbw %%mm0, %%mm3 \n\t"
 			"add $8, %%"REG_S" \n\t"
 			"pmullw %%mm7, %%mm3 \n\t"
 			"psubusw %%mm3, %%mm2 \n\t"
 			"psrlw $7, %%mm2 \n\t"
-			
+
 			"packuswb %%mm2, %%mm1 \n\t"
 			"movq %%mm1, (%%"REG_D") \n\t"
 			"add $8, %%"REG_D" \n\t"
@@ -259,9 +270,10 @@ static void qpel_4tap_MMX(unsigned char *d, unsigned char *s, int w, int h, int 
 	for (j=0; j<w; j++)
 		d[j] = (s[j+ssd] + 3*s[j])>>2;
 	d += ds; s += ss;
-	if (!up) memcpy(d, s, w);
-	asm volatile("emms \n\t" : : : "memory");
+	if (!up) fast_memcpy(d, s, w);
+	__asm__ volatile("emms \n\t" : : : "memory");
 }
+#endif /* HAVE_EBX_AVAILABLE */
 #endif
 
 static inline int clamp(int a)
@@ -276,7 +288,7 @@ static void qpel_li_C(unsigned char *d, unsigned char *s, int w, int h, int ds, 
 	int i, j, ssd=ss;
 	if (up) {
 		ssd = -ss;
-		memcpy(d, s, w);
+		fast_memcpy(d, s, w);
 		d += ds;
 		s += ss;
 	}
@@ -286,7 +298,7 @@ static void qpel_li_C(unsigned char *d, unsigned char *s, int w, int h, int ds, 
 		d += ds;
 		s += ss;
 	}
-	if (!up) memcpy(d, s, w);
+	if (!up) fast_memcpy(d, s, w);
 }
 
 static void qpel_4tap_C(unsigned char *d, unsigned char *s, int w, int h, int ds, int ss, int up)
@@ -294,7 +306,7 @@ static void qpel_4tap_C(unsigned char *d, unsigned char *s, int w, int h, int ds
 	int i, j, ssd=ss;
 	if (up) {
 		ssd = -ss;
-		memcpy(d, s, w);
+		fast_memcpy(d, s, w);
 		d += ds; s += ss;
 	}
 	for (j=0; j<w; j++)
@@ -308,16 +320,15 @@ static void qpel_4tap_C(unsigned char *d, unsigned char *s, int w, int h, int ds
 	for (j=0; j<w; j++)
 		d[j] = (s[j+ssd] + 3*s[j] + 2)>>2;
 	d += ds; s += ss;
-	if (!up) memcpy(d, s, w);
+	if (!up) fast_memcpy(d, s, w);
 }
 
 static void (*qpel_li)(unsigned char *d, unsigned char *s, int w, int h, int ds, int ss, int up);
 static void (*qpel_4tap)(unsigned char *d, unsigned char *s, int w, int h, int ds, int ss, int up);
 
-static int continue_buffered_image(struct vf_instance_s *);
-extern int correct_pts;
+static int continue_buffered_image(struct vf_instance *vf);
 
-static int put_image(struct vf_instance_s* vf, mp_image_t *mpi, double pts)
+static int put_image(struct vf_instance *vf, mp_image_t *mpi, double pts)
 {
 	vf->priv->buffered_mpi = mpi;
 	vf->priv->buffered_pts = pts;
@@ -325,7 +336,13 @@ static int put_image(struct vf_instance_s* vf, mp_image_t *mpi, double pts)
 	return continue_buffered_image(vf);
 }
 
-static int continue_buffered_image(struct vf_instance_s *vf)
+static double calc_pts(double base_pts, int field)
+{
+    // FIXME this assumes 25 fps / 50 fields per second
+    return base_pts + 0.02 * field;
+}
+
+static int continue_buffered_image(struct vf_instance *vf)
 {
 	int i=vf->priv->buffered_i;
 	double pts = vf->priv->buffered_pts;
@@ -338,7 +355,6 @@ static int continue_buffered_image(struct vf_instance_s *vf)
 
 	if (i == 0)
 		vf_queue_frame(vf, continue_buffered_image);
-	pts += i * .02;  // XXX not right
 
 	if (!(mpi->flags & MP_IMGFLAG_PLANAR)) bpp = mpi->bpp/8;
 	if (vf->priv->parity < 0) {
@@ -376,11 +392,11 @@ static int continue_buffered_image(struct vf_instance_s *vf)
 				dmpi->stride[1] = 2*mpi->stride[1];
 				dmpi->stride[2] = 2*mpi->stride[2];
 			}
-			ret |= vf_next_put_image(vf, dmpi, pts);
+			ret |= vf_next_put_image(vf, dmpi, calc_pts(pts, i));
 			if (correct_pts)
 				break;
 			else
-				if (!i) vf_next_control(vf, VFCTRL_FLIP_PAGE, NULL);
+				if (!i) vf_extra_flip(vf);
 		}
 		break;
 	case 1:
@@ -406,11 +422,11 @@ static int continue_buffered_image(struct vf_instance_s *vf)
 				deint(dmpi->planes[2], dmpi->stride[2], mpi->planes[2], mpi->stride[2],
 					mpi->chroma_width, mpi->chroma_height, (i^!tff));
 			}
-			ret |= vf_next_put_image(vf, dmpi, pts);
+			ret |= vf_next_put_image(vf, dmpi, calc_pts(pts, i));
 			if (correct_pts)
 				break;
 			else
-				if (!i) vf_next_control(vf, VFCTRL_FLIP_PAGE, NULL);
+				if (!i) vf_extra_flip(vf);
 		}
 		break;
 	case 2:
@@ -432,11 +448,11 @@ static int continue_buffered_image(struct vf_instance_s *vf)
 					mpi->chroma_width, mpi->chroma_height/2,
 					dmpi->stride[2], mpi->stride[2]*2, (i^!tff));
 			}
-			ret |= vf_next_put_image(vf, dmpi, pts);
+			ret |= vf_next_put_image(vf, dmpi, calc_pts(pts, i));
 			if (correct_pts)
 				break;
 			else
-				if (!i) vf_next_control(vf, VFCTRL_FLIP_PAGE, NULL);
+				if (!i) vf_extra_flip(vf);
 		}
 		break;
 	}
@@ -444,10 +460,13 @@ static int continue_buffered_image(struct vf_instance_s *vf)
 	return ret;
 }
 
-static int query_format(struct vf_instance_s* vf, unsigned int fmt)
+static int query_format(struct vf_instance *vf, unsigned int fmt)
 {
-	/* FIXME - figure out which other formats work */
+	/* FIXME - figure out which formats exactly work */
 	switch (fmt) {
+	default:
+		if (vf->priv->mode == 1)
+			return 0;
 	case IMGFMT_YV12:
 	case IMGFMT_IYUV:
 	case IMGFMT_I420:
@@ -456,7 +475,7 @@ static int query_format(struct vf_instance_s* vf, unsigned int fmt)
 	return 0;
 }
 
-static int config(struct vf_instance_s* vf,
+static int config(struct vf_instance *vf,
         int width, int height, int d_width, int d_height,
 	unsigned int flags, unsigned int outfmt)
 {
@@ -472,45 +491,44 @@ static int config(struct vf_instance_s* vf,
 	return 0;
 }
 
-static void uninit(struct vf_instance_s* vf)
+static void uninit(struct vf_instance *vf)
 {
 	free(vf->priv);
 }
 
-static int open(vf_instance_t *vf, char* args)
+static int vf_open(vf_instance_t *vf, char *args)
 {
-	struct vf_priv_s *p;
 	vf->config = config;
 	vf->put_image = put_image;
-	//vf->query_format = query_format;
+	vf->query_format = query_format;
 	vf->uninit = uninit;
 	vf->default_reqs = VFCAP_ACCEPT_STRIDE;
-	vf->priv = p = calloc(1, sizeof(struct vf_priv_s));
+	vf->priv = calloc(1, sizeof(struct vf_priv_s));
 	vf->priv->mode = 4;
 	vf->priv->parity = -1;
 	if (args) sscanf(args, "%d:%d", &vf->priv->mode, &vf->priv->parity);
 	qpel_li = qpel_li_C;
 	qpel_4tap = qpel_4tap_C;
-#ifdef HAVE_MMX
+#if HAVE_MMX_INLINE
 	if(gCpuCaps.hasMMX) qpel_li = qpel_li_MMX;
+#if HAVE_EBX_AVAILABLE
 	if(gCpuCaps.hasMMX) qpel_4tap = qpel_4tap_MMX;
 #endif
-#ifdef HAVE_MMX2
+#endif
+#if HAVE_MMXEXT_INLINE
 	if(gCpuCaps.hasMMX2) qpel_li = qpel_li_MMX2;
 #endif
-#ifdef HAVE_3DNOW
+#if HAVE_AMD3DNOW_INLINE
 	if(gCpuCaps.has3DNow) qpel_li = qpel_li_3DNOW;
 #endif
 	return 1;
 }
 
-vf_info_t vf_info_tfields = {
+const vf_info_t vf_info_tfields = {
     "temporal field separation",
     "tfields",
     "Rich Felker",
     "",
-    open,
+    vf_open,
     NULL
 };
-
-

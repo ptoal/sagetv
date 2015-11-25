@@ -1,29 +1,18 @@
 /*
  * Modified for use with MPlayer, detailed changelog at
  * http://svn.mplayerhq.hu/mplayer/trunk/
- * $Id: com.h,v 1.3 2007-04-10 19:33:29 Narflex Exp $
  */
 
-#ifndef AVIFILE_COM_H
-#define AVIFILE_COM_H
+#ifndef MPLAYER_COM_H
+#define MPLAYER_COM_H
+
+#include <stdint.h>
 
 #include "config.h"
-
-#ifdef HAVE_STDINT_H
-#include <stdint.h>
-#else
-#include <inttypes.h>
-#endif
 
 /**
  * Internal functions and structures for COM emulation code.
  */
-
-#if !defined(WIN32) || defined(__CYGWIN__) || defined(__MINGW32__)
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #ifndef GUID_TYPE
 #define GUID_TYPE
@@ -36,6 +25,9 @@ typedef struct
 } GUID;
 #endif
 
+// use copies of the IIDs to avoid symbol collisions
+#define IID_IUnknown MP_IID_IUnknown
+#define IID_IClassFactory MP_IID_IClassFactory
 extern const GUID IID_IUnknown;
 extern const GUID IID_IClassFactory;
 
@@ -51,9 +43,9 @@ struct IUnknown;
 struct IClassFactory;
 struct IUnknown_vt
 {
-    long STDCALL (*QueryInterface)(struct IUnknown* _this, const GUID* iid, void** ppv);
-    long STDCALL (*AddRef)(struct IUnknown* _this) ;
-    long STDCALL (*Release)(struct IUnknown* _this) ;
+    long STDCALL (*QueryInterface)(struct IUnknown* this, const GUID* iid, void** ppv);
+    long STDCALL (*AddRef)(struct IUnknown* this) ;
+    long STDCALL (*Release)(struct IUnknown* this) ;
 } ;
 
 typedef struct IUnknown
@@ -63,10 +55,10 @@ typedef struct IUnknown
 
 struct IClassFactory_vt
 {
-    long STDCALL (*QueryInterface)(struct IUnknown* _this, const GUID* iid, void** ppv);
-    long STDCALL (*AddRef)(struct IUnknown* _this) ;
-    long STDCALL (*Release)(struct IUnknown* _this) ;
-    long STDCALL (*CreateInstance)(struct IClassFactory* _this, struct IUnknown* pUnkOuter, const GUID* riid, void** ppvObject);
+    long STDCALL (*QueryInterface)(struct IUnknown* this, const GUID* iid, void** ppv);
+    long STDCALL (*AddRef)(struct IUnknown* this) ;
+    long STDCALL (*Release)(struct IUnknown* this) ;
+    long STDCALL (*CreateInstance)(struct IClassFactory* this, struct IUnknown* pUnkOuter, const GUID* riid, void** ppvObject);
 };
 
 struct IClassFactory
@@ -74,7 +66,7 @@ struct IClassFactory
     struct IClassFactory_vt* vt;
 };
 
-#ifdef WIN32_LOADER 
+#ifdef WIN32_LOADER
 long CoCreateInstance(GUID* rclsid, struct IUnknown* pUnkOuter,
  		      long dwClsContext, const GUID* riid, void** ppv);
 void* CoTaskMemAlloc(unsigned long cb);
@@ -86,10 +78,4 @@ void* STDCALL  CoTaskMemAlloc(unsigned long);
 void  STDCALL  CoTaskMemFree(void*);
 #endif
 
-#ifdef __cplusplus
-};
-#endif /* __cplusplus */
-
-#endif /* WIN32 */
-
-#endif /* AVIFILE_COM_H */
+#endif /* MPLAYER_COM_H */

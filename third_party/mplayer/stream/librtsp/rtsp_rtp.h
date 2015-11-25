@@ -18,9 +18,10 @@
  *  Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#ifndef _HAVE_RTSP_RTP_H_
-#define _HAVE_RTSP_RTP_H_
+#ifndef MPLAYER_RTSP_RTP_H
+#define MPLAYER_RTSP_RTP_H
 
+#include <sys/types.h>
 #include "rtsp.h"
 
 #define MAX_PREVIEW_SIZE 4096
@@ -37,5 +38,5 @@ off_t rtp_read (struct rtp_rtsp_session_t* st, char *buf, off_t length);
 void rtp_session_free (struct rtp_rtsp_session_t *st);
 void rtcp_send_rr (rtsp_t *s, struct rtp_rtsp_session_t *st);
 
-#endif /* _HAVE_RTSP_RTP_H_ */
+#endif /* MPLAYER_RTSP_RTP_H */
 

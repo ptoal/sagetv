@@ -1,27 +1,43 @@
-#include "config.h"
 /*
-    DK3 ADPCM Decoder for MPlayer
-      by Mike Melanson
-
-    "This format number was used by Duck Corp. but not officially 
-    registered with Microsoft"
-
-    This file is responsible for decoding audio data encoded with
-    Duck Corp's DK3 ADPCM algorithm. Details about the data format
-    can be found here:
-      http://www.pcisys.net/~melanson/codecs/
-*/
+ * DK3 ADPCM decoder
+ *
+ * "This format number was used by Duck Corp. but not officially
+ * registered with Microsoft"
+ *
+ * This file is responsible for decoding audio data encoded with
+ * Duck Corp's DK3 ADPCM algorithm. Details about the data format
+ * can be found here:
+ *   http://www.pcisys.net/~melanson/codecs/
+ *
+ * Copyright (c) 2002 Mike Melanson
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 
 #include "config.h"
-#include "libavutil/common.h"
-#include "mpbswap.h"
+#include "mp_msg.h"
+#include "libavutil/intreadwrite.h"
 #include "ad_internal.h"
 
-static ad_info_t info = 
+static const ad_info_t info =
 {
 	"Duck Corp. DK3 ADPCM decoder",
 	"dk3adpcm",
@@ -33,9 +49,6 @@ static ad_info_t info =
 LIBAD_EXTERN(dk3adpcm)
 
 #define DK3_ADPCM_PREAMBLE_SIZE 16
-
-#define LE_16(x) (le2me_16(*(unsigned short *)(x)))
-#define LE_32(x) (le2me_32(*(unsigned int *)(x)))
 
 // useful macros
 // clamp a number between 0 and 88
@@ -73,7 +86,7 @@ static int adpcm_index[16] =
 static int preinit(sh_audio_t *sh_audio)
 {
   sh_audio->audio_out_minsize = sh_audio->wf->nBlockAlign * 6;
-  sh_audio->ds->ss_div = 
+  sh_audio->ds->ss_div =
     (sh_audio->wf->nBlockAlign - DK3_ADPCM_PREAMBLE_SIZE) * 8 / 3;
   sh_audio->audio_in_minsize=
   sh_audio->ds->ss_mul = sh_audio->wf->nBlockAlign;
@@ -139,8 +152,8 @@ static int dk3_adpcm_decode_block(unsigned short *output, unsigned char *input,
   int step;
   int diff;
 
-  sum_pred = LE_16(&input[10]);
-  diff_pred = LE_16(&input[12]);
+  sum_pred = AV_RL16(&input[10]);
+  diff_pred = AV_RL16(&input[12]);
   SE_16BIT(sum_pred);
   SE_16BIT(diff_pred);
   diff_channel = diff_pred;
@@ -235,8 +248,8 @@ static int dk3_adpcm_decode_block(unsigned short *output, unsigned char *input,
 static int decode_audio(sh_audio_t *sh_audio,unsigned char *buf,int minlen,int maxlen)
 {
   if (demux_read_data(sh_audio->ds, sh_audio->a_in_buffer,
-    sh_audio->ds->ss_mul) != 
-    sh_audio->ds->ss_mul) 
+    sh_audio->ds->ss_mul) !=
+    sh_audio->ds->ss_mul)
       return -1; /* EOF */
 
   if (maxlen < 2 * 4 * sh_audio->wf->nBlockAlign * 2 / 3) {

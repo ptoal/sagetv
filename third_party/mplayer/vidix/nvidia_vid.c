@@ -1,13 +1,26 @@
 /*
-   nvidia_vid - VIDIX based video driver for NVIDIA chips
-   Copyrights 2003 - 2004 Sascha Sommer. This file is based on sources from
-   RIVATV (rivatv.sf.net)
-   Licence: GPL
-   WARNING: THIS DRIVER IS IN BETA STAGE
-   
-   multi buffer support and TNT2 fixes by Dmitry Baryshkov
-*/
-
+ * VIDIX driver for nVidia chipsets.
+ *
+ * Copyright (C) 2003-2004 Sascha Sommer
+ * This file is based on sources from RIVATV (rivatv.sf.net)
+ * Multi buffer support and TNT2 fixes by Dmitry Baryshkov.
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <errno.h>
 #include <stdio.h>
@@ -18,18 +31,18 @@
 #include <unistd.h>
 
 
+#include "config.h"
 #include "vidix.h"
-#include "vidixlib.h"
 #include "fourcc.h"
-#include "../libdha/libdha.h"
-#include "../libdha/pci_ids.h"
-#include "../libdha/pci_names.h"
-#include "../config.h"
-#include "../libavutil/common.h"
-#include "../mpbswap.h"
+#include "dha.h"
+#include "pci_ids.h"
+#include "pci_names.h"
+#include "libavutil/common.h"
+#include "mpbswap.h"
+#include "mp_msg.h"
 
 
-pciinfo_t pci_info;
+static pciinfo_t pci_info;
 
 
 #define MAX_FRAMES 3
@@ -83,26 +96,25 @@ static struct nvidia_cards nvidia_card_ids[] = {
   /*NV04*/
   {DEVICE_NVIDIA_NV4_RIVA_TNT,NV_ARCH_04},
   {DEVICE_NVIDIA_NV5_RIVA_TNT2_TNT2,NV_ARCH_04},
-  {DEVICE_NVIDIA_NV5_RIVA_TNT2,NV_ARCH_04},  
-  {DEVICE_NVIDIA_NV5_RIVA_TNT22,NV_ARCH_04},  
-  {DEVICE_NVIDIA_NV5_RIVA_TNT23,NV_ARCH_04},  
+  {DEVICE_NVIDIA_NV5_RIVA_TNT2,NV_ARCH_04},
+  {DEVICE_NVIDIA_NV5_RIVA_TNT22,NV_ARCH_04},
+  {DEVICE_NVIDIA_NV5_RIVA_TNT23,NV_ARCH_04},
   {DEVICE_NVIDIA_NV6_VANTA_VANTA_LT,NV_ARCH_04},
   {DEVICE_NVIDIA_NV5M64_RIVA_TNT2,NV_ARCH_04},
   {DEVICE_NVIDIA_NV6_VANTA,NV_ARCH_04},
   {DEVICE_NVIDIA_NV6_VANTA2,NV_ARCH_04},
   {DEVICE_NVIDIA2_TNT,NV_ARCH_04},
-  {DEVICE_NVIDIA2_TNT2,NV_ARCH_04},  
-  {DEVICE_NVIDIA2_VTNT2,NV_ARCH_04},  
+  {DEVICE_NVIDIA2_TNT2,NV_ARCH_04},
+  {DEVICE_NVIDIA2_VTNT2,NV_ARCH_04},
   {DEVICE_NVIDIA2_UTNT2	,NV_ARCH_04},
   {DEVICE_NVIDIA2_ITNT2,NV_ARCH_04},
-  {DEVICE_NVIDIA_NV5_ALADDIN_TNT2,NV_ARCH_30},
+  {DEVICE_NVIDIA_NV5_ALADDIN_TNT2,NV_ARCH_04},
   /*NV10*/
   {DEVICE_NVIDIA_NV18_GEFORCE_PCX,NV_ARCH_10},
   {DEVICE_NVIDIA_NV10_GEFORCE_256,NV_ARCH_10},
   {DEVICE_NVIDIA_NV10DDR_GEFORCE_256,NV_ARCH_10},
   {DEVICE_NVIDIA_NV10GL_QUADRO,NV_ARCH_10},
   {DEVICE_NVIDIA_NV11_GEFORCE2_MX_MX,NV_ARCH_10},
-  {DEVICE_NVIDIA_NV11DDR_GEFORCE2_MX,NV_ARCH_10},
   {DEVICE_NVIDIA_NV11DDR_GEFORCE2_MX,NV_ARCH_10},
   {DEVICE_NVIDIA_NV11_GEFORCE2_GO,NV_ARCH_10},
   {DEVICE_NVIDIA_NV11GL_QUADRO2_MXR_EX_GO,NV_ARCH_10},
@@ -137,10 +149,8 @@ static struct nvidia_cards nvidia_card_ids[] = {
   {DEVICE_NVIDIA_NV18GL_QUADRO4_380,NV_ARCH_10},
   {DEVICE_NVIDIA_NV18M_GEFORCE4_4482,NV_ARCH_10},
   {DEVICE_NVIDIA_NVCRUSH11_GEFORCE2_MX,NV_ARCH_10},
-  {DEVICE_NVIDIA_NFORCE2_AGP_DIFFERENT,NV_ARCH_10},
-  {DEVICE_NVIDIA_NFORCE2_AGP,NV_ARCH_10},
   {DEVICE_NVIDIA_NV18_GEFORCE4_MX5,NV_ARCH_10},
-  {DEVICE_NVIDIA_NV18_GEFORCE_PCX,NV_ARCH_10}, 
+  {DEVICE_NVIDIA_NV18_GEFORCE_PCX,NV_ARCH_10},
   /*NV20*/
   {DEVICE_NVIDIA_NV20_GEFORCE3,NV_ARCH_20},
   {DEVICE_NVIDIA_NV20_GEFORCE3_TI,NV_ARCH_20},
@@ -246,7 +256,6 @@ static struct nvidia_cards nvidia_card_ids[] = {
   {DEVICE_NVIDIA_NV41_QUADRO_FX,NV_ARCH_40},
   {DEVICE_NVIDIA_NV41_QUADRO_FX2,NV_ARCH_40},
   {DEVICE_NVIDIA_NV41GL_QUADRO_FX,NV_ARCH_40},
-  {DEVICE_NVIDIA_NV41GL_QUADRO_FX,NV_ARCH_40},
   {DEVICE_NVIDIA_NV40_GEFORCE_6800_GEFORCE,NV_ARCH_40},
   {DEVICE_NVIDIA_NV43_GEFORCE_6600_GEFORCE,NV_ARCH_40},
   {DEVICE_NVIDIA_NV43_GEFORCE_6600_GEFORCE2,NV_ARCH_40},
@@ -324,10 +333,10 @@ static int nv_probe(int verbose, int force){
     int err;
 
     if (force)
-	    printf("[nvidia_vid]: warning: forcing not supported yet!\n");
+	    mp_msg(MSGT_VO, MSGL_STATUS, "[nvidia_vid]: warning: forcing not supported yet!\n");
     err = pci_scan(lst,&num_pci);
     if(err){
-	printf("[nvidia_vid] Error occurred during pci scan: %s\n",strerror(err));
+	mp_msg(MSGT_VO, MSGL_STATUS, "[nvidia_vid] Error occurred during pci scan: %s\n",strerror(err));
 	return err;
     }
     else {
@@ -341,9 +350,9 @@ static int nv_probe(int verbose, int force){
 		    continue;
 		dname = pci_device_name(lst[i].vendor, lst[i].device);
 		dname = dname ? dname : "Unknown chip";
-		printf("[nvidia_vid] Found chip: %s\n", dname);
+		mp_msg(MSGT_VO, MSGL_STATUS, "[nvidia_vid] Found chip: %s\n", dname);
 		if ((lst[i].command & PCI_COMMAND_IO) == 0){
-			printf("[nvidia_vid] Device is disabled, ignoring\n");
+			mp_msg(MSGT_VO, MSGL_STATUS, "[nvidia_vid] Device is disabled, ignoring\n");
 			continue;
 		}
 		nvidia_cap.device_id = lst[i].device;
@@ -353,7 +362,7 @@ static int nv_probe(int verbose, int force){
 	    }
 	}
     }
-    if(err && verbose) printf("[nvidia_vid] Can't find chip\n");
+    if(err && verbose) mp_msg(MSGT_VO, MSGL_STATUS, "[nvidia_vid] Can't find chip\n");
     return err;
 }
 
@@ -364,7 +373,7 @@ static int nv_probe(int verbose, int force){
  * PCI-Memory IO access macros.
  */
 
-#define MEM_BARRIER() __asm__ __volatile__ ("" : : : "memory")
+#define MEM_BARRIER() __asm__ volatile ("" : : : "memory")
 
 #undef	VID_WR08
 #define VID_WR08(p,i,val) ({ MEM_BARRIER(); ((uint8_t *)(p))[(i)]=(val); })
@@ -409,10 +418,10 @@ typedef struct rivatv_chip rivatv_chip;
 
 
 struct rivatv_info {
-    unsigned int use_colorkey;    
+    unsigned int use_colorkey;
     unsigned int colorkey; /* saved xv colorkey*/
     unsigned int vidixcolorkey; /*currently used colorkey*/
-    unsigned int depth; 
+    unsigned int depth;
     unsigned int format;
     unsigned int pitch;
     unsigned int width,height;
@@ -433,13 +442,25 @@ struct rivatv_info {
 };
 typedef struct rivatv_info rivatv_info;
 
+static uint8_t nvReadVGA(struct rivatv_chip *chip, int index)
+{
+	VID_WR08 (chip->PCIO, 0x3D4, index);
+	return VID_RD08 (chip->PCIO, 0x3D5);
+}
+
+static void nvWriteVGA(struct rivatv_chip *chip, int index, int data)
+{
+	VID_WR08 (chip->PCIO, 0x3D4, index);
+	VID_WR08 (chip->PCIO, 0x3D5, data);
+}
+
 //framebuffer size funcs
 static unsigned long rivatv_fbsize_nv03 (struct rivatv_chip *chip){
 	if (VID_RD32 (chip->PFB, 0) & 0x00000020) {
 		if (((VID_RD32 (chip->PMC, 0) & 0xF0) == 0x20)
 		    && ((VID_RD32 (chip->PMC, 0) & 0x0F) >= 0x02)) {
 			/* SDRAM 128 ZX. */
-			return ((1 << (VID_RD32 (chip->PFB, 0) & 0x03)) * 1024 * 1024);
+			return (1 << (VID_RD32 (chip->PFB, 0) & 0x03)) * 1024 * 1024;
 		}
 		else {
 			return 1024 * 1024 * 8;
@@ -494,10 +515,8 @@ static void rivatv_lock_nv03 (struct rivatv_chip *chip, int LockUnlock){
 }
 
 static void rivatv_lock_nv04 (struct rivatv_chip *chip, int LockUnlock){
-	VID_WR08 (chip->PCIO, 0x3C4, 0x06);
-	VID_WR08 (chip->PCIO, 0x3C5, LockUnlock ? 0x99 : 0x57);
-	VID_WR08 (chip->PCIO, 0x3D4, 0x1F);
-	VID_WR08 (chip->PCIO, 0x3D5, LockUnlock ? 0x99 : 0x57);
+	rivatv_lock_nv03 (chip, LockUnlock);
+	nvWriteVGA (chip, 0x1F, LockUnlock ? 0x99 : 0x57);
 }
 
 
@@ -516,7 +535,7 @@ static void  rivatv_enable_PMEDIA (struct rivatv_info *info){
 	/* NV3 (0x10100010): NV03_PMC_ENABLE_PMEDIA, NV03_PMC_ENABLE_PFB, NV03_PMC_ENABLE_PVIDEO */
 
 	if ((reg & 0x10100010) != 0x10100010) {
-		printf("PVIDEO and PFB disabled, enabling...\n");
+		mp_msg(MSGT_VO, MSGL_STATUS, "[nvidia_vid] PVIDEO and PFB disabled, enabling...\n");
 		VID_OR32 (info->chip.PMC, 0x000200, 0x10100010);
 	}
 
@@ -534,8 +553,8 @@ static void  rivatv_enable_PMEDIA (struct rivatv_info *info){
         /* NV_PVIDEO_KEY */
 	    info->colorkey = VID_RD32 (info->chip.PVIDEO, 0x240);
         break;
-    }       
-    
+    }
+
 
 	/* re-enable interrupts again */
 //	VID_WR32 (info->chip.PMC, 0x000140, 0x01);
@@ -581,14 +600,10 @@ static void rivatv_overlay_stop (struct rivatv_info *info) {
 static uint32_t rivatv_overlay_pan (struct rivatv_info *info){
 	uint32_t pan;
 	info->chip.lock (&info->chip, 0);
-	VID_WR08 (info->chip.PCIO, 0x3D4, 0x0D);
-	pan = VID_RD08 (info->chip.PCIO, 0x3D5);
-	VID_WR08 (info->chip.PCIO, 0x3D4, 0x0C);
-	pan |= VID_RD08 (info->chip.PCIO, 0x3D5) << 8;
-	VID_WR08 (info->chip.PCIO, 0x3D4, 0x19);
-	pan |= (VID_RD08 (info->chip.PCIO, 0x3D5) & 0x1F) << 16;
-	VID_WR08 (info->chip.PCIO, 0x3D4, 0x2D);
-	pan |= (VID_RD08 (info->chip.PCIO, 0x3D5) & 0x60) << 16;
+	pan  =  nvReadVGA (&info->chip, 0x0D);
+	pan |=  nvReadVGA (&info->chip, 0x0C) << 8;
+	pan |= (nvReadVGA (&info->chip, 0x19) & 0x1F) << 16;
+	pan |= (nvReadVGA (&info->chip, 0x2D) & 0x60) << 16;
 	return pan << 2;
 }
 
@@ -602,27 +617,28 @@ static void rivatv_overlay_colorkey (rivatv_info* info, unsigned int chromakey){
 	switch (info->depth) {
 	case 15:
 		key = ((r >> 3) << 10) | ((g >> 3) << 5) | ((b >> 3));
-#ifndef WIN32
+
+#if !defined(__MINGW32__) && !defined(__CYGWIN__)
         key = key | 0x00008000;
-#endif       
+#endif
 		break;
 	case 16: // XXX unchecked
 		key = ((r >> 3) << 11) | ((g >> 2) << 5) | ((b >> 3));
-#ifndef WIN32
+#if !defined(__MINGW32__) && !defined(__CYGWIN__)
         key = key | 0x00008000;
-#endif       
+#endif
 		break;
 	case 24: // XXX unchecked, maybe swap order of masking - FIXME Can the card be in 24 bit mode anyway?
 		key = (chromakey & 0x00FFFFFF) | 0x00800000;
 		break;
 	case 32:
 		key = chromakey;
-#ifndef WIN32
+#if !defined(__MINGW32__) && !defined(__CYGWIN__)
         key = key | 0x80000000;
-#endif       
+#endif
 		break;
 	}
-	//printf("[nvidia_vid] depth=%d %08X \n", info->depth, chromakey);
+	//mp_msg(MSGT_VO, MSGL_STATUS, "[nvidia_vid] depth=%d %08X \n", info->depth, chromakey);
     switch (info->chip.arch) {
 	  case NV_ARCH_10:
 	  case NV_ARCH_20:
@@ -641,33 +657,36 @@ static void nv_getscreenproperties(struct rivatv_info *info){
   uint32_t bpp=0,x;
   info->chip.lock(&info->chip, 0);
   /*get screen depth*/
-  VID_WR08(info->chip.PCIO, 0x03D4,0x28);
-  bpp = VID_RD08(info->chip.PCIO,0x03D5)&0x3;
+  bpp = nvReadVGA (&info->chip, 0x28) & 0x3;
   if((bpp == 2) && (VID_RD32(info->chip.PVIDEO,0x600) & 0x00001000) == 0x0)info->depth=15;
   else info->depth = 0x04 << bpp;
   /*get screen width*/
-  VID_WR08(info->chip.PCIO, 0x03D4, 0x1);
-  info->screen_x = (1 + VID_RD08(info->chip.PCIO, 0x3D5)) * 8;
+  info->screen_x = nvReadVGA (&info->chip, 0x1);
+  /* NV_PCRTC_HORIZ_EXTRA_DISPLAY_END_8 */
+  info->screen_x |= (nvReadVGA (&info->chip, 0x2D) & 0x02) << 7;
+  info->screen_x = (info->screen_x + 1) << 3;
   /*get screen height*/
   /* get first 8 bits in VT_DISPLAY_END*/
-  VID_WR08(info->chip.PCIO, 0x03D4, 0x12);
-  info->screen_y = VID_RD08(info->chip.PCIO,0x03D5);
-  VID_WR08(info->chip.PCIO,0x03D4,0x07);
+  info->screen_y = nvReadVGA (&info->chip, 0x12);
   /* get 9th bit in CRTC_OVERFLOW*/
-  info->screen_y |= (VID_RD08(info->chip.PCIO,0x03D5) &0x02)<<7;
+  info->screen_y |= (nvReadVGA (&info->chip, 0x07) & 0x02) << 7;
   /* and the 10th in CRTC_OVERFLOW*/
-  info->screen_y |=(VID_RD08(info->chip.PCIO,0x03D5) &0x40)<<3;
+  info->screen_y |= (nvReadVGA (&info->chip, 0x07) & 0x40) << 3;
   ++info->screen_y;
 
+  if(info->chip.arch >= NV_ARCH_10){
+    /* NV_PCRTC_EXTRA_VERT_DISPLAY_END_10 */
+    info->screen_y |= (nvReadVGA (&info->chip, 0x25) & 0x02) << 9;
+    /* NV_PCRTC_???_VERT_DISPLAY_END_11 */
+    info->screen_y |= (nvReadVGA (&info->chip, 0x41) & 0x04) << 9;
+  }
+
   /* NV_PCRTC_OFFSET */
-  VID_WR08 (info->chip.PCIO, 0x3D4, 0x13);
-  x = VID_RD08 (info->chip.PCIO, 0x3D5);
+  x  =  nvReadVGA (&info->chip, 0x13);
   /* NV_PCRTC_REPAINT0_OFFSET_10_8 */
-  VID_WR08 (info->chip.PCIO, 0x3D4, 0x19);
-  x |= (VID_RD08 (info->chip.PCIO, 0x3D5) & 0xE0) << 3;
+  x |= (nvReadVGA (&info->chip, 0x19) & 0xE0) << 3;
   /* NV_PCRTC_EXTRA_OFFSET_11 */
-  VID_WR08 (info->chip.PCIO, 0x3D4, 0x25);
-  x |= (VID_RD08 (info->chip.PCIO, 0x3D5) & 0x20) << 6; x <<= 3;
+  x |= (nvReadVGA (&info->chip, 0x25) & 0x20) << 6; x <<= 3;
   info->bps = x * bpp;
 }
 
@@ -701,7 +720,7 @@ static void rivatv_overlay_start (struct rivatv_info *info,int bufno){
             // setting y to 8 seems to work ok, though
             if(info->chip.arch < NV_ARCH_10 && y < 8) y = 8;
     }
-    
+
 	    /* adjust negative output window variables */
 	    if (x < 0) {
 		  lwidth = info->d_width + x;
@@ -768,8 +787,8 @@ static void rivatv_overlay_start (struct rivatv_info *info,int bufno){
 		//VID_WR32 (info->chip.PVIDEO, 0x950 + 4, (height << 16) | width);
 
 		/* NV_PVIDEO_FORMAT */
-        value = info->pitch;       
-	    if(info->use_colorkey)value |= 1 << 20; 
+        value = info->pitch;
+	    if(info->use_colorkey)value |= 1 << 20;
         if(info->format == IMGFMT_YUY2)value |= 1 << 16;
         VID_WR32 (info->chip.PVIDEO, 0x958 + 0, value);
 	    //VID_WR32 (info->chip.PVIDEO, 0x958 + 4, (pitch << 1) | 0x00100000);
@@ -833,12 +852,12 @@ static void rivatv_overlay_start (struct rivatv_info *info,int bufno){
 		VID_WR32 (info->chip.PVIDEO, 0x21C + 4, 0);
 
 		/* NV_PVIDEO_INTR_EN_0_NOTIFY_ENABLED */
-//		VID_OR32 (info->chip.PVIDEO, 0x140, 0x01);                                 
+//		VID_OR32 (info->chip.PVIDEO, 0x140, 0x01);
 
 		/* NV_PVIDEO_OVERLAY (KEY_ON, VIDEO_ON, FORMAT_CCIR) */
         value = 0x1; /*video on*/
         if(info->format==IMGFMT_YUY2)value |= 0x100;
-        if(info->use_colorkey)value |=0x10;       
+        if(info->use_colorkey)value |=0x10;
         VID_WR32 (info->chip.PVIDEO, 0x244, value);
 
 		/* NV_PVIDEO_SU_STATE */
@@ -847,7 +866,7 @@ static void rivatv_overlay_start (struct rivatv_info *info,int bufno){
 	}
     /*set colorkey*/
     rivatv_overlay_colorkey(info,info->vidixcolorkey);
-    
+
 }
 
 
@@ -859,14 +878,14 @@ static void rivatv_overlay_start (struct rivatv_info *info,int bufno){
 static rivatv_info* info;
 
 
-      
-      
+
+
 static int nv_init(void){
 	int mtrr;
   info = calloc(1,sizeof(rivatv_info));
   info->control_base = map_phys_mem(pci_info.base0, 0x00C00000 + 0x00008000);
-  info->chip.arch =  nvidia_card_ids[find_chip(pci_info.device)].arch;  
-  printf("[nvidia_vid] arch %x register base %p\n",info->chip.arch,info->control_base);
+  info->chip.arch =  nvidia_card_ids[find_chip(pci_info.device)].arch;
+  mp_msg(MSGT_VO, MSGL_STATUS, "[nvidia_vid] arch %x register base %p\n",info->chip.arch,info->control_base);
   info->chip.PFIFO  = (uint32_t *) (info->control_base + 0x00002000);
   info->chip.FIFO   = (uint32_t *) (info->control_base + 0x00800000);
   info->chip.PMC    = (uint32_t *) (info->control_base + 0x00000000);
@@ -909,7 +928,7 @@ static int nv_init(void){
         info->chip.PRAMIN = (uint32_t *) (info->video_base + 0x00C00000);
         break;
 	}
-    case NV_ARCH_04:	
+    case NV_ARCH_04:
 	case NV_ARCH_10:
 	case NV_ARCH_20:
     case NV_ARCH_30:
@@ -925,18 +944,18 @@ static int nv_init(void){
 	}
   }
 
-  printf("[nvidia_vid] detected memory size %u MB\n",(uint32_t)(info->chip.fbsize /1024/1024));
+  mp_msg(MSGT_VO, MSGL_STATUS, "[nvidia_vid] detected memory size %u MB\n",(uint32_t)(info->chip.fbsize /1024/1024));
 
   if ((mtrr = mtrr_set_type(pci_info.base1, info->chip.fbsize, MTRR_TYPE_WRCOMB))!= 0)
-	  printf("[nvidia_vid] unable to setup MTRR: %s\n", strerror(mtrr));
+	  mp_msg(MSGT_VO, MSGL_STATUS, "[nvidia_vid] unable to setup MTRR: %s\n", strerror(mtrr));
   else
-	  printf("[nvidia_vid] MTRR set up\n");
-  
+	  mp_msg(MSGT_VO, MSGL_STATUS, "[nvidia_vid] MTRR set up\n");
+
   nv_getscreenproperties(info);
-  if(!info->depth)printf("[nvidia_vid] text mode: %ux%u\n",info->screen_x,info->screen_y);
-  else printf("[nvidia_vid] video mode: %ux%u@%u\n",info->screen_x,info->screen_y, info->depth);
- 
-   
+  if(!info->depth) mp_msg(MSGT_VO, MSGL_STATUS, "[nvidia_vid] text mode: %ux%u\n",info->screen_x,info->screen_y);
+  else mp_msg(MSGT_VO, MSGL_STATUS, "[nvidia_vid] video mode: %ux%u@%u\n",info->screen_x,info->screen_y, info->depth);
+
+
   rivatv_enable_PMEDIA(info);
   info->cur_frame = 0;
   info->use_colorkey = 0;
@@ -964,7 +983,7 @@ static int nv_get_caps(vidix_capability_t *to){
     return 0;
 }
 
-inline static int is_supported_fourcc(uint32_t fourcc)
+static inline int is_supported_fourcc(uint32_t fourcc)
 {
 	if	(fourcc == IMGFMT_UYVY || fourcc == IMGFMT_YUY2)
 		return 1;
@@ -974,21 +993,16 @@ inline static int is_supported_fourcc(uint32_t fourcc)
 
 static int nv_query_fourcc(vidix_fourcc_t *to){
     if(is_supported_fourcc(to->fourcc)){
-	to->depth = VID_DEPTH_1BPP | VID_DEPTH_2BPP |
-		    VID_DEPTH_4BPP | VID_DEPTH_8BPP |
-		    VID_DEPTH_12BPP| VID_DEPTH_15BPP|
-		    VID_DEPTH_16BPP| VID_DEPTH_24BPP|
-		    VID_DEPTH_32BPP;
+	to->depth = VID_DEPTH_ALL;
 	to->flags = VID_CAP_EXPAND | VID_CAP_SHRINK | VID_CAP_COLORKEY;
 	return 0;
     }
-    else  to->depth = to->flags = 0;
     return ENOSYS;
 }
 
 static int nv_config_playback(vidix_playback_t *vinfo){
     uint32_t i;
-    printf("called %s\n", __FUNCTION__);
+//    mp_msg(MSGT_VO, MSGL_STATUS, "called %s\n", __FUNCTION__);
     if (! is_supported_fourcc(vinfo->fourcc))
 	    return ENOSYS;
 
@@ -1001,10 +1015,10 @@ static int nv_config_playback(vidix_playback_t *vinfo){
     info->wy = vinfo->dest.y;
     info->format = vinfo->fourcc;
 
-    printf("[nvidia_vid] setting up a %dx%d-%dx%d video window (src %dx%d), format 0x%X\n",
+    mp_msg(MSGT_VO, MSGL_STATUS, "[nvidia_vid] setting up a %dx%d-%dx%d video window (src %dx%d), format 0x%X\n",
 		    info->d_width, info->d_height, info->wx, info->wy, info->width, info->height, vinfo->fourcc);
-    
-    
+
+
     vinfo->dga_addr=info->picture_base;
 
     switch (vinfo->fourcc)
@@ -1027,7 +1041,7 @@ static int nv_config_playback(vidix_playback_t *vinfo){
     info->num_frames = vinfo->num_frames= (info->chip.fbsize - info->picture_offset)/vinfo->frame_size;
     if(vinfo->num_frames > MAX_FRAMES)vinfo->num_frames = MAX_FRAMES;
 //    vinfo->num_frames = 1;
-//    printf("[nvidia_vid] Number of frames %i\n",vinfo->num_frames);
+//    mp_msg(MSGT_VO, MSGL_STATUS, "[nvidia_vid] Number of frames %i\n",vinfo->num_frames);
     for(i=0;i <vinfo->num_frames;i++)vinfo->offsets[i] = vinfo->frame_size*i;
     return 0;
 }
@@ -1046,19 +1060,19 @@ static int nv_set_gkeys( const vidix_grkey_t * grkey){
   if (grkey->ckey.op == CKEY_FALSE)
   {
     info->use_colorkey = 0;
-    printf("[nvidia_vid] colorkeying disabled\n");
+    mp_msg(MSGT_VO, MSGL_STATUS, "[nvidia_vid] colorkeying disabled\n");
   }
   else {
   info->use_colorkey = 1;
   info->vidixcolorkey = ((grkey->ckey.red<<16)|(grkey->ckey.green<<8)|grkey->ckey.blue);
-  printf("[nvidia_vid] set colorkey 0x%x\n",info->vidixcolorkey);
+  mp_msg(MSGT_VO, MSGL_STATUS, "[nvidia_vid] set colorkey 0x%x\n",info->vidixcolorkey);
   }
   if(info->d_width && info->d_height)rivatv_overlay_start(info,0);
   return 0;
 }
 
 static int nv_frame_sel(unsigned int frame){
-//  printf("selecting buffer %d\n", frame);
+//  mp_msg(MSGT_VO, MSGL_STATUS, "selecting buffer %d\n", frame);
   rivatv_overlay_start(info, frame);
   if (info->num_frames >= 1)
 	  info->cur_frame = frame/*(frame+1)%info->num_frames*/;
@@ -1109,3 +1123,31 @@ VDXDriver nvidia_drv = {
   .set_eq = nv_set_eq,
   .set_gkey = nv_set_gkeys,
 };
+
+
+#if 0
+//gcc -o nvidia_vid nvidia_vid.c -I ../ -lm ../vidix/libvidix.a
+
+int main(int argc,char* argv[]){
+  if(nv_probe(0,0)){
+        mp_msg(MSGT_VO, MSGL_STATUS, "no supported chip found\n");
+        return 1;
+  }
+  if(nv_init()){
+	mp_msg(MSGT_VO, MSGL_STATUS, "could not init\n");
+	return 1;
+  }
+  if(info->chip.arch >= NV_ARCH_10){
+    mp_msg(MSGT_VO, MSGL_STATUS, "NV_PVIDEO_BASE (0x900) 0x%x\n",VID_RD32(info->chip.PVIDEO, 0x900));
+    mp_msg(MSGT_VO, MSGL_STATUS, "NV_PVIDEO_LIMIT (0x908) 0x%x\n",VID_RD32(info->chip.PVIDEO, 0x908));
+    mp_msg(MSGT_VO, MSGL_STATUS, "NV_PVIDEO_OFFSET (0x920) 0x%x\n",VID_RD32(info->chip.PVIDEO, 0x920));
+    mp_msg(MSGT_VO, MSGL_STATUS, "NV_PVIDEO_FORMAT (0x958) 0x%x\n",VID_RD32(info->chip.PVIDEO, 0x958));
+    mp_msg(MSGT_VO, MSGL_STATUS, "NV_PVIDEO_STOP (0x704) 0x%x\n",VID_RD32(info->chip.PVIDEO, 0x704));
+    mp_msg(MSGT_VO, MSGL_STATUS, "NV_PVIDEO_BUFFER (0x700) 0x%x\n",VID_RD32(info->chip.PVIDEO, 0x700));
+  }
+
+  nv_destroy();
+  return 0;
+}
+
+#endif

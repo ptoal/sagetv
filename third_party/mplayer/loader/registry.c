@@ -1,7 +1,6 @@
 /*
  * Modified for use with MPlayer, detailed changelog at
  * http://svn.mplayerhq.hu/mplayer/trunk/
- * $Id: registry.c,v 1.3 2007-04-10 19:33:29 Narflex Exp $
  */
 
 #include "config.h"
@@ -22,10 +21,10 @@
 #include "ext.h"
 #include "registry.h"
 
+#include "path.h"
+
 //#undef TRACE
 //#define TRACE printf
-
-extern char *get_path ( const char * );
 
 // ...can be set before init_registry() call
 char* regpathname = NULL;
@@ -159,8 +158,7 @@ void free_registry(void)
     while (t)
     {
 	reg_handle_t* f = t;
-        if (t->name)
-	    free(t->name);
+	free(t->name);
 	t=t->prev;
         free(f);
     }
@@ -183,6 +181,7 @@ void free_registry(void)
 }
 
 
+#if 0
 static reg_handle_t* find_handle_by_name(const char* name)
 {
 	reg_handle_t* t;
@@ -195,6 +194,7 @@ static reg_handle_t* find_handle_by_name(const char* name)
 	}
 	return 0;
 }
+#endif
 static struct reg_value* find_value_by_name(const char* name)
 {
 	int i;
@@ -215,7 +215,7 @@ static reg_handle_t* find_handle(int handle)
 	}
 	return 0;
 }
-static int generate_handle()
+static int generate_handle(void)
 {
 	static unsigned int zz=249;
 	zz++;
@@ -263,7 +263,6 @@ static char* build_keyname(long key, const char* subkey)
 }
 static struct reg_value* insert_reg_value(int handle, const char* name, int type, const void* value, int len)
 {
-	reg_handle_t* t;
 	struct reg_value* v;
 	char* fullname;
 	if((fullname=build_keyname(handle, name))==NULL)
@@ -277,7 +276,7 @@ static struct reg_value* insert_reg_value(int handle, const char* name, int type
 	{
 		if(regs==0)
 		    create_registry();
-		regs=(struct reg_value*)realloc(regs, sizeof(struct reg_value)*(reg_size+1));
+		regs = realloc(regs, sizeof(struct reg_value) * (reg_size +1 ));
 		//regs=(struct reg_value*)my_realloc(regs, sizeof(struct reg_value)*(reg_size+1));
 		v=regs+reg_size;
 		reg_size++;
@@ -306,37 +305,15 @@ static void init_registry(void)
 	// can't be free-ed - it's static and probably thread
 	// unsafe structure which is stored in glibc
 
-#ifdef MPLAYER
 	regpathname = get_path("registry");
 	localregpathname = regpathname;
-#else
-	// regpathname is an external pointer
-        //
-	// registry.c is holding its own internal pointer
-	// localregpathname  - which is being allocate/deallocated
-
-	if (localregpathname == 0)
-	{
-            const char* pthn = regpathname;
-	    if (!regpathname)
-	    {
-		// avifile - for now reading data from user's home
-		struct passwd* pwent;
-		pwent = getpwuid(geteuid());
-                pthn = pwent->pw_dir;
-	    }
-
-	    localregpathname = malloc(strlen(pthn)+20);
-	    strcpy(localregpathname, pthn);
-	    strcat(localregpathname, "/.registry");
-	}
-#endif
 
 	open_registry();
 	insert_handle(HKEY_LOCAL_MACHINE, "HKLM");
 	insert_handle(HKEY_CURRENT_USER, "HKCU");
 }
 
+#if 0
 static reg_handle_t* find_handle_2(long key, const char* subkey)
 {
 	char* full_name;
@@ -356,6 +333,7 @@ static reg_handle_t* find_handle_2(long key, const char* subkey)
 	free(full_name);
 	return t;
 }
+#endif
 
 long __stdcall RegOpenKeyExA(long key, const char* subkey, long reserved, long access, int* newkey)
 {
@@ -401,12 +379,11 @@ long __stdcall RegCloseKey(long key)
 	handle->prev->next=handle->next;
     if(handle->next)
 	handle->next->prev=handle->prev;
-    if(handle->name)
-	free(handle->name);
+    free(handle->name);
     if(handle==head)
 	head=head->prev;
     free(handle);
-    return 1;
+    return 0;
 }
 
 long __stdcall RegQueryValueExA(long key, const char* value, int* reserved, int* type, int* data, int* count)
@@ -421,9 +398,32 @@ long __stdcall RegQueryValueExA(long key, const char* value, int* reserved, int*
     if (!c)
 	return 1;
     t=find_value_by_name(c);
+    if (t==0) {
+        // Hacks for CineForm.
+        if (strcmp(c, "HKCU\\SOFTWARE\\CineForm\\DecoderProperties\\Resolution") == 0) {
+            if (data)
+                *data = 1000;
+            if (type)
+                *type = REG_DWORD;
+            if (count)
+                *count = sizeof(DWORD);
+            free(c);
+            return ERROR_SUCCESS;
+        }
+        if (strcmp(c, "HKCU\\SOFTWARE\\CineForm\\DecoderProperties\\PixelFormats") == 0) {
+            if (data)
+                *data = 0xffff;
+            if (type)
+                *type = REG_DWORD;
+            if (count)
+                *count = sizeof(DWORD);
+            free(c);
+            return ERROR_SUCCESS;
+        }
+        free(c);
+        return ERROR_FILE_NOT_FOUND;
+    }
     free(c);
-    if (t==0)
-	return 2;
     if (type)
 	*type=t->type;
     if (data)
@@ -440,7 +440,7 @@ long __stdcall RegQueryValueExA(long key, const char* value, int* reserved, int*
     {
 	*count=t->len;
     }
-    return 0;
+    return ERROR_SUCCESS;
 }
 long __stdcall RegCreateKeyExA(long key, const char* name, long reserved,
 		     void* classs, long options, long security,
@@ -511,7 +511,6 @@ long __stdcall RegEnumValueA(HKEY hkey, DWORD index, LPSTR value, LPDWORD val_co
 
 long __stdcall RegSetValueExA(long key, const char* name, long v1, long v2, const void* data, long size)
 {
-    struct reg_value* t;
     char* c;
     TRACE("Request to set value %s %d\n", name, *(const int*)data);
     if(!regs)

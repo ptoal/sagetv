@@ -1,15 +1,28 @@
-/* parse_mp4.c - MP4 file format parser code
- * This file is part of MPlayer, see http://mplayerhq.hu/ for info.  
- * (c)2002 by Felix Buenemann <atmosfear at users.sourceforge.net>
- * File licensed under the GPL, see http://www.fsf.org/ for more info.
+/*
+ * MP4 file format parser code
+ *
+ * Copyright (C) 2002 Felix Buenemann <atmosfear at users.sourceforge.net>
  * Code inspired by libmp4 from http://mpeg4ip.sourceforge.net/.
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
-#include "config.h"   
+
 #include <stdio.h>
 #include <inttypes.h>
-#ifdef HAVE_MALLOC_H
-#include <malloc.h>
-#endif
 #include <stdlib.h>
 #include "parse_mp4.h"
 #include "mp_msg.h"
@@ -20,7 +33,8 @@
 #define MP4_DL MSGL_V
 #define freereturn(a,b) free(a); return b
 
-int mp4_read_descr_len(stream_t *s) {
+static int mp4_read_descr_len(stream_t *s)
+{
   uint8_t b;
   uint8_t numBytes = 0;
   uint32_t length = 0;
@@ -42,11 +56,11 @@ int mp4_parse_esds(unsigned char *data, int datalen, esds_t *esds) {
   uint16_t len;
 #ifdef MP4_DUMPATOM
   {int i;
-  printf("ESDS Dump (%dbyte):\n", datalen);  
+  printf("ESDS Dump (%dbyte):\n", datalen);
   for(i = 0; i < datalen; i++)
     printf("%02X ", data[i]);
   printf("\nESDS Dumped\n");}
-#endif  
+#endif
   memset(esds, 0, sizeof(esds_t));
 
   esds->version = stream_read_char(s);
@@ -114,7 +128,7 @@ int mp4_parse_esds(unsigned char *data, int datalen, esds_t *esds) {
   }
 
   /* read length */
-  esds->decoderConfigLen = len = mp4_read_descr_len(s); 
+  esds->decoderConfigLen = len = mp4_read_descr_len(s);
 
   esds->decoderConfig = malloc(esds->decoderConfigLen);
   if (esds->decoderConfig) {
@@ -157,4 +171,3 @@ void mp4_free_esds(esds_t *esds) {
 
 #undef freereturn
 #undef MP4_DL
-

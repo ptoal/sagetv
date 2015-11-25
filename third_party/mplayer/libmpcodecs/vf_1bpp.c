@@ -1,9 +1,27 @@
-#include "config.h"
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
 
+#include "config.h"
 #include "mp_msg.h"
 
 #include "img_format.h"
@@ -12,7 +30,7 @@
 
 //===========================================================================//
 
-static unsigned int bgr_list[]={
+static const unsigned int bgr_list[]={
     IMGFMT_Y800,
     IMGFMT_Y8,
     IMGFMT_BGR8,
@@ -25,8 +43,10 @@ static unsigned int bgr_list[]={
     IMGFMT_IYUV,
     IMGFMT_422P,
     IMGFMT_444P,
-    
+
     IMGFMT_YUY2,
+    IMGFMT_BGR12,
+    IMGFMT_RGB12,
     IMGFMT_BGR15,
     IMGFMT_RGB15,
     IMGFMT_BGR16,
@@ -40,10 +60,10 @@ static unsigned int bgr_list[]={
     0
 };
 
-static unsigned int find_best(struct vf_instance_s* vf){
+static unsigned int find_best(struct vf_instance *vf){
     unsigned int best=0;
     int ret;
-    unsigned int* p=bgr_list;
+    const unsigned int* p=bgr_list;
     while(*p){
 	ret=vf->next->query_format(vf->next,*p);
 	mp_msg(MSGT_VFILTER,MSGL_V,"[%s] query(%s) -> %d\n",vf->info->name,vo_format_name(*p),ret&3);
@@ -60,7 +80,7 @@ struct vf_priv_s {
     unsigned int fmt;
 };
 
-static int config(struct vf_instance_s* vf,
+static int config(struct vf_instance *vf,
         int width, int height, int d_width, int d_height,
 	unsigned int flags, unsigned int outfmt){
     if (!vf->priv->fmt)
@@ -74,7 +94,7 @@ static int config(struct vf_instance_s* vf,
     return vf_next_config(vf,width,height,d_width,d_height,flags,vf->priv->fmt);
 }
 
-static int bittab[8]={128,64,32,16,8,4,2,1};
+static const int bittab[8]={128,64,32,16,8,4,2,1};
 
 static void convert(mp_image_t *mpi, mp_image_t *dmpi, int value0, int value1,int bpp){
     int y;
@@ -103,9 +123,9 @@ static void convert(mp_image_t *mpi, mp_image_t *dmpi, int value0, int value1,in
     }
 }
 
-static int put_image(struct vf_instance_s* vf, mp_image_t *mpi, double pts){
+static int put_image(struct vf_instance *vf, mp_image_t *mpi, double pts){
     mp_image_t *dmpi;
-    
+
     // hope we'll get DR buffer:
     dmpi=vf_get_image(vf->next,vf->priv->fmt,
 	MP_IMGTYPE_TEMP, MP_IMGFLAG_ACCEPT_STRIDE,
@@ -132,6 +152,10 @@ static int put_image(struct vf_instance_s* vf, mp_image_t *mpi, double pts){
     case IMGFMT_YUY2:
 	convert(mpi,dmpi,0x8000,0x80ff,2);
 	break;
+    case IMGFMT_BGR12:
+    case IMGFMT_RGB12:
+        convert(mpi,dmpi,0,0x0fff,2);
+        break;
     case IMGFMT_BGR15:
     case IMGFMT_RGB15:
 	convert(mpi,dmpi,0,0x7fff,2);
@@ -154,7 +178,7 @@ static int put_image(struct vf_instance_s* vf, mp_image_t *mpi, double pts){
 
 //===========================================================================//
 
-static int query_format(struct vf_instance_s* vf, unsigned int fmt){
+static int query_format(struct vf_instance *vf, unsigned int fmt){
     int best;
     if(fmt!=IMGFMT_RGB1 && fmt!=IMGFMT_BGR1) return 0;
     best=find_best(vf);
@@ -162,7 +186,7 @@ static int query_format(struct vf_instance_s* vf, unsigned int fmt){
     return vf->next->query_format(vf->next,best);
 }
 
-static int open(vf_instance_t *vf, char* args){
+static int vf_open(vf_instance_t *vf, char *args){
     vf->config=config;
     vf->put_image=put_image;
     vf->query_format=query_format;
@@ -171,12 +195,12 @@ static int open(vf_instance_t *vf, char* args){
     return 1;
 }
 
-vf_info_t vf_info_1bpp = {
+const vf_info_t vf_info_1bpp = {
     "1bpp bitmap -> YUV/BGR 8/15/16/32 conversion",
     "1bpp",
     "A'rpi",
     "",
-    open,
+    vf_open,
     NULL
 };
 

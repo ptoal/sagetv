@@ -5,7 +5,6 @@
  *
  * Modified for use with MPlayer, detailed changelog at
  * http://svn.mplayerhq.hu/mplayer/trunk/
- * $Id: elfdll.c,v 1.3 2007-04-10 19:33:29 Narflex Exp $
  *
  */
 #include "config.h"
@@ -18,6 +17,9 @@
 #include "wine/elfdll.h"
 #include "wine/debugtools.h"
 #include "wine/winerror.h"
+#include "debug.h"
+#include "loader.h"
+#include "path.h"
 
 //DEFAULT_DEBUG_CHANNEL(elfdll)
 
@@ -28,17 +30,10 @@
 #include <dlfcn.h>
 
 
-//WINE_MODREF *local_wm=NULL;
-extern modref_list* local_wm;
-
-
 /*------------------ HACKS -----------------*/
-extern DWORD fixup_imports(WINE_MODREF *wm);
-extern void dump_exports(HMODULE hModule);
+DWORD fixup_imports(WINE_MODREF *wm);
+void dump_exports(HMODULE hModule);
 /*---------------- END HACKS ---------------*/
-
-//char *extra_ld_library_path = "/usr/lib/win32";
-extern char* def_path;
 
 struct elfdll_image
 {
@@ -68,7 +63,7 @@ void *ELFDLL_dlopen(const char *libname, int flags)
 
 	/* Now try to construct searches through our extra search-path */
 	namelen = strlen(libname);
-	ldpath = def_path;
+	ldpath = codec_path;
 	while(ldpath && *ldpath)
 	{
 		int len;
@@ -171,10 +166,10 @@ static LPSTR get_sobasename(LPCSTR path, LPSTR name)
 static WINE_MODREF *ELFDLL_CreateModref(HMODULE hModule, LPCSTR path)
 {
 //	IMAGE_NT_HEADERS *nt = PE_HEADER(hModule);
-	IMAGE_DATA_DIRECTORY *dir;
-	IMAGE_IMPORT_DESCRIPTOR *pe_import = NULL;
+//	IMAGE_DATA_DIRECTORY *dir;
+//	IMAGE_IMPORT_DESCRIPTOR *pe_import = NULL;
 	WINE_MODREF *wm;
-	int len;
+//	int len;
 	HANDLE procheap = GetProcessHeap();
 
 	wm = (WINE_MODREF *)HeapAlloc(procheap, HEAP_ZERO_MEMORY, sizeof(*wm));
@@ -197,7 +192,7 @@ static WINE_MODREF *ELFDLL_CreateModref(HMODULE hModule, LPCSTR path)
 //		wm->binfmt.pe.pe_resource = (PIMAGE_RESOURCE_DIRECTORY)RVA(hModule, dir->VirtualAddress);
 
 
-	wm->filename = (char*) malloc(strlen(path)+1);
+	wm->filename = malloc(strlen(path)+1);
 	strcpy(wm->filename, path);
 	wm->modname = strrchr( wm->filename, '\\' );
 	if (!wm->modname) wm->modname = wm->filename;
@@ -213,10 +208,10 @@ static WINE_MODREF *ELFDLL_CreateModref(HMODULE hModule, LPCSTR path)
 	/* Link MODREF into process list */
 
 //	EnterCriticalSection( &PROCESS_Current()->crit_section );
-	
+
 	if(local_wm)
         {
-    	    local_wm->next = (modref_list*) malloc(sizeof(modref_list));
+    	    local_wm->next = malloc(sizeof(modref_list));
     	    local_wm->next->prev=local_wm;
     	    local_wm->next->next=NULL;
             local_wm->next->wm=wm;
@@ -224,10 +219,10 @@ static WINE_MODREF *ELFDLL_CreateModref(HMODULE hModule, LPCSTR path)
 	}
 	else
         {
-	    local_wm = (modref_list*) malloc(sizeof(modref_list));
+	    local_wm = malloc(sizeof(modref_list));
 	    local_wm->next=local_wm->prev=NULL;
     	    local_wm->wm=wm;
-	}	
+	}
 
 //	LeaveCriticalSection( &PROCESS_Current()->crit_section );
 	return wm;
@@ -241,7 +236,7 @@ static WINE_MODREF *ELFDLL_CreateModref(HMODULE hModule, LPCSTR path)
 WINE_MODREF *ELFDLL_LoadLibraryExA(LPCSTR path, DWORD flags)
 {
 	LPVOID dlhandle;
-	struct elfdll_image *image;
+//	struct elfdll_image *image;
 	char name[129];
 	char soname[129];
 	WINE_MODREF *wm;
@@ -263,7 +258,7 @@ WINE_MODREF *ELFDLL_LoadLibraryExA(LPCSTR path, DWORD flags)
 /*	strcpy(soname, name);
 	strcat(soname, "_elfdll_image");
 	image = (struct elfdll_image *)dlsym(dlhandle, soname);
-	if(!image) 
+	if(!image)
 	{
 		ERR("Could not get elfdll image descriptor %s (%s)\n", soname, dlerror());
 		dlclose(dlhandle);

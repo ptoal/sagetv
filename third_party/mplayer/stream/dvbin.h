@@ -2,52 +2,41 @@
  *
  * Modified for use with MPlayer, for details see the changelog at
  * http://svn.mplayerhq.hu/mplayer/trunk/
- * $Id: dvbin.h,v 1.1 2007-04-10 20:11:30 Narflex Exp $
+ * $Id: dvbin.h 31516 2010-06-21 14:39:24Z diego $
  */
 
-#ifndef DVBIN_H
-#define DVBIN_H
+#ifndef MPLAYER_DVBIN_H
+#define MPLAYER_DVBIN_H
 
+#include "config.h"
 #include "stream.h"
 
 #define SLOF (11700*1000UL)
 #define LOF1 (9750*1000UL)
 #define LOF2 (10600*1000UL)
 
-#ifdef HAVE_DVB_HEAD
-	#include <linux/dvb/dmx.h>
-	#include <linux/dvb/frontend.h>
-	#include <linux/dvb/version.h>
-#else
-	#include <ost/dmx.h>
-	#include <ost/sec.h>
-	#include <ost/frontend.h>
-	#define fe_status_t FrontendStatus
-	#define fe_spectral_inversion_t SpectralInversion
-	#define fe_modulation_t Modulation
-	#define fe_code_rate_t CodeRate
-	#define fe_transmit_mode_t TransmitMode
-	#define fe_guard_interval_t GuardInterval
-	#define fe_bandwidth_t BandWidth
-	#define fe_hierarchy_t Hierarchy
-	#define fe_sec_voltage_t SecVoltage
-	#define dmx_pes_filter_params dmxPesFilterParams
-	#define dmx_sct_filter_params dmxSctFilterParams
-	#define dmx_pes_type_t dmxPesType_t
-#endif
+#include <inttypes.h>
+#include <linux/dvb/dmx.h>
+#include <linux/dvb/frontend.h>
+#include <linux/dvb/version.h>
 
 #undef DVB_ATSC
 #if defined(DVB_API_VERSION_MINOR)
-#if DVB_API_VERSION == 3 && DVB_API_VERSION_MINOR >= 1
+
+/* kernel headers >=2.6.28 have version 5.
+ *
+ * FIXME: are there any real differences between 3.1 and 5?
+ */
+
+#if (DVB_API_VERSION == 3 && DVB_API_VERSION_MINOR >= 1) || DVB_API_VERSION == 5
 #define DVB_ATSC 1
 #endif
+
 #endif
 
 
 #define DVB_CHANNEL_LOWER -1
 #define DVB_CHANNEL_HIGHER 1
-
-#include "inttypes.h"
 
 #ifndef DMX_FILTER_SIZE
 #define DMX_FILTER_SIZE 16
@@ -97,7 +86,6 @@ typedef struct {
 	dvb_channels_list *list;
 	int tuner_type;
 	int is_on;
-	stream_t *stream;
 	int retry;
 	int timeout;
 	int last_freq;
@@ -109,8 +97,9 @@ typedef struct {
 #define TUNER_CBL	3
 #define TUNER_ATSC	4
 
-extern int dvb_step_channel(dvb_priv_t *, int);
-extern int dvb_set_channel(dvb_priv_t *, int, int);
-extern dvb_config_t *dvb_get_config(void);
+int dvb_step_channel(stream_t *, int);
+int dvb_set_channel(stream_t *, int, int);
+dvb_config_t *dvb_get_config(void);
+void dvb_free_config(dvb_config_t *config);
 
-#endif
+#endif /* MPLAYER_DVBIN_H */

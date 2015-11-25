@@ -1,15 +1,30 @@
-#include "config.h"
-// SAMPLE audio decoder - you can use this file as template when creating new codec!
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 
 #include "config.h"
-
+#include "mp_msg.h"
 #include "ad_internal.h"
 
-static ad_info_t info =  {
+static const ad_info_t info = {
 	"libmad mpeg audio decoder",
 	"libmad",
 	"A'rpi",
@@ -23,10 +38,10 @@ LIBAD_EXTERN(libmad)
 
 typedef struct mad_decoder_s {
 
-  struct mad_synth  synth; 
+  struct mad_synth  synth;
   struct mad_stream stream;
   struct mad_frame  frame;
-  
+
   int have_frame;
 
   int               output_sampling_rate;
@@ -37,63 +52,62 @@ typedef struct mad_decoder_s {
 
 static int preinit(sh_audio_t *sh){
 
-  mad_decoder_t *this = (mad_decoder_t *) malloc(sizeof(mad_decoder_t));
-  memset(this,0,sizeof(mad_decoder_t));
+  mad_decoder_t *this = calloc(1, sizeof(mad_decoder_t));
   sh->context = this;
-  
+
   mad_synth_init  (&this->synth);
   mad_stream_init (&this->stream);
   mad_frame_init  (&this->frame);
-  
+
   sh->audio_out_minsize=2*4608;
   sh->audio_in_minsize=4096;
-  
+
   return 1;
 }
 
 static int read_frame(sh_audio_t *sh){
-  mad_decoder_t *this = (mad_decoder_t *) sh->context;
-  int len;
+  mad_decoder_t *this = sh->context;
 
-while((len=demux_read_data(sh->ds,&sh->a_in_buffer[sh->a_in_buffer_len],
-          sh->a_in_buffer_size-sh->a_in_buffer_len))>0){
-  sh->a_in_buffer_len+=len;
   while(1){
     int ret;
     mad_stream_buffer (&this->stream, sh->a_in_buffer, sh->a_in_buffer_len);
     ret=mad_frame_decode (&this->frame, &this->stream);
     if (this->stream.next_frame) {
-	int num_bytes =
-	    (char*)sh->a_in_buffer+sh->a_in_buffer_len - (char*)this->stream.next_frame;
-	memmove(sh->a_in_buffer, this->stream.next_frame, num_bytes);
-	mp_msg(MSGT_DECAUDIO,MSGL_DBG2,"libmad: %d bytes processed\n",sh->a_in_buffer_len-num_bytes);
-	sh->a_in_buffer_len = num_bytes;
+	unsigned processed = this->stream.next_frame - (uint8_t *)sh->a_in_buffer;
+	sh->a_in_buffer_len -= processed;
+	memmove(sh->a_in_buffer, this->stream.next_frame, sh->a_in_buffer_len);
+	mp_msg(MSGT_DECAUDIO,MSGL_DBG2,"libmad: %d bytes processed\n",processed);
     }
     if (ret == 0) return 1; // OK!!!
     // error! try to resync!
-    if(this->stream.error==MAD_ERROR_BUFLEN) break;
-  }
+    if(this->stream.error==MAD_ERROR_BUFLEN) {
+        int len=demux_read_data(sh->ds,&sh->a_in_buffer[sh->a_in_buffer_len],
+                                sh->a_in_buffer_size-sh->a_in_buffer_len);
+        if (len <= 0) break;
+        sh->a_in_buffer_len+=len;
+    }
 }
 mp_msg(MSGT_DECAUDIO,MSGL_INFO,"Cannot sync MAD frame\n");
 return 0;
 }
 
 static int init(sh_audio_t *sh){
-  mad_decoder_t *this = (mad_decoder_t *) sh->context;
+  mad_decoder_t *this = sh->context;
 
   this->have_frame=read_frame(sh);
   if(!this->have_frame) return 0; // failed to sync...
-  
+
   sh->channels=(this->frame.header.mode == MAD_MODE_SINGLE_CHANNEL) ? 1 : 2;
   sh->samplerate=this->frame.header.samplerate;
-  sh->i_bps=this->frame.header.bitrate/8;
+  if (sh->i_bps < 1)
+    sh->i_bps=this->frame.header.bitrate/8;
   sh->samplesize=2;
-  
+
   return 1;
 }
 
 static void uninit(sh_audio_t *sh){
-  mad_decoder_t *this = (mad_decoder_t *) sh->context;
+  mad_decoder_t *this = sh->context;
   mad_synth_finish (&this->synth);
   mad_frame_finish (&this->frame);
   mad_stream_finish(&this->stream);
@@ -116,7 +130,7 @@ static inline signed int scale(mad_fixed_t sample) {
 }
 
 static int decode_audio(sh_audio_t *sh,unsigned char *buf,int minlen,int maxlen){
-  mad_decoder_t *this = (mad_decoder_t *) sh->context;
+  mad_decoder_t *this = sh->context;
   int len=0;
 
   while(len<minlen && len+4608<=maxlen){
@@ -138,24 +152,24 @@ static int decode_audio(sh_audio_t *sh,unsigned char *buf,int minlen,int maxlen)
 
 	  len+=2*nchannels*nsamples;
 	  buf+=2*nchannels*nsamples;
-	  
+
 	  while (nsamples--) {
 	    /* output sample(s) in 16-bit signed little-endian PCM */
-	    
+
 	    *output++ = scale(*left_ch++);
-	    
-	    if (nchannels == 2) 
+
+	    if (nchannels == 2)
 	      *output++ = scale(*right_ch++);
 
 	  }
 	}
   }
-  
+
   return len?len:-1;
 }
 
 static int control(sh_audio_t *sh,int cmd,void* arg, ...){
-  mad_decoder_t *this = (mad_decoder_t *) sh->context;
+  mad_decoder_t *this = sh->context;
     // various optional functions you MAY implement:
     switch(cmd){
       case ADCTRL_RESYNC_STREAM:

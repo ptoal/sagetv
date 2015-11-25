@@ -1,18 +1,41 @@
-#include "config.h"
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <strings.h>
 #include <unistd.h>
 #include <stdarg.h>
 #include <math.h>
 
 #include "config.h"
+#include "mp_msg.h"
 #include "ad_internal.h"
+#include "libaf/reorder_ch.h"
 
-static ad_info_t info = 
+static const ad_info_t info =
 {
 	"Ogg/Vorbis audio decoder",
+#ifdef CONFIG_TREMOR
+	"tremor",
+#else
 	"libvorbis",
+#endif
 	"Felix Buenemann, A'rpi",
 	"libvorbis",
 	""
@@ -20,7 +43,7 @@ static ad_info_t info =
 
 LIBAD_EXTERN(libvorbis)
 
-#ifdef TREMOR
+#ifdef CONFIG_TREMOR
 #include <tremor/ivorbiscodec.h>
 #else
 #include <vorbis/codec.h>
@@ -34,7 +57,7 @@ typedef struct ov_struct_st {
   vorbis_dsp_state vd; /* central working state for the packet->PCM decoder */
   vorbis_block     vb; /* local working space for packet->PCM decode */
   float            rg_scale; /* replaygain scale */
-#ifdef TREMOR
+#ifdef CONFIG_TREMOR
   int              rg_scale_int;
 #endif
 } ov_struct_t;
@@ -89,10 +112,6 @@ static int init(sh_audio_t *sh)
 
   mp_msg(MSGT_DECAUDIO,MSGL_V,"ad_vorbis, extradata seems is %d bytes long\n", sh->wf->cbSize);
   extradata = (char*) (sh->wf+1);
-  if(!extradata) {
-    mp_msg(MSGT_DECAUDIO,MSGL_ERR,"ad_vorbis, extradata seems to be NULL!, exit\n");
-    ERROR();
-  }
 
   if(*extradata != 2) {
     mp_msg (MSGT_DEMUX, MSGL_WARN, "ad_vorbis: Vorbis track does not contain valid headers.\n");
@@ -158,9 +177,9 @@ static int init(sh_audio_t *sh)
     if(ov->rg_scale * rg_peak > 1.f)
       ov->rg_scale = 1.f / rg_peak;
     /* replaygain: security */
-    if(ov->rg_scale > 15.) 
+    if(ov->rg_scale > 15.)
       ov->rg_scale = 15.;
-#ifdef TREMOR
+#ifdef CONFIG_TREMOR
     ov->rg_scale_int = (int)(ov->rg_scale*64.f);
 #endif
     mp_msg(MSGT_DECAUDIO,MSGL_V,"OggVorbis: Bitstream is %d channel%s, %dHz, %dbit/s %cBR\n",(int)ov->vi.channels,ov->vi.channels>1?"s":"",(int)ov->vi.rate,(int)ov->vi.bitrate_nominal,
@@ -176,7 +195,7 @@ static int init(sh_audio_t *sh)
 //  printf("lower=%d  upper=%d  \n",(int)ov->vi.bitrate_lower,(int)ov->vi.bitrate_upper);
 
   // Setup the decoder
-  sh->channels=ov->vi.channels; 
+  sh->channels=ov->vi.channels;
   sh->samplerate=ov->vi.rate;
   sh->samplesize=2;
   // assume 128kbit if bitrate not specified in the header
@@ -204,7 +223,7 @@ static int control(sh_audio_t *sh,int cmd,void* arg, ...)
 {
     switch(cmd)
     {
-#if 0      
+#if 0
       case ADCTRL_RESYNC_STREAM:
 	  return CONTROL_TRUE;
       case ADCTRL_SKIP_FRAME:
@@ -218,12 +237,12 @@ static int decode_audio(sh_audio_t *sh,unsigned char *buf,int minlen,int maxlen)
 {
         int len = 0;
         int samples;
-#ifdef TREMOR
+#ifdef CONFIG_TREMOR
         ogg_int32_t **pcm;
 #else
+        float scale;
         float **pcm;
 #endif
-        float scale;
         struct ov_struct_st *ov = sh->context;
 	while(len < minlen) {
 	  while((samples=vorbis_synthesis_pcmout(&ov->vd,&pcm))<=0){
@@ -245,12 +264,12 @@ static int decode_audio(sh_audio_t *sh,unsigned char *buf,int minlen,int maxlen)
 	    int clipflag=0;
 	    int convsize=(maxlen-len)/(2*ov->vi.channels); // max size!
 	    int bout=((samples<convsize)?samples:convsize);
-	  
+
 	    if(bout<=0) break; // no buffer space
 
 	    /* convert floats to 16 bit signed ints (host order) and
 	       interleave */
-#ifdef TREMOR
+#ifdef CONFIG_TREMOR
            if (ov->rg_scale_int == 64) {
 	    for(i=0;i<ov->vi.channels;i++){
 	      ogg_int16_t *convbuffer=(ogg_int16_t *)(&buf[len]);
@@ -272,15 +291,15 @@ static int decode_audio(sh_audio_t *sh,unsigned char *buf,int minlen,int maxlen)
 	      }
 	    }
 	   } else
-#endif /* TREMOR */
+#endif /* CONFIG_TREMOR */
 	   {
-#ifndef TREMOR
+#ifndef CONFIG_TREMOR
             scale = 32767.f * ov->rg_scale;
 #endif
 	    for(i=0;i<ov->vi.channels;i++){
 	      ogg_int16_t *convbuffer=(ogg_int16_t *)(&buf[len]);
 	      ogg_int16_t *ptr=convbuffer+i;
-#ifdef TREMOR
+#ifdef CONFIG_TREMOR
 	      ogg_int32_t  *mono=pcm[i];
 	      for(j=0;j<bout;j++){
 		int val=(mono[j]*ov->rg_scale_int)>>(9+6);
@@ -297,13 +316,13 @@ static int decode_audio(sh_audio_t *sh,unsigned char *buf,int minlen,int maxlen)
 		  val=-32768;
 		  clipflag=1;
 		}
-#endif    /* TREMOR */
+#endif /* CONFIG_TREMOR */
 		*ptr=val;
 		ptr+=ov->vi.channels;
 	      }
 	    }
 	   }
-		
+
 	    if(clipflag)
 	      mp_msg(MSGT_DECAUDIO,MSGL_DBG2,"Clipping in frame %ld\n",(long)(ov->vd.sequence));
 	    len+=2*ov->vi.channels*bout;
@@ -317,6 +336,12 @@ static int decode_audio(sh_audio_t *sh,unsigned char *buf,int minlen,int maxlen)
 //          if (!samples) break; // why? how?
 	}
 
+	if (len > 0 && ov->vi.channels >= 5) {
+	  reorder_channel_nch(buf, AF_CHANNEL_LAYOUT_VORBIS_DEFAULT,
+	                      AF_CHANNEL_LAYOUT_MPLAYER_DEFAULT,
+	                      ov->vi.channels, len / sh->samplesize,
+	                      sh->samplesize);
+	}
 
 
   return len;

@@ -3,7 +3,6 @@
  *
  * Modified for use with MPlayer, detailed changelog at
  * http://svn.mplayerhq.hu/mplayer/trunk/
- * $Id: vfl.c,v 1.3 2007-04-10 19:33:29 Narflex Exp $
  *
  */
 #include <config.h>
@@ -22,7 +21,7 @@
 #include "wine/winestring.h"
 #include "wine/driver.h"
 #include "wine/avifmt.h"
-#include "driver.h"
+#include "drv.h"
 
 #define OpenDriverA DrvOpen
 #define CloseDriver DrvClose
@@ -67,7 +66,7 @@ ICOpen(long filename,long fccHandler,unsigned int wMode) {
 	HDRVR		hdrv;
 	WINE_HIC	*whic;
 
-	/* Well, lParam2 is in fact a LPVIDEO_OPEN_PARMS, but it has the 
+	/* Well, lParam2 is in fact a LPVIDEO_OPEN_PARMS, but it has the
 	 * same layout as ICOPEN
 	 */
 	icopen.fccType		= 0x63646976; // "vidc" //fccType;
@@ -94,7 +93,7 @@ ICGetInfo(HIC hic,ICINFO *picinfo,long cb) {
 	LRESULT		ret;
 
 	ret = ICSendMessage(hic,ICM_GETINFO,(long)picinfo,cb);
-	
+
 	return ret;
 }
 
@@ -130,7 +129,7 @@ ICCompress(
 /***********************************************************************
  *		ICDecompress			[MSVFW.26]
  */
-long VFWAPIV 
+long VFWAPIV
 ICDecompress(HIC hic,long dwFlags,LPBITMAPINFOHEADER lpbiFormat,void* lpData,LPBITMAPINFOHEADER  lpbi,void* lpBits) {
 	ICDECOMPRESS	icd;
 	int result;
@@ -148,11 +147,11 @@ ICDecompress(HIC hic,long dwFlags,LPBITMAPINFOHEADER lpbiFormat,void* lpData,LPB
 /***********************************************************************
  *		ICDecompressEx			[MSVFW.26]
  */
-long VFWAPIV 
+long VFWAPIV
 ICDecompressEx(HIC hic,long dwFlags,LPBITMAPINFOHEADER lpbiFormat,void* lpData,LPBITMAPINFOHEADER  lpbi,void* lpBits) {
 	ICDECOMPRESSEX	icd;
 	int result;
-	
+
 	icd.dwFlags	= dwFlags;
 
 	icd.lpbiSrc	= lpbiFormat;
@@ -160,7 +159,7 @@ ICDecompressEx(HIC hic,long dwFlags,LPBITMAPINFOHEADER lpbiFormat,void* lpData,L
 
 	icd.lpbiDst	= lpbi;
 	icd.lpDst	= lpBits;
-	
+
 	icd.xSrc=icd.ySrc=0;
 	icd.dxSrc=lpbiFormat->biWidth;
 	icd.dySrc=abs(lpbiFormat->biHeight);
@@ -168,17 +167,17 @@ ICDecompressEx(HIC hic,long dwFlags,LPBITMAPINFOHEADER lpbiFormat,void* lpData,L
 	icd.xDst=icd.yDst=0;
 	icd.dxDst=lpbi->biWidth;
 	icd.dyDst=abs(lpbi->biHeight);
-	
+
 	//icd.ckid	= 0;
 	result=ICSendMessage(hic,ICM_DECOMPRESSEX,(long)&icd,sizeof(icd));
 	return result;
 }
 
-long VFWAPIV 
+long VFWAPIV
 ICUniversalEx(HIC hic,int command,LPBITMAPINFOHEADER lpbiFormat,LPBITMAPINFOHEADER lpbi) {
 	ICDECOMPRESSEX	icd;
 	int result;
-	
+
 	icd.dwFlags	= 0;
 
 	icd.lpbiSrc	= lpbiFormat;
@@ -186,7 +185,7 @@ ICUniversalEx(HIC hic,int command,LPBITMAPINFOHEADER lpbiFormat,LPBITMAPINFOHEAD
 
 	icd.lpbiDst	= lpbi;
 	icd.lpDst	= 0;
-	
+
 	icd.xSrc=icd.ySrc=0;
 	icd.dxSrc=lpbiFormat->biWidth;
 	icd.dySrc=abs(lpbiFormat->biHeight);
@@ -194,7 +193,7 @@ ICUniversalEx(HIC hic,int command,LPBITMAPINFOHEADER lpbiFormat,LPBITMAPINFOHEAD
 	icd.xDst=icd.yDst=0;
 	icd.dxDst=lpbi->biWidth;
 	icd.dyDst=abs(lpbi->biHeight);
-	
+
 	//icd.ckid	= 0;
 	result=ICSendMessage(hic,command,(long)&icd,sizeof(icd));
 	return result;
@@ -219,13 +218,11 @@ LRESULT VFWAPI ICClose(HIC hic) {
 	/* FIXME: correct? */
 //	CloseDriver(whic->hdrv,0,0);
         DrvClose(whic->hdrv);
-//#warning FIXME: DrvClose
 	free(whic);
 	return 0;
 }
 
-int VFWAPI ICDoSomething()
+int VFWAPI ICDoSomething(void)
 {
   return 0;
 }
-

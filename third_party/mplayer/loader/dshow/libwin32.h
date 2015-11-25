@@ -1,44 +1,37 @@
-#ifndef __LIBWIN32_H
-#define __LIBWIN32_H
-
-#ifndef NOAVIFILE_HEADERS
-#error this header file should not be used without -DNOAVIFILE_HEADERS
-#endif
-
-// this file is only included when NOAVIFILE_HEADERS are defined
-// serves mainly for mplayer
+#ifndef MPLAYER_LIBWIN32_H
+#define MPLAYER_LIBWIN32_H
 
 #define VFW_E_NOT_RUNNING               0x80040226
 
 #include <inttypes.h>
 
 //#define FATAL(a)  // you don't need exception - if you want - just fill more code
-#include "wine/mmreg.h"
-#include "wine/winreg.h"
-#include "wine/vfw.h"
-#include "com.h"
+#include "loader/wine/mmreg.h"
+#include "loader/wine/winreg.h"
+#include "loader/wine/vfw.h"
+#include "loader/com.h"
 
 typedef uint32_t fourcc_t;
 
 /*
-typedef struct _FatalError
+typedef struct FatalError
 {
     FatalError();
-    void PrintAll() {}
+    void PrintAll(void) {}
 }FatalError;
 */
 
-typedef struct _CodecInfo
+typedef struct CodecInfo
 {
     char* dll;
     GUID* guid;
 }CodecInfo;
 
 
-typedef struct _CImage // public  your_libvo_mem
+typedef struct CImage // public  your_libvo_mem
 {
     char* ptr;
-    
+
     /*char* (*Data)();
     {
 	return 0;
@@ -47,7 +40,7 @@ typedef struct _CImage // public  your_libvo_mem
     /*int (*Supported)(fourcc_t csp, int bits);
     {
 	return true;
-	// if you support such surface 
+	// if you support such surface
     }*/
 }CImage;
 
@@ -60,7 +53,7 @@ struct BitmapInfo : public BITMAPINFOHEADER
 };
 #endif
 
-typedef struct _IAudioDecoder
+typedef struct IAudioDecoder
 {
     WAVEFORMATEX in_fmt;
     CodecInfo  record;
@@ -103,7 +96,7 @@ struct IAudioEncoder
 	START,
     };
 
-typedef struct _BitmapInfo
+typedef struct BitmapInfo
 {
     long 	biSize;
     long  	biWidth;
@@ -116,10 +109,10 @@ typedef struct _BitmapInfo
     long  	biYPelsPerMeter;
     long 	biClrUsed;
     long 	biClrImportant;
-    int 	colors[3];    
+    int 	colors[3];
 } BitmapInfo;
 
-typedef struct _IVideoDecoder
+typedef struct IVideoDecoder
 {
     int VBUFSIZE;
     int QMARKHI;
@@ -260,4 +253,4 @@ struct IRtConfig
 #define fccYVU9 mmioFOURCC('Y', 'V', 'U', '9')/* Planar 4:1:0 */
 #define fccIF09 mmioFOURCC('I', 'F', '0', '9')/* Planar 4:1:0 + delta */
 
-#endif
+#endif /* MPLAYER_LIBWIN32_H */

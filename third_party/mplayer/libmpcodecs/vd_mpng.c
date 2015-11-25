@@ -1,7 +1,25 @@
-#include "config.h"
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "config.h"
 #include "mp_msg.h"
 
 #include <png.h>
@@ -12,7 +30,7 @@
 
 #include "vd_internal.h"
 
-static vd_info_t info = {
+static const vd_info_t info = {
 	"PNG Images decoder",
 	"mpng",
 	"A'rpi",
@@ -56,9 +74,9 @@ static int    pngLength;
 
 static void pngReadFN( png_structp pngstr,png_bytep buffer,png_size_t size )
 {
- char * p = pngstr->io_ptr;
+ char * p = png_get_io_ptr(pngstr);
  if(size>pngLength-pngPointer && pngLength>=pngPointer) size=pngLength-pngPointer;
- memcpy( buffer,(char *)&p[pngPointer],size );
+ fast_memcpy( buffer,(char *)&p[pngPointer],size );
  pngPointer+=size;
 }
 
@@ -72,6 +90,7 @@ static mp_image_t* decode(sh_video_t *sh,void* data,int len,int flags){
     png_uint_32     png_width=0,png_height=0;
     int             depth,color;
     png_uint_32     i;
+    png_byte        color_type;
     mp_image_t* mpi;
 
     int cols;
@@ -79,7 +98,7 @@ static mp_image_t* decode(sh_video_t *sh,void* data,int len,int flags){
     unsigned char *p;
 
     if(len<=0) return NULL; // skipped frame
-    
+
  png=png_create_read_struct( PNG_LIBPNG_VER_STRING,NULL,NULL,NULL );
  info=png_create_info_struct( png );
  endinfo=png_create_info_struct( png );
@@ -93,7 +112,9 @@ static mp_image_t* decode(sh_video_t *sh,void* data,int len,int flags){
  png_get_IHDR( png,info,&png_width,&png_height,&depth,&color,NULL,NULL,NULL );
  png_set_bgr( png );
 
- switch( info->color_type ) {
+ color_type=png_get_color_type(png, info);
+
+ switch( color_type ) {
    case PNG_COLOR_TYPE_GRAY_ALPHA:
       mp_msg( MSGT_DECVIDEO,MSGL_INFO,"Sorry gray scaled png with alpha channel not supported at moment.\n" );
       break;
@@ -110,7 +131,7 @@ static mp_image_t* decode(sh_video_t *sh,void* data,int len,int flags){
       out_fmt=IMGFMT_BGR24;
       break;
    default:
-      mp_msg( MSGT_DECVIDEO,MSGL_INFO,"Sorry, unsupported PNG colorspace: %d.\n" ,info->color_type);
+      mp_msg( MSGT_DECVIDEO,MSGL_INFO,"Sorry, unsupported PNG colorspace: %d.\n" ,color_type);
  }
 
  // (re)init libvo if image parameters changed (width/height/colorspace)
@@ -131,20 +152,20 @@ static mp_image_t* decode(sh_video_t *sh,void* data,int len,int flags){
   }
 #endif
 
-    mpi=mpcodecs_get_image(sh, MP_IMGTYPE_TEMP, MP_IMGFLAG_ACCEPT_STRIDE, 
+    mpi=mpcodecs_get_image(sh, MP_IMGTYPE_TEMP, MP_IMGFLAG_ACCEPT_STRIDE,
 	png_width,png_height);
     if(!mpi) return NULL;
 
 // Let's DECODE!
  row_p=malloc( sizeof( png_bytep ) * png_height );
-//png_get_rowbytes( png,info ) 
+//png_get_rowbytes( png,info )
  for ( i=0; i < png_height; i++ ) row_p[i]=mpi->planes[0] + mpi->stride[0]*i;
  png_read_image( png,row_p );
  free( row_p );
 
  if (out_fmt==IMGFMT_BGR8) {
      png_get_PLTE( png,info,&pal,&cols );
-     mpi->planes[1] = (char*)realloc(mpi->planes[1], 4*cols);
+     mpi->planes[1] = realloc(mpi->planes[1], 4*cols);
      p = mpi->planes[1];
      for (i = 0; i < cols; i++) {
 	 *p++ = pal[i].blue;
@@ -153,7 +174,7 @@ static mp_image_t* decode(sh_video_t *sh,void* data,int len,int flags){
 	 *p++ = 0;
      }
  }
- 
+
  png_read_end( png,endinfo );
  png_destroy_read_struct( &png,&info,&endinfo );
 

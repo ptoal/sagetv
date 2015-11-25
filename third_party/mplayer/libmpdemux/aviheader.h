@@ -1,9 +1,30 @@
-#ifndef _aviheader_h
-#define	_aviheader_h
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-//#include "config.h"	/* get correct definition WORDS_BIGENDIAN */
+#ifndef MPLAYER_AVIHEADER_H
+#define MPLAYER_AVIHEADER_H
+
+#include <sys/types.h>
+#include <stdint.h>
+#include "config.h"	/* get correct definition of HAVE_BIGENDIAN */
 #include "libavutil/common.h"
 #include "mpbswap.h"
+#include "demuxer.h"
 
 #ifndef mmioFOURCC
 #define mmioFOURCC( ch0, ch1, ch2, ch3 )				\
@@ -70,10 +91,10 @@ typedef struct
     uint32_t		dwInitialFrames;
     uint32_t		dwStreams;
     uint32_t		dwSuggestedBufferSize;
-    
+
     uint32_t		dwWidth;
     uint32_t		dwHeight;
-    
+
     uint32_t		dwReserved[4];
 } MainAVIHeader;
 
@@ -91,7 +112,7 @@ typedef struct {
     uint16_t		wPriority;
     uint16_t		wLanguage;
     uint32_t		dwInitialFrames;
-    uint32_t		dwScale;	
+    uint32_t		dwScale;
     uint32_t		dwRate;	/* dwRate / dwScale == samples/second */
     uint32_t		dwStart;
     uint32_t		dwLength; /* In units above... */
@@ -108,9 +129,6 @@ typedef struct {
 #define AVIIF_NOTIME	    0x00000100L // this frame doesn't take any time
 #define AVIIF_COMPUSE       0x0FFF0000L // these bits are for compressor use
 
-#define FOURCC_RIFF     mmioFOURCC('R', 'I', 'F', 'F')
-#define FOURCC_LIST     mmioFOURCC('L', 'I', 'S', 'T')
-
 typedef struct
 {
     uint32_t		ckid;
@@ -120,19 +138,19 @@ typedef struct
 } AVIINDEXENTRY;
 
 
-typedef struct _avisuperindex_entry {
+typedef struct avisuperindex_entry {
     uint64_t qwOffset;           // absolute file offset
     uint32_t dwSize;             // size of index chunk at this offset
     uint32_t dwDuration;         // time span in stream ticks
 } avisuperindex_entry;
 
-typedef struct _avistdindex_entry {
+typedef struct avistdindex_entry {
     uint32_t dwOffset;           // qwBaseOffset + this is absolute file offset
     uint32_t dwSize;             // bit 31 is set if this is NOT a keyframe
 } avistdindex_entry;
 
-// Standard index 
-typedef struct __attribute__((packed)) _avistdindex_chunk {
+// Standard index
+typedef struct __attribute__((packed)) avistdindex_chunk {
     char           fcc[4];       // ix##
     uint32_t  dwSize;            // size of this chunk
     uint16_t wLongsPerEntry;     // must be sizeof(aIndex[0])/sizeof(DWORD)
@@ -144,10 +162,10 @@ typedef struct __attribute__((packed)) _avistdindex_chunk {
     uint32_t  dwReserved3;       // must be 0
     avistdindex_entry *aIndex;   // the actual frames
 } avistdindex_chunk;
-    
+
 
 // Base Index Form 'indx'
-typedef struct _avisuperindex_chunk {
+typedef struct avisuperindex_chunk {
     char           fcc[4];
     uint32_t  dwSize;                // size of this chunk
     uint16_t wLongsPerEntry;         // size of each entry in aIndex array (must be 4*4 for us)
@@ -207,7 +225,7 @@ typedef enum {
  * Some macros to swap little endian structures read from an AVI file
  * into machine endian format
  */
-#ifdef WORDS_BIGENDIAN
+#if HAVE_BIGENDIAN
 #define	le2me_MainAVIHeader(h) {					\
     (h)->dwMicroSecPerFrame = le2me_32((h)->dwMicroSecPerFrame);	\
     (h)->dwMaxBytesPerSec = le2me_32((h)->dwMaxBytesPerSec);		\
@@ -324,7 +342,7 @@ typedef enum {
 
 typedef struct {
   // index stuff:
-  void* idx;
+  AVIINDEXENTRY *idx;
   int idx_size;
   off_t idx_pos;
   off_t idx_pos_a;
@@ -347,10 +365,11 @@ typedef struct {
   avisuperindex_chunk *suidx;
   int suidx_size;
   int isodml;
+  int warned_unaligned;
 } avi_priv_t;
-
-#define AVI_PRIV ((avi_priv_t*)(demuxer->priv))
 
 #define AVI_IDX_OFFSET(x) ((((uint64_t)(x)->dwFlags&0xffff0000)<<16)+(x)->dwChunkOffset)
 
-#endif /* _aviheader_h */
+void read_avi_header(demuxer_t *demuxer, int index_mode);
+
+#endif /* MPLAYER_AVIHEADER_H */

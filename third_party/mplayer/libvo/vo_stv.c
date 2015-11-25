@@ -22,14 +22,14 @@
 #include "video_out_internal.h"
 
 #include "fastmemcpy.h"
-#include "sub.h"
+#include "../sub/sub.h"
 #include "aspect.h"
 
 #ifdef HAVE_NEW_GUI
 #include "../Gui/interface.h"
 #endif
 
-static vo_info_t info = {
+const static vo_info_t info = {
     "SageTV Miniclient",
     "stv",
     "Jean-Francois Thibert",
@@ -290,7 +290,7 @@ static int preinit(const char *arg)
     return 0;
 }
 
-static int control(uint32_t request, void *data, ...)
+static int control(uint32_t request, void *data)
 {
     switch (request)
     {

@@ -3,7 +3,7 @@
  *
  *  Copyright (C) 2001 Andrew Stevens <andrew.stevens@philips.com>
  *
- *  This file is part of the lavtools package (mjpeg.sourceforge.net).  
+ *  This file is part of the MJPEG Tools package (mjpeg.sourceforge.net).
  *
  *  This program is free software; you can redistribute it and/or
  *  modify it under the terms of version 2 of the GNU General Public License
@@ -19,8 +19,8 @@
  *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#ifndef __YUV4MPEG_INTERN_H__
-#define __YUV4MPEG_INTERN_H__
+#ifndef MPLAYER_YUV4MPEG_INTERN_H
+#define MPLAYER_YUV4MPEG_INTERN_H
 
 
 #define Y4M_MAGIC "YUV4MPEG2"
@@ -61,7 +61,7 @@
 #define Y4M_SAR_MPEG1_4  { 10000, 7615 }
 #define Y4M_SAR_MPEG1_5  { 10000, 8055 }
 #define Y4M_SAR_MPEG1_6  { 10000, 8437 } /* Anamorphic 16:9 NTSC */
-#define Y4M_SAR_MPEG1_7  { 10000, 8935 } 
+#define Y4M_SAR_MPEG1_7  { 10000, 8935 }
 #define Y4M_SAR_MPEG1_8  { 10000, 9375 } /* PAL/SECAM 4:3 */
 #define Y4M_SAR_MPEG1_9  { 10000, 9815 }
 #define Y4M_SAR_MPEG1_10 { 10000, 10255 }
@@ -75,4 +75,4 @@
 #define Y4M_DAR_MPEG2_3 { 16, 9 }
 #define Y4M_DAR_MPEG2_4 { 221, 100 }
 
-#endif /* __YUV4MPEG_INTERN_H__ */
+#endif /* MPLAYER_YUV4MPEG_INTERN_H */

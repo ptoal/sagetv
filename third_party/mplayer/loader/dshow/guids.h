@@ -1,26 +1,26 @@
-#ifndef DS_GUIDS_H
-#define DS_GUIDS_H
+#ifndef MPLAYER_GUIDS_H
+#define MPLAYER_GUIDS_H
 
-#include "com.h"
-#include "wine/module.h"
-#include "wine/windef.h"
-#include "wine/vfw.h"
+/*
+this will be defined if <ole2.h> already included before this file
+under MinGW
+*/
+
+#ifndef GUID_DEFINED
+#include "loader/com.h"
+#endif
+
+#ifndef VFWAPI
+#include "loader/wine/module.h"
+#include "loader/wine/windef.h"
+#include "loader/wine/vfw.h"
+#endif
+
+#include "mediatype.h"
 
 //#define Debug if(1)
 #define Debug if(0)
 
-typedef struct __attribute__((__packed__)) _MediaType
-{
-    GUID	majortype;		//0x0
-    GUID	subtype;		//0x10
-    int		bFixedSizeSamples;	//0x20
-    int		bTemporalCompression;	//0x24
-    unsigned long lSampleSize;		//0x28
-    GUID	formattype;		//0x2c
-    IUnknown*	pUnk;			//0x3c
-    unsigned long cbFormat;		//0x40
-    char*	pbFormat;		//0x44
-} AM_MEDIA_TYPE;
 
 typedef long long REFERENCE_TIME;
 
@@ -46,6 +46,7 @@ typedef GUID IID;
 extern const GUID IID_IBaseFilter;
 extern const GUID IID_IEnumPins;
 extern const GUID IID_IEnumMediaTypes;
+extern const GUID IID_IFilterGraph;
 extern const GUID IID_IMemInputPin;
 extern const GUID IID_IMemAllocator;
 extern const GUID IID_IMediaSample;
@@ -54,8 +55,11 @@ extern const GUID IID_Iv50Hidden;
 extern const GUID CLSID_DivxDecompressorCF;
 extern const GUID IID_IDivxFilterInterface;
 extern const GUID CLSID_IV50_Decoder;
+extern const GUID CLSID_FilterGraph;
 extern const GUID CLSID_MemoryAllocator;
 extern const GUID MEDIATYPE_Video;
+// avoid a clash with MinGW-W64 libuuid
+#define GUID_NULL MP_GUID_NULL
 extern const GUID GUID_NULL;
 extern const GUID FORMAT_VideoInfo;
 extern const GUID MEDIASUBTYPE_RGB1;
@@ -82,4 +86,4 @@ extern const GUID FORMAT_WaveFormatEx;
 extern const GUID MEDIATYPE_Audio;
 extern const GUID MEDIASUBTYPE_PCM;
 
-#endif /* DS_GUIDS_H */
+#endif /* MPLAYER_GUIDS_H */

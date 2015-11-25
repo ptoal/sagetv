@@ -1,11 +1,10 @@
 /*
  * Modified for use with MPlayer, detailed changelog at
  * http://svn.mplayerhq.hu/mplayer/trunk/
- * $Id: iunk.h,v 1.3 2007-04-10 19:33:30 Narflex Exp $
  */
 
-#ifndef DS_IUNK_H
-#define DS_IUNK_H
+#ifndef MPLAYER_IUNK_H
+#define MPLAYER_IUNK_H
 
 #include "guids.h"
 
@@ -52,4 +51,4 @@ static long STDCALL CLASSNAME ## _Release(IUnknown * This) \
     return 0; 					\
 }
 
-#endif /* DS_IUNK_H */
+#endif /* MPLAYER_IUNK_H */

@@ -1,39 +1,47 @@
-#include "config.h"
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "config.h"
 #include "mp_msg.h"
-
+#include "mpcommon.h"
 #include "mp_image.h"
 #include "vf.h"
 
+#include "sub/sub.h"
 #include "libvo/video_out.h"
-
-#ifdef USE_ASS
-#include "libass/ass.h"
-#include "libass/ass_mp.h"
-extern ass_track_t* ass_track;
-#endif
+#include "sub/eosd.h"
 
 //===========================================================================//
 
-extern int sub_visibility;
-extern float sub_delay;
-
 struct vf_priv_s {
     double pts;
-    vo_functions_t *vo;
-#ifdef USE_ASS
-    ass_renderer_t* ass_priv;
-    int prev_visibility;
-#endif
+    const vo_functions_t *vo;
 };
 #define video_out (vf->priv->vo)
 
-static int query_format(struct vf_instance_s* vf, unsigned int fmt); /* forward declaration */
+static int query_format(struct vf_instance *vf, unsigned int fmt); /* forward declaration */
+static void draw_slice(struct vf_instance *vf, unsigned char** src, int* stride, int w,int h, int x, int y);
 
-static int config(struct vf_instance_s* vf,
+static int config(struct vf_instance *vf,
         int width, int height, int d_width, int d_height,
 	unsigned int flags, unsigned int outfmt){
 
@@ -60,21 +68,17 @@ static int config(struct vf_instance_s* vf,
   }
 
     // save vo's stride capability for the wanted colorspace:
-    vf->default_caps=query_format(vf,outfmt) & VFCAP_ACCEPT_STRIDE;
+    vf->default_caps=query_format(vf,outfmt);
+    vf->draw_slice = (vf->default_caps & VOCAP_NOSLICES) ? NULL : draw_slice;
 
     if(config_video_out(video_out,width,height,d_width,d_height,flags,"MPlayer",outfmt))
 	return 0;
-
-#ifdef USE_ASS
-    if (vf->priv->ass_priv)
-	ass_configure(vf->priv->ass_priv, width, height);
-#endif
 
     ++vo_config_count;
     return 1;
 }
 
-static int control(struct vf_instance_s* vf, int request, void* data)
+static int control(struct vf_instance *vf, int request, void* data)
 {
     switch(request){
     case VFCTRL_GET_DEINTERLACE:
@@ -101,46 +105,29 @@ static int control(struct vf_instance_s* vf, int request, void* data)
     }
     case VFCTRL_SET_EQUALIZER:
     {
-	vf_equalizer_t *eq=data;
 	if(!vo_config_count) return CONTROL_FALSE; // vo not configured?
-	return((video_out->control(VOCTRL_SET_EQUALIZER, eq->item, eq->value) == VO_TRUE) ? CONTROL_TRUE : CONTROL_FALSE);
+	return (video_out->control(VOCTRL_SET_EQUALIZER, data) == VO_TRUE) ? CONTROL_TRUE : CONTROL_FALSE;
     }
     case VFCTRL_GET_EQUALIZER:
     {
-	vf_equalizer_t *eq=data;
 	if(!vo_config_count) return CONTROL_FALSE; // vo not configured?
-	return((video_out->control(VOCTRL_GET_EQUALIZER, eq->item, &eq->value) == VO_TRUE) ? CONTROL_TRUE : CONTROL_FALSE);
+	return (video_out->control(VOCTRL_GET_EQUALIZER, data) == VO_TRUE) ? CONTROL_TRUE : CONTROL_FALSE;
     }
-#ifdef USE_ASS
+#ifdef CONFIG_ASS
     case VFCTRL_INIT_EOSD:
     {
-        vf->priv->ass_priv = ass_renderer_init((ass_library_t*)data);
-        if (!vf->priv->ass_priv) return CONTROL_FALSE;
-        ass_configure_fonts(vf->priv->ass_priv);
-        vf->priv->prev_visibility = 0;
         return CONTROL_TRUE;
     }
     case VFCTRL_DRAW_EOSD:
     {
-        mp_eosd_images_t images = {NULL, 2};
+        struct mp_eosd_image_list images;
+        struct mp_eosd_settings res = {0};
         double pts = vf->priv->pts;
-        if (!vo_config_count || !vf->priv->ass_priv) return CONTROL_FALSE;
-        if (sub_visibility && vf->priv->ass_priv && ass_track && (pts != MP_NOPTS_VALUE)) {
-            mp_eosd_res_t res;
-            memset(&res, 0, sizeof(res));
-            if (video_out->control(VOCTRL_GET_EOSD_RES, &res) == VO_TRUE) {
-                ass_set_frame_size(vf->priv->ass_priv, res.w, res.h);
-                ass_set_margins(vf->priv->ass_priv, res.mt, res.mb, res.ml, res.mr);
-                ass_set_aspect_ratio(vf->priv->ass_priv, (double)res.w / res.h);
-            }
-
-            images.imgs = ass_render_frame(vf->priv->ass_priv, ass_track, (pts+sub_delay) * 1000 + .5, &images.changed);
-            if (!vf->priv->prev_visibility)
-                images.changed = 2;
-            vf->priv->prev_visibility = 1;
-        } else
-            vf->priv->prev_visibility = 0;
-        vf->priv->prev_visibility = sub_visibility;
+        if (!vo_config_count) return CONTROL_FALSE;
+        res.unscaled = !!(vf->default_caps & VFCAP_EOSD_UNSCALED);
+        if (video_out->control(VOCTRL_GET_EOSD_RES, &res) == VO_TRUE)
+            eosd_configure(&res);
+        eosd_render_frame(pts, &images);
         return (video_out->control(VOCTRL_DRAW_EOSD, &images) == VO_TRUE) ? CONTROL_TRUE : CONTROL_FALSE;
     }
 #endif
@@ -154,7 +141,7 @@ static int control(struct vf_instance_s* vf, int request, void* data)
     return CONTROL_UNKNOWN;
 }
 
-static int query_format(struct vf_instance_s* vf, unsigned int fmt){
+static int query_format(struct vf_instance *vf, unsigned int fmt){
     int flags=video_out->control(VOCTRL_QUERY_FORMAT,&fmt);
     // draw_slice() accepts stride, draw_frame() doesn't:
     if(flags)
@@ -163,13 +150,16 @@ static int query_format(struct vf_instance_s* vf, unsigned int fmt){
     return flags;
 }
 
-static void get_image(struct vf_instance_s* vf,
+static void get_image(struct vf_instance *vf,
         mp_image_t *mpi){
-    if(vo_directrendering && vo_config_count)
+    if(!vo_config_count) return;
+    // GET_IMAGE is required for hardware-accelerated formats
+    if(vo_directrendering ||
+       IMGFMT_IS_HWACCEL(mpi->imgfmt))
 	video_out->control(VOCTRL_GET_IMAGE,mpi);
 }
 
-static int put_image(struct vf_instance_s* vf,
+static int put_image(struct vf_instance *vf,
         mp_image_t *mpi, double pts){
   if(!vo_config_count) return 0; // vo not configured?
   // record pts (potentially modified by filters) for main loop
@@ -188,31 +178,25 @@ static int put_image(struct vf_instance_s* vf,
   return 1;
 }
 
-static void start_slice(struct vf_instance_s* vf,
+static void start_slice(struct vf_instance *vf,
 		       mp_image_t *mpi) {
     if(!vo_config_count) return; // vo not configured?
     video_out->control(VOCTRL_START_SLICE,mpi);
 }
 
-static void draw_slice(struct vf_instance_s* vf,
+static void draw_slice(struct vf_instance *vf,
         unsigned char** src, int* stride, int w,int h, int x, int y){
     if(!vo_config_count) return; // vo not configured?
     video_out->draw_slice(src,stride,w,h,x,y);
 }
 
-static void uninit(struct vf_instance_s* vf)
+static void uninit(struct vf_instance *vf)
 {
-    if (vf->priv) {
-#ifdef USE_ASS
-        if (vf->priv->ass_priv)
-            ass_renderer_done(vf->priv->ass_priv);
-#endif
         free(vf->priv);
-    }
 }
 //===========================================================================//
 
-static int open(vf_instance_t *vf, char* args){
+static int vf_open(vf_instance_t *vf, char *args){
     vf->config=config;
     vf->control=control;
     vf->query_format=query_format;
@@ -222,18 +206,17 @@ static int open(vf_instance_t *vf, char* args){
     vf->start_slice=start_slice;
     vf->uninit=uninit;
     vf->priv=calloc(1, sizeof(struct vf_priv_s));
-    vf->priv->vo = (vo_functions_t *)args;
+    vf->priv->vo = (const vo_functions_t *)args;
     if(!video_out) return 0; // no vo ?
-//    if(video_out->preinit(args)) return 0; // preinit failed
     return 1;
 }
 
-vf_info_t vf_info_vo = {
+const vf_info_t vf_info_vo = {
     "libvo wrapper",
     "vo",
     "A'rpi",
     "for internal use",
-    open,
+    vf_open,
     NULL
 };
 

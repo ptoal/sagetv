@@ -2,8 +2,8 @@
  * Drivers definitions
  */
 
-#ifndef __WINE_DRIVER_H
-#define __WINE_DRIVER_H
+#ifndef MPLAYER_DRIVER_H
+#define MPLAYER_DRIVER_H
 
 #include "windef.h"
 
@@ -80,7 +80,7 @@ typedef struct
     CHAR         		szAliasName[128];
 } DRIVERINFOSTRUCT16, *LPDRIVERINFOSTRUCT16;
 
-LRESULT WINAPI DefDriverProc16(DWORD dwDevID, HDRVR16 hDriv, UINT16 wMsg, 
+LRESULT WINAPI DefDriverProc16(DWORD dwDevID, HDRVR16 hDriv, UINT16 wMsg,
                                LPARAM dwParam1, LPARAM dwParam2);
 LRESULT WINAPI DefDriverProc(DWORD dwDriverIdentifier, HDRVR hdrvr,
                                UINT Msg, LPARAM lParam1, LPARAM lParam2);
@@ -101,12 +101,10 @@ HMODULE16 WINAPI GetDriverModuleHandle16(HDRVR16 hDriver);
 HMODULE WINAPI GetDriverModuleHandle(HDRVR hDriver);
 
 DWORD WINAPI GetDriverFlags( HDRVR hDriver );
-#ifdef __WINE__
 /* this call (GetDriverFlags) is not documented, nor the flags returned.
  * here are Wine only definitions
  */
 #define WINE_GDF_EXIST	0x80000000
 #define WINE_GDF_16BIT	0x10000000
-#endif
 
-#endif  /* __WINE_DRIVER_H */
+#endif /* MPLAYER_DRIVER_H */

@@ -1,11 +1,24 @@
-/* 
- * ao_jack.c - libao2 JACK Audio Output Driver for MPlayer
+/*
+ * JACK audio output driver for MPlayer
  *
- * This driver is under the same license as MPlayer.
- * (http://www.mplayerhq.hu)
+ * Copyleft 2001 by Felix BÃ¼nemann (atmosfear@users.sf.net)
+ * and Reimar DÃ¶ffinger (Reimar.Doeffinger@stud.uni-karlsruhe.de)
  *
- * Copyleft 2001 by Felix Bünemann (atmosfear@users.sf.net)
- * and Reimar Döffinger (Reimar.Doeffinger@stud.uni-karlsruhe.de)
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * along with MPlayer; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
 #include <stdio.h>
@@ -23,22 +36,22 @@
 #include "osdep/timer.h"
 #include "subopt-helper.h"
 
-#include "libvo/fastmemcpy.h"
+#include "libavutil/fifo.h"
 
 #include <jack/jack.h>
 
-static ao_info_t info = 
+static const ao_info_t info =
 {
   "JACK audio output",
   "jack",
-  "Reimar Döffinger <Reimar.Doeffinger@stud.uni-karlsruhe.de>",
+  "Reimar DÃ¶ffinger <Reimar.Doeffinger@stud.uni-karlsruhe.de>",
   "based on ao_sdl.c"
 };
 
 LIBAO_EXTERN(jack)
 
 //! maximum number of channels supported, avoids lots of mallocs
-#define MAX_CHANS 6
+#define MAX_CHANS 8
 static jack_port_t *ports[MAX_CHANS];
 static int num_ports; ///< Number of used ports == number of channels
 static jack_client_t *client;
@@ -55,47 +68,10 @@ static volatile float callback_time = 0;
 #define CHUNK_SIZE (16 * 1024)
 //! number of "virtual" chunks the buffer consists of
 #define NUM_CHUNKS 8
-// This type of ring buffer may never fill up completely, at least
-// one byte must always be unused.
-// For performance reasons (alignment etc.) one whole chunk always stays
-// empty, not only one byte.
-#define BUFFSIZE ((NUM_CHUNKS + 1) * CHUNK_SIZE)
+#define BUFFSIZE (NUM_CHUNKS * CHUNK_SIZE)
 
 //! buffer for audio data
-static unsigned char *buffer = NULL;
-
-//! buffer read position, may only be modified by playback thread or while it is stopped
-static volatile int read_pos;
-//! buffer write position, may only be modified by MPlayer's thread
-static volatile int write_pos;
-
-/**
- * \brief get the number of free bytes in the buffer
- * \return number of free bytes in buffer
- * 
- * may only be called by MPlayer's thread
- * return value may change between immediately following two calls,
- * and the real number of free bytes might be larger!
- */
-static int buf_free(void) {
-  int free = read_pos - write_pos - CHUNK_SIZE;
-  if (free < 0) free += BUFFSIZE;
-  return free;
-}
-
-/**
- * \brief get amount of data available in the buffer
- * \return number of bytes available in buffer
- *
- * may only be called by the playback thread
- * return value may change between immediately following two calls,
- * and the real number of buffered bytes might be larger!
- */
-static int buf_used(void) {
-  int used = write_pos - read_pos;
-  if (used < 0) used += BUFFSIZE;
-  return used;
-}
+static AVFifoBuffer *buffer;
 
 /**
  * \brief insert len bytes into buffer
@@ -106,18 +82,32 @@ static int buf_used(void) {
  * If there is not enough room, the buffer is filled up
  */
 static int write_buffer(unsigned char* data, int len) {
-  int first_len = BUFFSIZE - write_pos;
-  int free = buf_free();
+  int free = av_fifo_space(buffer);
   if (len > free) len = free;
-  if (first_len > len) first_len = len;
-  // till end of buffer
-  memcpy (&buffer[write_pos], data, first_len);
-  if (len > first_len) { // we have to wrap around
-    // remaining part from beginning of buffer
-    memcpy (buffer, &data[first_len], len - first_len);
+  return av_fifo_generic_write(buffer, data, len, NULL);
+}
+
+static void silence(float **bufs, int cnt, int num_bufs);
+
+struct deinterleave {
+  float **bufs;
+  int num_bufs;
+  int cur_buf;
+  int pos;
+};
+
+static void deinterleave(void *info, void *src, int len) {
+  struct deinterleave *di = info;
+  float *s = src;
+  int i;
+  len /= sizeof(float);
+  for (i = 0; i < len; i++) {
+    di->bufs[di->cur_buf++][di->pos] = s[i];
+    if (di->cur_buf >= di->num_bufs) {
+      di->cur_buf = 0;
+      di->pos++;
+    }
   }
-  write_pos = (write_pos + len) % BUFFSIZE;
-  return len;
 }
 
 /**
@@ -134,20 +124,13 @@ static int write_buffer(unsigned char* data, int len) {
  * with silence.
  */
 static int read_buffer(float **bufs, int cnt, int num_bufs) {
-  int buffered = buf_used();
-  int i, j;
-  int orig_cnt = cnt;
-  if (cnt * sizeof(float) * num_bufs > buffered)
+  struct deinterleave di = {bufs, num_bufs, 0, 0};
+  int buffered = av_fifo_size(buffer);
+  if (cnt * sizeof(float) * num_bufs > buffered) {
+    silence(bufs, cnt, num_bufs);
     cnt = buffered / sizeof(float) / num_bufs;
-  for (i = 0; i < cnt; i++) {
-    for (j = 0; j < num_bufs; j++) {
-      bufs[j][i] = *((float *)(&buffer[read_pos]));
-      read_pos = (read_pos + sizeof(float)) % BUFFSIZE;
-    }
   }
-  for (i = cnt; i < orig_cnt; i++)
-    for (j = 0; j < num_bufs; j++)
-      bufs[j][i] = 0;
+  av_fifo_generic_read(buffer, &di, cnt * num_bufs * sizeof(float), deinterleave);
   return cnt;
 }
 
@@ -164,10 +147,9 @@ static int control(int cmd, void *arg) {
  * \param num_bufs number of buffers
  */
 static void silence(float **bufs, int cnt, int num_bufs) {
-  int i, j;
-  for (i = 0; i < cnt; i++)
-    for (j = 0; j < num_bufs; j++)
-      bufs[j][i] = 0;
+  int i;
+  for (i = 0; i < num_bufs; i++)
+    memset(bufs[i], 0, cnt * sizeof(float));
 }
 
 /**
@@ -210,24 +192,34 @@ static void print_help (void)
            "Example: mplayer -ao jack:port=myout\n"
            "  connects MPlayer to the jack ports named myout\n"
            "\nOptions:\n"
+           "  connect\n"
+           "    Automatically connect to output ports\n"
            "  port=<port name>\n"
            "    Connects to the given ports instead of the default physical ones\n"
            "  name=<client name>\n"
            "    Client name to pass to JACK\n"
            "  estimate\n"
-           "    Estimates the amount of data in buffers (experimental)\n");
+           "    Estimates the amount of data in buffers (experimental)\n"
+           "  autostart\n"
+           "    Automatically start JACK server if necessary\n"
+         );
 }
 
 static int init(int rate, int channels, int format, int flags) {
   const char **matching_ports = NULL;
   char *port_name = NULL;
   char *client_name = NULL;
-  opt_t subopts[] = {
+  int autostart = 0;
+  int connect = 1;
+  const opt_t subopts[] = {
     {"port", OPT_ARG_MSTRZ, &port_name, NULL},
     {"name", OPT_ARG_MSTRZ, &client_name, NULL},
     {"estimate", OPT_ARG_BOOL, &estimate, NULL},
+    {"autostart", OPT_ARG_BOOL, &autostart, NULL},
+    {"connect", OPT_ARG_BOOL, &connect, NULL},
     {NULL}
   };
+  jack_options_t open_options = JackUseExactName;
   int port_flags = JackPortIsInput;
   int i;
   estimate = 1;
@@ -241,29 +233,34 @@ static int init(int rate, int channels, int format, int flags) {
   }
   if (!client_name) {
     client_name = malloc(40);
-  sprintf(client_name, "MPlayer [%d]", getpid());
+    sprintf(client_name, "MPlayer [%d]", getpid());
   }
-  client = jack_client_new(client_name);
+  if (!autostart)
+    open_options |= JackNoStartServer;
+  client = jack_client_open(client_name, open_options, NULL);
   if (!client) {
     mp_msg(MSGT_AO, MSGL_FATAL, "[JACK] cannot open server\n");
     goto err_out;
   }
-  reset();
+  buffer = av_fifo_alloc(BUFFSIZE);
   jack_set_process_callback(client, outputaudio, 0);
 
-  // list matching ports
-  if (!port_name)
-    port_flags |= JackPortIsPhysical;
-  matching_ports = jack_get_ports(client, port_name, NULL, port_flags);
-  for (num_ports = 0; matching_ports && matching_ports[num_ports]; num_ports++) ;
-  if (!num_ports) {
-    mp_msg(MSGT_AO, MSGL_FATAL, "[JACK] no physical ports available\n");
-    goto err_out;
+  // list matching ports if connections should be made
+  if (connect) {
+    if (!port_name)
+      port_flags |= JackPortIsPhysical;
+    matching_ports = jack_get_ports(client, port_name, NULL, port_flags);
+    i = 0;
+    while (matching_ports && matching_ports[i]) i++;
+    if (!i) {
+      mp_msg(MSGT_AO, MSGL_FATAL, "[JACK] no physical ports available\n");
+      goto err_out;
+    }
+    if (channels > i) channels = i;
   }
-  if (channels > num_ports) channels = num_ports;
   num_ports = channels;
 
-  // create out output ports
+  // create out_* output ports
   for (i = 0; i < num_ports; i++) {
     char pname[30];
     snprintf(pname, 30, "out_%d", i);
@@ -277,7 +274,7 @@ static int init(int rate, int channels, int format, int flags) {
     mp_msg(MSGT_AO, MSGL_FATAL, "[JACK] activate failed\n");
     goto err_out;
   }
-  for (i = 0; i < num_ports; i++) {
+  for (i = 0; i < num_ports && matching_ports && matching_ports[i]; i++) {
     if (jack_connect(client, jack_port_name(ports[i]), matching_ports[i])) {
       mp_msg(MSGT_AO, MSGL_FATAL, "[JACK] connecting failed\n");
       goto err_out;
@@ -287,7 +284,6 @@ static int init(int rate, int channels, int format, int flags) {
   jack_latency = (float)(jack_port_get_total_latency(client, ports[0]) +
                          jack_get_buffer_size(client)) / (float)rate;
   callback_interval = 0;
-  buffer = (unsigned char *) malloc(BUFFSIZE);
 
   ao_data.channels = channels;
   ao_data.samplerate = rate;
@@ -306,7 +302,7 @@ err_out:
   free(client_name);
   if (client)
     jack_client_close(client);
-  free(buffer);
+  av_fifo_free(buffer);
   buffer = NULL;
   return 0;
 }
@@ -319,7 +315,7 @@ static void uninit(int immed) {
   reset();
   usec_sleep(100 * 1000);
   jack_client_close(client);
-  free(buffer);
+  av_fifo_free(buffer);
   buffer = NULL;
 }
 
@@ -328,8 +324,7 @@ static void uninit(int immed) {
  */
 static void reset(void) {
   paused = 1;
-  read_pos = 0;
-  write_pos = 0;
+  av_fifo_reset(buffer);
   paused = 0;
 }
 
@@ -348,7 +343,7 @@ static void audio_resume(void) {
 }
 
 static int get_space(void) {
-  return buf_free();
+  return av_fifo_space(buffer);
 }
 
 /**
@@ -356,13 +351,13 @@ static int get_space(void) {
  */
 static int play(void *data, int len, int flags) {
   if (!(flags & AOPLAY_FINAL_CHUNK))
-  len -= len % ao_data.outburst;
+    len -= len % ao_data.outburst;
   underrun = 0;
   return write_buffer(data, len);
 }
 
 static float get_delay(void) {
-  int buffered = BUFFSIZE - CHUNK_SIZE - buf_free(); // could be less
+  int buffered = av_fifo_size(buffer); // could be less
   float in_jack = jack_latency;
   if (estimate && callback_interval > 0) {
     float elapsed = (float)GetTimer() / 1000000.0 - callback_time;
@@ -371,4 +366,3 @@ static float get_delay(void) {
   }
   return (float)buffered / (float)ao_data.bps + in_jack;
 }
-

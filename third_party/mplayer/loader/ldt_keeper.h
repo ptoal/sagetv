@@ -1,10 +1,7 @@
-#ifndef LDT_KEEPER_H
-#define LDT_KEEPER_H
+#ifndef MPLAYER_LDT_KEEPER_H
+#define MPLAYER_LDT_KEEPER_H
 
-#ifdef __cplusplus
-extern "C"
-{
-#endif
+extern void *fs_seg;
 
 typedef struct {
   void* fs_seg;
@@ -14,8 +11,5 @@ typedef struct {
 void Setup_FS_Segment(void);
 ldt_fs_t* Setup_LDT_Keeper(void);
 void Restore_LDT_Keeper(ldt_fs_t* ldt_fs);
-#ifdef __cplusplus
-}
-#endif
 
-#endif /* LDT_KEEPER_H */
+#endif /* MPLAYER_LDT_KEEPER_H */

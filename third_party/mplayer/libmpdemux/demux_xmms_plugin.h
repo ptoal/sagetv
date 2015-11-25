@@ -21,8 +21,8 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-#ifndef PLUGIN_H
-#define PLUGIN_H
+#ifndef MPLAYER_DEMUX_XMMS_PLUGIN_H
+#define MPLAYER_DEMUX_XMMS_PLUGIN_H
 
 typedef enum
 {
@@ -40,10 +40,10 @@ typedef struct
 	void (*configure) (void);	/* Show the configuration dialog */
 	void (*get_volume) (int *l, int *r);
 	void (*set_volume) (int l, int r);	/* Set the volume */
-	int (*open_audio) (AFormat fmt, int rate, int nch);	/* Open the device, if the device can't handle the given 
+	int (*open_audio) (AFormat fmt, int rate, int nch);	/* Open the device, if the device can't handle the given
 								   parameters the plugin is responsible for downmixing
 								   the data to the right format before outputting it */
-	void (*write_audio) (void *ptr, int length);	/* The input plugin calls this to write data to the output 
+	void (*write_audio) (void *ptr, int length);	/* The input plugin calls this to write data to the output
 							   buffer */
 	void (*close_audio) (void);	/* No comment... */
 	void (*flush) (int time);	/* Flush the buffer and set the plugins internal timers to time */
@@ -100,7 +100,7 @@ typedef struct
 	void (*set_volume) (int l, int r);	/*  you want the output plugin to handle it */
 	void (*cleanup) (void);			/* Called when xmms exit */
 	InputVisType (*get_vis_type) (void); /* OBSOLETE, DO NOT USE! */
-	void (*add_vis_pcm) (int time, AFormat fmt, int nch, int length, void *ptr); /* Send data to the visualization plugins 
+	void (*add_vis_pcm) (int time, AFormat fmt, int nch, int length, void *ptr); /* Send data to the visualization plugins
 											Preferably 512 samples/block */
 	void (*set_info) (char *title, int length, int rate, int freq, int nch);	/* Fill in the stuff that is shown in the player window
 											   set length to -1 if it's unknown. Filled in by xmms */
@@ -133,7 +133,7 @@ typedef struct
 }
 GeneralPlugin;
 
-typedef struct _VisPlugin
+typedef struct VisPlugin
 {
 	void *handle; 	/* Filled in by xmms */
 	char *filename; /* Filled in by xmms */
@@ -145,11 +145,11 @@ typedef struct _VisPlugin
 	void (*cleanup)(void); /* Called when the plugin is disabled */
 	void (*about)(void); /* Show the about box */
 	void (*configure)(void); /* Show the configure box */
-	void (*disable_plugin)(struct _VisPlugin *); /* Call this with a pointer to your plugin to disable the plugin */
+	void (*disable_plugin)(struct VisPlugin *); /* Call this with a pointer to your plugin to disable the plugin */
 	void (*playback_start)(void); /* Called when playback starts */
 	void (*playback_stop)(void); /* Called when playback stops */
 	void (*render_pcm)(short pcm_data[2][512]); /* Render the PCM data, don't do anything time consuming in here */
 	void (*render_freq)(short freq_data[2][256]); /* Render the freq data, don't do anything time consuming in here */
 } VisPlugin;
 
-#endif
+#endif /* MPLAYER_DEMUX_XMMS_PLUGIN_H */

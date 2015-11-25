@@ -6,7 +6,7 @@
  *
  *  Copyright (C) 2001 Matthew J. Marjanovic <maddog@mir.com>
  *
- *  This file is ripped from the lavtools package (mjpeg.sourceforge.net)
+ *  This file is part of the MJPEG Tools package (mjpeg.sourceforge.net).
  *  Ported to mplayer by Rik Snel <rsnel@cube.dyndns.org>
  *
  *  This program is free software; you can redistribute it and/or
@@ -24,8 +24,8 @@
  *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#ifndef __YUV4MPEG_H__
-#define __YUV4MPEG_H__
+#ifndef MPLAYER_YUV4MPEG_H
+#define MPLAYER_YUV4MPEG_H
 
 #include <stdlib.h>
 //#include "mp_msg.h"
@@ -55,7 +55,7 @@
  *  'ratio' datatype, for rational numbers
  *                                     (see 'ratio' functions down below)
  ************************************************************************/
-typedef struct _y4m_ratio {
+typedef struct y4m_ratio {
   int n;  /* numerator   */
   int d;  /* denominator */
 } y4m_ratio_t;
@@ -77,7 +77,7 @@ extern const y4m_ratio_t y4m_fps_60;         /* 60fps                      */
 /************************************************************************
  *  useful standard sample (pixel) aspect ratios
  ************************************************************************/
-extern const y4m_ratio_t y4m_sar_UNKNOWN; 
+extern const y4m_ratio_t y4m_sar_UNKNOWN;
 extern const y4m_ratio_t y4m_sar_SQUARE;        /* square pixels */
 extern const y4m_ratio_t y4m_sar_NTSC_CCIR601;  /* 525-line (NTSC) Rec.601 */
 extern const y4m_ratio_t y4m_sar_NTSC_16_9;     /* 16:9 NTSC/Rec.601       */
@@ -99,7 +99,7 @@ extern const y4m_ratio_t y4m_sar_PAL_SVCD_16_9; /* PAL SVCD 16:9           */
  ************************************************************************/
 #define Y4M_MAX_XTAGS 32        /* maximum number of xtags in list       */
 #define Y4M_MAX_XTAG_SIZE 32    /* max length of an xtag (including 'X') */
-typedef struct _y4m_xtag_list {
+typedef struct y4m_xtag_list {
   int count;
   char *tags[Y4M_MAX_XTAGS];
 } y4m_xtag_list_t;
@@ -114,7 +114,7 @@ typedef struct _y4m_xtag_list {
  *     Use the y4m_si_*() functions (see below).
  *     You must initialize/finalize this structure before/after use.
  ************************************************************************/
-typedef struct _y4m_stream_info {
+typedef struct y4m_stream_info {
   /* values from header */
   int width;
   int height;
@@ -141,7 +141,7 @@ typedef struct _y4m_stream_info {
  *     Use the y4m_fi_*() functions (see below).
  *     You must initialize/finalize this structure before/after use.
  ************************************************************************/
-typedef struct _y4m_frame_info {
+typedef struct y4m_frame_info {
   /* mystical X tags */
   y4m_xtag_list_t x_tags;
 } y4m_frame_info_t;
@@ -202,12 +202,12 @@ const char *y4m_xtag_get(const y4m_xtag_list_t *xtags, int n);
               Y4M_ERR_XXTAGS - list is already full */
 int y4m_xtag_add(y4m_xtag_list_t *xtags, const char *tag);
 
-/* remove a tag from an xtag_list 
+/* remove a tag from an xtag_list
     returns:         Y4M_OK - success
               Y4M_ERR_RANGE - n is out of range */
 int y4m_xtag_remove(y4m_xtag_list_t *xtags, int n);
 
-/* remove all tags from an xtag_list 
+/* remove all tags from an xtag_list
     returns:   Y4M_OK - success       */
 int y4m_xtag_clearlist(y4m_xtag_list_t *xtags);
 
@@ -294,7 +294,7 @@ ssize_t y4m_write(int fd, char *buf, size_t len);
 
 /************************************************************************
  *  stream header processing functions
- *  
+ *
  *  o return values:
  *                   Y4M_OK - success
  *                Y4M_ERR_* - error (see y4m_strerr() for descriptions)
@@ -315,7 +315,7 @@ int y4m_write_stream_header(int fd,  y4m_stream_info_t *i);
 
 /************************************************************************
  *  frame processing functions
- *  
+ *
  *  o return values:
  *                   Y4M_OK - success
  *                Y4M_ERR_* - error (see y4m_strerr() for descriptions)
@@ -332,13 +332,13 @@ int y4m_write_frame_header(int fd, y4m_frame_info_t *i);
 
 /* read a complete frame (header + data)
    o yuv[3] points to three buffers, one each for Y, U, V planes */
-int y4m_read_frame(stream_t *s, y4m_stream_info_t *si, 
+int y4m_read_frame(stream_t *s, y4m_stream_info_t *si,
 		   y4m_frame_info_t *fi, unsigned char *yuv[3]);
 
 #if 0
 /* write a complete frame (header + data)
    o yuv[3] points to three buffers, one each for Y, U, V planes */
-int y4m_write_frame(int fd, y4m_stream_info_t *si, 
+int y4m_write_frame(int fd, y4m_stream_info_t *si,
 		    y4m_frame_info_t *fi, unsigned char *yuv[3]);
 #endif
 
@@ -349,7 +349,7 @@ int y4m_write_frame(int fd, y4m_stream_info_t *si,
    o lower_field[3] same as yuv[3] above, but for lower field
 */
 int y4m_read_fields(int fd, y4m_stream_info_t *si, y4m_frame_info_t *fi,
-		    unsigned char *upper_field[3], 
+		    unsigned char *upper_field[3],
 		    unsigned char *lower_field[3]);
 
 /* write a complete frame (header + data), but interleave fields
@@ -358,7 +358,7 @@ int y4m_read_fields(int fd, y4m_stream_info_t *si, y4m_frame_info_t *fi,
    o lower_field[3] same as yuv[3] above, but for lower field
 */
 int y4m_write_fields(int fd, y4m_stream_info_t *si, y4m_frame_info_t *fi,
-		     unsigned char *upper_field[3], 
+		     unsigned char *upper_field[3],
 		     unsigned char *lower_field[3]);
 
 #endif
@@ -449,6 +449,4 @@ int y4m_allow_unknown_tags(int yn);
  ************************************************************************
  ************************************************************************/
 
-#endif /* __YUV4MPEG_H__ */
-
-
+#endif /* MPLAYER_YUV4MPEG_H */

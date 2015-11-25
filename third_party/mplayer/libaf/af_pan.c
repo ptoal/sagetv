@@ -1,15 +1,22 @@
-#include "config.h"
-/*=============================================================================
-//	
-//  This software has been released under the terms of the GNU General Public
-//  license. See http://www.gnu.org/copyleft/gpl.html for details.
-//
-//  Copyright 2002 Anders Johansson ajh@atri.curtin.edu.au
-//
-//=============================================================================
-*/
-
-/* */
+/*
+ * Copyright (C) 2002 Anders Johansson ajh@atri.curtin.edu.au
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,18 +25,21 @@
 #include <math.h>
 #include <limits.h>
 
+#include "libavutil/common.h"
+#include "mp_msg.h"
 #include "af.h"
 
 // Data for specific instances of this filter
 typedef struct af_pan_s
 {
+  int nch; // Number of output channels; zero means same as input
   float level[AF_NCH][AF_NCH];	// Gain level for each channel
 }af_pan_t;
 
 // Initialization and runtime control
 static int control(struct af_instance_s* af, int cmd, void* arg)
 {
-  af_pan_t* s = af->setup; 
+  af_pan_t* s = af->setup;
 
   switch(cmd){
   case AF_CONTROL_REINIT:
@@ -39,17 +49,16 @@ static int control(struct af_instance_s* af, int cmd, void* arg)
     af->data->rate   = ((af_data_t*)arg)->rate;
     af->data->format = AF_FORMAT_FLOAT_NE;
     af->data->bps    = 4;
-    af->mul.n        = af->data->nch;
-    af->mul.d	     = ((af_data_t*)arg)->nch;
-    af_frac_cancel(&af->mul);
+    af->data->nch    = s->nch ? s->nch: ((af_data_t*)arg)->nch;
+    af->mul          = (double)af->data->nch / ((af_data_t*)arg)->nch;
 
-    if((af->data->format != ((af_data_t*)arg)->format) || 
+    if((af->data->format != ((af_data_t*)arg)->format) ||
        (af->data->bps != ((af_data_t*)arg)->bps)){
       ((af_data_t*)arg)->format = af->data->format;
       ((af_data_t*)arg)->bps = af->data->bps;
       return AF_FALSE;
     }
-    return control(af,AF_CONTROL_PAN_NOUT | AF_CONTROL_SET, &af->data->nch);
+    return AF_OK;
   case AF_CONTROL_COMMAND_LINE:{
     int   nch = 0;
     int   n = 0;
@@ -65,12 +74,12 @@ static int control(struct af_instance_s* af, int cmd, void* arg)
     j = 0; k = 0;
     while((*cp == ':') && (k < AF_NCH)){
       sscanf(cp, ":%f%n" , &s->level[j][k], &n);
-      af_msg(AF_MSG_VERBOSE,"[pan] Pan level from channel %i to" 
+      mp_msg(MSGT_AFILTER, MSGL_V, "[pan] Pan level from channel %i to"
 	     " channel %i = %f\n",k,j,s->level[j][k]);
       cp =&cp[n];
       j++;
       if(j>=nch){
-	j = 0; 
+	j = 0;
 	k++;
       }
     }
@@ -101,27 +110,43 @@ static int control(struct af_instance_s* af, int cmd, void* arg)
 
     // Sanity check
     if(((int*)arg)[0] <= 0 || ((int*)arg)[0] > AF_NCH){
-      af_msg(AF_MSG_ERROR,"[pan] The number of output channels must be" 
+      mp_msg(MSGT_AFILTER, MSGL_ERR, "[pan] The number of output channels must be"
 	     " between 1 and %i. Current value is %i\n",AF_NCH,((int*)arg)[0]);
       return AF_ERROR;
     }
-    af->data->nch=((int*)arg)[0];
+    s->nch=((int*)arg)[0];
     return AF_OK;
   case AF_CONTROL_PAN_NOUT | AF_CONTROL_GET:
     *(int*)arg = af->data->nch;
+    return AF_OK;
+  case AF_CONTROL_PAN_BALANCE | AF_CONTROL_SET:{
+    float val = *(float*)arg;
+    if (s->nch)
+      return AF_ERROR;
+    if (af->data->nch >= 2) {
+      s->level[0][0] = FFMIN(1.f, 1.f - val);
+      s->level[0][1] = FFMAX(0.f, val);
+      s->level[1][0] = FFMAX(0.f, -val);
+      s->level[1][1] = FFMIN(1.f, 1.f + val);
+    }
+    return AF_OK;
+  }
+  case AF_CONTROL_PAN_BALANCE | AF_CONTROL_GET:
+    if (s->nch)
+      return AF_ERROR;
+    *(float*)arg = s->level[0][1] - s->level[1][0];
     return AF_OK;
   }
   return AF_UNKNOWN;
 }
 
-// Deallocate memory 
+// Deallocate memory
 static void uninit(struct af_instance_s* af)
 {
   if(af->data)
     free(af->data->audio);
   free(af->data);
-  if(af->setup)
-    free(af->setup);
+  free(af->setup);
 }
 
 // Filter data through filter
@@ -141,7 +166,7 @@ static af_data_t* play(struct af_instance_s* af, af_data_t* data)
     return NULL;
 
   out = l->audio;
-  // Execute panning 
+  // Execute panning
   // FIXME: Too slow
   while(in < end){
     for(j=0;j<ncho;j++){
@@ -157,7 +182,7 @@ static af_data_t* play(struct af_instance_s* af, af_data_t* data)
 
   // Set output data
   c->audio = l->audio;
-  c->len   = (c->len*af->mul.n)/af->mul.d;
+  c->len   = c->len / c->nch * l->nch;
   c->nch   = l->nch;
 
   return c;
@@ -168,13 +193,11 @@ static int af_open(af_instance_t* af){
   af->control=control;
   af->uninit=uninit;
   af->play=play;
-  af->mul.n=1;
-  af->mul.d=1;
+  af->mul=1;
   af->data=calloc(1,sizeof(af_data_t));
   af->setup=calloc(1,sizeof(af_pan_t));
   if(af->data == NULL || af->setup == NULL)
     return AF_ERROR;
-  // Set initial pan to pass-through.
   return AF_OK;
 }
 
@@ -184,6 +207,6 @@ af_info_t af_info_pan = {
     "pan",
     "Anders",
     "",
-    AF_FLAGS_NOT_REENTRANT,
+    AF_FLAGS_REENTRANT,
     af_open
 };

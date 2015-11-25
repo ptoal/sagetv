@@ -1,12 +1,8 @@
-#ifndef DS_FILTER_H
-#define DS_FILTER_H
+#ifndef MPLAYER_DS_FILTER_H
+#define MPLAYER_DS_FILTER_H
 
 #include "inputpin.h"
 #include "outputpin.h"
-
-#if defined(__cplusplus)
-extern "C" {
-#endif
 
 typedef struct {
     char* frame_pointer;
@@ -18,8 +14,8 @@ typedef struct {
    and then set up m_pAll.
  **/
 
-typedef struct _DS_Filter DS_Filter;
-struct _DS_Filter
+typedef struct DS_Filter DS_Filter;
+struct DS_Filter
 {
     int m_iHandle;
     IBaseFilter* m_pFilter;
@@ -43,8 +39,4 @@ DS_Filter* DS_FilterCreate(const char* dllname, const GUID* id,
 			   AM_MEDIA_TYPE* in_fmt, AM_MEDIA_TYPE* out_fmt,SampleProcUserData* pUserData);
 void DS_Filter_Destroy(DS_Filter* This);
 
-#if defined(__cplusplus)
-}
-#endif
-
-#endif /* DS_FILTER_H */
+#endif /* MPLAYER_DS_FILTER_H */

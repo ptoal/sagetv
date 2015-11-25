@@ -1,27 +1,31 @@
-#ifndef __ASF_H
-#define __ASF_H
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-//#include "config.h"	/* for WORDS_BIGENDIAN */
+#ifndef MPLAYER_ASF_H
+#define MPLAYER_ASF_H
+
+//#include "config.h"	/* for HAVE_BIGENDIAN */
 #include <inttypes.h>
 #include "libavutil/common.h"
 #include "mpbswap.h"
 
 ///////////////////////
-// MS GUID definition
-///////////////////////
-#ifndef GUID_DEFINED
-#define GUID_DEFINED
-// Size of GUID is 16 bytes!
-typedef struct __attribute__((packed)) {
-	uint32_t	Data1;		// 4 bytes
-	uint16_t	Data2;		// 2 bytes
-	uint16_t	Data3;		// 2 bytes
-	uint8_t		Data4[8];	// 8 bytes
-} GUID_t;
-#endif
-
-///////////////////////
-// ASF Object Header 
+// ASF Object Header
 ///////////////////////
 typedef struct __attribute__((packed)) {
   uint8_t guid[16];
@@ -29,7 +33,7 @@ typedef struct __attribute__((packed)) {
 } ASF_obj_header_t;
 
 ////////////////
-// ASF Header 
+// ASF Header
 ////////////////
 typedef struct __attribute__((packed)) {
   ASF_obj_header_t objh;
@@ -39,7 +43,7 @@ typedef struct __attribute__((packed)) {
 } ASF_header_t;
 
 /////////////////////
-// ASF File Header 
+// ASF File Header
 /////////////////////
 typedef struct __attribute__((packed)) {
   uint8_t stream_id[16]; // stream GUID
@@ -48,7 +52,7 @@ typedef struct __attribute__((packed)) {
   uint64_t num_packets;    //Number of packets UINT64 8
   uint64_t play_duration; //Timestamp of the end position UINT64 8
   uint64_t send_duration;  //Duration of the playback UINT64 8
-  uint64_t preroll; //Time to bufferize before playing UINT32 4
+  uint64_t preroll; //Time to bufferize before playing UINT64 8
   uint32_t flags; //Unknown, maybe flags ( usually contains 2 ) UINT32 4
   uint32_t min_packet_size; //Min size of the packet, in bytes UINT32 4
   uint32_t max_packet_size; //Max size of the packet  UINT32 4
@@ -80,7 +84,7 @@ typedef struct  __attribute__((packed)) {
 } ASF_content_description_t;
 
 ////////////////////////
-// ASF Segment Header 
+// ASF Segment Header
 ////////////////////////
 typedef struct __attribute__((packed)) {
   uint8_t streamno;
@@ -101,7 +105,7 @@ typedef struct __attribute__((packed)) {
 } ASF_stream_chunck_t;
 
 // Definition of the stream type
-#ifdef WORDS_BIGENDIAN
+#if HAVE_BIGENDIAN
 	#define ASF_STREAMING_CLEAR	0x2443		// $C
 	#define ASF_STREAMING_DATA	0x2444		// $D
 	#define ASF_STREAMING_END_TRANS	0x2445		// $E
@@ -136,7 +140,7 @@ typedef struct {
  * Some macros to swap little endian structures read from an ASF file
  * into machine endian format
  */
-#ifdef WORDS_BIGENDIAN
+#if HAVE_BIGENDIAN
 #define	le2me_ASF_obj_header_t(h) {					\
     (h)->size = le2me_64((h)->size);					\
 }
@@ -218,12 +222,30 @@ struct asf_priv {
     int scrambling_b;
     unsigned packetsize;
     double   packetrate;
-    unsigned movielength;
-    double avg_vid_frame_time;
+    double movielength;
     int asf_is_dvr_ms;
     uint32_t asf_frame_state;
     int asf_frame_start_found;
     double dvr_last_vid_pts;
+    uint64_t vid_frame_ct;
+    uint64_t play_duration;
+    uint64_t num_packets;
+    int new_vid_frame_seg;
+    int *vid_repdata_sizes;
+    int *aud_repdata_sizes;
+    int vid_repdata_count;
+    int aud_repdata_count;
+    uint64_t avg_vid_frame_time;
+    uint64_t last_key_payload_time;
+    uint64_t last_aud_pts;
+    uint64_t last_aud_diff;
+    int found_first_key_frame;
+    uint32_t last_vid_seq;
+    int vid_ext_timing_index;
+    int aud_ext_timing_index;
+    int vid_ext_frame_index;
+    int know_frame_time;
+    unsigned bps;
 };
 
-#endif
+#endif /* MPLAYER_ASF_H */

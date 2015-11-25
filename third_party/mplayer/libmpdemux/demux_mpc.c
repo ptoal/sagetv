@@ -1,8 +1,25 @@
-/**
- * Demuxer for Musepack v7 bitstream
- * by Reimar Doeffinger <Reimar.Doeffinger@stud.uni-karlsruhe.de>
+/*
+ * demuxer for Musepack v7 bitstream
+ * copyright (c) 2005 Reimar Doeffinger <Reimar.Doeffinger@stud.uni-karlsruhe.de>
+ *
  * This code may be be relicensed under the terms of the GNU LGPL when it
  * becomes part of the FFmpeg project (ffmpeg.org)
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include "config.h"
@@ -76,7 +93,7 @@ static demuxer_t *demux_mpc_open(demuxer_t* demuxer) {
   sh_audio_t* sh_audio;
   da_priv_t* priv = demuxer->priv;
 
-  sh_audio = new_sh_audio(demuxer,0);
+  sh_audio = new_sh_audio(demuxer,0, NULL);
 
   {
     char *wf = calloc(1, sizeof(WAVEFORMATEX) + HDR_SIZE);
@@ -113,7 +130,6 @@ static demuxer_t *demux_mpc_open(demuxer_t* demuxer) {
   demuxer->priv = priv;
   demuxer->audio->id = 0;
   demuxer->audio->sh = sh_audio;
-  sh_audio->ds = demuxer->audio;
   sh_audio->samplerate = sh_audio->wf->nSamplesPerSec;
   sh_audio->i_bps = sh_audio->wf->nAvgBytesPerSec;
   sh_audio->audio.dwSampleSize = 0;
@@ -156,9 +172,9 @@ static void demux_mpc_seek(demuxer_t *demuxer,float rel_seek_secs,float audio_de
   da_priv_t* priv = demuxer->priv;
   stream_t* s = demuxer->stream;
   float target = rel_seek_secs;
-  if (flags & 2)
+  if (flags & SEEK_FACTOR)
     target *= priv->length;
-  if (!(flags & 1))
+  if (!(flags & SEEK_ABSOLUTE))
     target += priv->last_pts;
   if (target < priv->last_pts) {
     stream_seek(s, demuxer->movi_start);
@@ -182,8 +198,6 @@ static void demux_mpc_seek(demuxer_t *demuxer,float rel_seek_secs,float audio_de
 static void demux_close_mpc(demuxer_t* demuxer) {
   da_priv_t* priv = demuxer->priv;
 
-  if(!priv)
-    return;
   free(priv);
 }
 
@@ -203,7 +217,7 @@ static int demux_mpc_control(demuxer_t *demuxer,int cmd, void *arg){
 }
 
 
-demuxer_desc_t demuxer_desc_mpc = {
+const demuxer_desc_t demuxer_desc_mpc = {
   "Musepack demuxer",
   "mpc",
   "MPC",

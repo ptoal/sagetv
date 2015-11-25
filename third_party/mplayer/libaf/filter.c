@@ -1,16 +1,25 @@
-/*=============================================================================
-//	
-//  This software has been released under the terms of the GNU General Public
-//  license. See http://www.gnu.org/copyleft/gpl.html for details.
-//
-//  Copyright 2001 Anders Johansson ajh@atri.curtin.edu.au
-//
-//=============================================================================
-*/
+/*
+ * design and implementation of different types of digital filters
+ *
+ * Copyright (C) 2001 Anders Johansson ajh@atri.curtin.edu.au
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-/* Design and implementation of different types of digital filters
-
-*/
 #include <string.h>
 #include <math.h>
 #include "dsp.h"
@@ -23,12 +32,13 @@
 
    n number of filter taps, where mod(n,4)==0
    w filter taps
-   x input signal must be a circular buffer which is indexed backwards 
+   x input signal must be a circular buffer which is indexed backwards
 */
-inline _ftype_t af_filter_fir(register unsigned int n, _ftype_t* w, _ftype_t* x)
+inline FLOAT_TYPE af_filter_fir(register unsigned int n, const FLOAT_TYPE* w,
+                                const FLOAT_TYPE* x)
 {
-  register _ftype_t y; // Output
-  y = 0.0; 
+  register FLOAT_TYPE y; // Output
+  y = 0.0;
   do{
     n--;
     y+=w[n]*x[n];
@@ -42,14 +52,16 @@ inline _ftype_t af_filter_fir(register unsigned int n, _ftype_t* w, _ftype_t* x)
    d  number of filters
    xi current index in xq
    w  filter taps k by n big
-   x  input signal must be a circular buffers which are indexed backwards 
+   x  input signal must be a circular buffers which are indexed backwards
    y  output buffer
    s  output buffer stride
 */
-inline _ftype_t* af_filter_pfir(unsigned int n, unsigned int d, unsigned int xi, _ftype_t** w, _ftype_t** x, _ftype_t* y, unsigned int s)
+FLOAT_TYPE* af_filter_pfir(unsigned int n, unsigned int d, unsigned int xi,
+                           const FLOAT_TYPE** w, const FLOAT_TYPE** x, FLOAT_TYPE* y,
+                           unsigned int s)
 {
-  register _ftype_t* xt = *x + xi;
-  register _ftype_t* wt = *w;
+  register const FLOAT_TYPE* xt = *x + xi;
+  register const FLOAT_TYPE* wt = *w;
   register int    nt = 2*n;
   while(d-- > 0){
     *y = af_filter_fir(n,wt,xt);
@@ -65,11 +77,12 @@ inline _ftype_t* af_filter_pfir(unsigned int n, unsigned int d, unsigned int xi,
    at the new samples, xi current index in xq and n the length of the
    filter. xq must be n*2 by k big, s is the index for in.
 */
-inline int af_filter_updatepq(unsigned int n, unsigned int d, unsigned int xi, _ftype_t** xq, _ftype_t* in, unsigned int s)  
+int af_filter_updatepq(unsigned int n, unsigned int d, unsigned int xi,
+                       FLOAT_TYPE** xq, const FLOAT_TYPE* in, unsigned int s)
 {
-  register _ftype_t* txq = *xq + xi;
+  register FLOAT_TYPE* txq = *xq + xi;
   register int nt = n*2;
-  
+
   while(d-- >0){
     *txq= *(txq+n) = *in;
     txq+=nt;
@@ -86,27 +99,28 @@ inline int af_filter_updatepq(unsigned int n, unsigned int d, unsigned int xi, _
 
    n     filter length must be odd for HP and BS filters
    w     buffer for the filter taps (must be n long)
-   fc    cutoff frequencies (1 for LP and HP, 2 for BP and BS) 
+   fc    cutoff frequencies (1 for LP and HP, 2 for BP and BS)
          0 < fc < 1 where 1 <=> Fs/2
    flags window and filter type as defined in filter.h
-         variables are ored together: i.e. LP|HAMMING will give a 
-	 low pass filter designed using a hamming window  
+         variables are ored together: i.e. LP|HAMMING will give a
+	 low pass filter designed using a hamming window
    opt   beta constant used only when designing using kaiser windows
-   
+
    returns 0 if OK, -1 if fail
 */
-int af_filter_design_fir(unsigned int n, _ftype_t* w, _ftype_t* fc, unsigned int flags, _ftype_t opt)
+int af_filter_design_fir(unsigned int n, FLOAT_TYPE* w, const FLOAT_TYPE* fc,
+                         unsigned int flags, FLOAT_TYPE opt)
 {
   unsigned int	o   = n & 1;          	// Indicator for odd filter length
   unsigned int	end = ((n + 1) >> 1) - o;       // Loop end
   unsigned int	i;			// Loop index
 
-  _ftype_t k1 = 2 * M_PI;		// 2*pi*fc1
-  _ftype_t k2 = 0.5 * (_ftype_t)(1 - o);// Constant used if the filter has even length
-  _ftype_t k3;				// 2*pi*fc2 Constant used in BP and BS design
-  _ftype_t g  = 0.0;     		// Gain
-  _ftype_t t1,t2,t3;     		// Temporary variables
-  _ftype_t fc1,fc2;			// Cutoff frequencies
+  FLOAT_TYPE k1 = 2 * M_PI;		// 2*pi*fc1
+  FLOAT_TYPE k2 = 0.5 * (FLOAT_TYPE)(1 - o);// Constant used if the filter has even length
+  FLOAT_TYPE k3;		        // 2*pi*fc2 Constant used in BP and BS design
+  FLOAT_TYPE g  = 0.0;     		// Gain
+  FLOAT_TYPE t1,t2,t3;     		// Temporary variables
+  FLOAT_TYPE fc1,fc2;			// Cutoff frequencies
 
   // Sanity check
   if(!w || (n == 0)) return -1;
@@ -128,10 +142,10 @@ int af_filter_design_fir(unsigned int n, _ftype_t* w, _ftype_t* fc, unsigned int
   case(KAISER):
     af_window_kaiser(n,w,opt); break;
   default:
-    return -1;	
+    return -1;
   }
 
-  if(flags & (LP | HP)){ 
+  if(flags & (LP | HP)){
     fc1=*fc;
     // Cutoff frequency must be < 0.5 where 0.5 <=> Fs/2
     fc1 = ((fc1 <= 1.0) && (fc1 > 0.0)) ? fc1/2 : 0.25;
@@ -140,7 +154,7 @@ int af_filter_design_fir(unsigned int n, _ftype_t* w, _ftype_t* fc, unsigned int
     if(flags & LP){ // Low pass filter
 
       // If the filter length is odd, there is one point which is exactly
-      // in the middle. The value at this point is 2*fCutoff*sin(x)/x, 
+      // in the middle. The value at this point is 2*fCutoff*sin(x)/x,
       // where x is zero. To make sure nothing strange happens, we set this
       // value separately.
       if (o){
@@ -150,7 +164,7 @@ int af_filter_design_fir(unsigned int n, _ftype_t* w, _ftype_t* fc, unsigned int
 
       // Create filter
       for (i=0 ; i<end ; i++){
-	t1 = (_ftype_t)(i+1) - k2;
+	t1 = (FLOAT_TYPE)(i+1) - k2;
 	w[end-i-1] = w[n-end+i] = w[end-i-1] * sin(k1 * t1)/(M_PI * t1); // Sinc
 	g += 2*w[end-i-1]; // Total gain in filter
       }
@@ -163,7 +177,7 @@ int af_filter_design_fir(unsigned int n, _ftype_t* w, _ftype_t* fc, unsigned int
 
       // Create filter
       for (i=0 ; i<end ; i++){
-	t1 = (_ftype_t)(i+1);
+	t1 = (FLOAT_TYPE)(i+1);
 	w[end-i-1] = w[n-end+i] = -1 * w[end-i-1] * sin(k1 * t1)/(M_PI * t1); // Sinc
 	g += ((i&1) ? (2*w[end-i-1]) : (-2*w[end-i-1])); // Total gain in filter
       }
@@ -188,13 +202,13 @@ int af_filter_design_fir(unsigned int n, _ftype_t* w, _ftype_t* fc, unsigned int
 
       // Create filter
       for (i=0 ; i<end ; i++){
-	t1 = (_ftype_t)(i+1) - k2;
+	t1 = (FLOAT_TYPE)(i+1) - k2;
 	t2 = sin(k3 * t1)/(M_PI * t1); // Sinc fc2
 	t3 = sin(k1 * t1)/(M_PI * t1); // Sinc fc1
 	g += w[end-i-1] * (t3 + t2);   // Total gain in filter
-	w[end-i-1] = w[n-end+i] = w[end-i-1] * (t2 - t3); 
+	w[end-i-1] = w[n-end+i] = w[end-i-1] * (t2 - t3);
       }
-    }      
+    }
     else{ // Band stop
       if (!o) // Band stop filters must have odd length
 	return -1;
@@ -203,10 +217,10 @@ int af_filter_design_fir(unsigned int n, _ftype_t* w, _ftype_t* fc, unsigned int
 
       // Create filter
       for (i=0 ; i<end ; i++){
-	t1 = (_ftype_t)(i+1);
+	t1 = (FLOAT_TYPE)(i+1);
 	t2 = sin(k1 * t1)/(M_PI * t1); // Sinc fc1
 	t3 = sin(k3 * t1)/(M_PI * t1); // Sinc fc2
-	w[end-i-1] = w[n-end+i] = w[end-i-1] * (t2 - t3); 
+	w[end-i-1] = w[n-end+i] = w[end-i-1] * (t2 - t3);
 	g += 2*w[end-i-1]; // Total gain in filter
       }
     }
@@ -214,9 +228,9 @@ int af_filter_design_fir(unsigned int n, _ftype_t* w, _ftype_t* fc, unsigned int
 
   // Normalize gain
   g=1/g;
-  for (i=0; i<n; i++) 
+  for (i=0; i<n; i++)
     w[i] *= g;
-  
+
   return 0;
 }
 
@@ -225,7 +239,7 @@ int af_filter_design_fir(unsigned int n, _ftype_t* w, _ftype_t* fc, unsigned int
    n     length of prototype filter
    k     number of polyphase components
    w     prototype filter taps
-   pw    Parallel FIR filter 
+   pw    Parallel FIR filter
    g     Filter gain
    flags FWD forward indexing
          REW reverse indexing
@@ -233,13 +247,14 @@ int af_filter_design_fir(unsigned int n, _ftype_t* w, _ftype_t* fc, unsigned int
 
    returns 0 if OK, -1 if fail
 */
-int af_filter_design_pfir(unsigned int n, unsigned int k, _ftype_t* w, _ftype_t** pw, _ftype_t g, unsigned int flags)
+int af_filter_design_pfir(unsigned int n, unsigned int k, const FLOAT_TYPE* w,
+                          FLOAT_TYPE** pw, FLOAT_TYPE g, unsigned int flags)
 {
   int l = (int)n/k;	// Length of individual FIR filters
   int i;     	// Counters
   int j;
-  _ftype_t t;	// g * w[i]
-  
+  FLOAT_TYPE t;	// g * w[i]
+
   // Sanity check
   if(l<1 || k<1 || !w || !pw)
     return -1;
@@ -272,11 +287,11 @@ int af_filter_design_pfir(unsigned int n, unsigned int k, _ftype_t* w, _ftype_t*
 
 /* Pre-warp the coefficients of a numerator or denominator.
    Note that a0 is assumed to be 1, so there is no wrapping
-   of it.  
+   of it.
 */
-static void af_filter_prewarp(_ftype_t* a, _ftype_t fc, _ftype_t fs)
+static void af_filter_prewarp(FLOAT_TYPE* a, FLOAT_TYPE fc, FLOAT_TYPE fs)
 {
-  _ftype_t wp;
+  FLOAT_TYPE wp;
   wp = 2.0 * fs * tan(M_PI * fc / fs);
   a[2] = a[2]/(wp * wp);
   a[1] = a[1]/wp;
@@ -284,7 +299,7 @@ static void af_filter_prewarp(_ftype_t* a, _ftype_t fc, _ftype_t fs)
 
 /* Transform the numerator and denominator coefficients of s-domain
    biquad section into corresponding z-domain coefficients.
-   
+
    The transfer function for z-domain is:
 
           1 + alpha1 * z^(-1) + alpha2 * z^(-2)
@@ -295,7 +310,7 @@ static void af_filter_prewarp(_ftype_t* a, _ftype_t fc, _ftype_t fs)
    order:
    beta1, beta2    (denominator)
    alpha1, alpha2  (numerator)
-   
+
    Arguments:
    a       - s-domain numerator coefficients
    b       - s-domain denominator coefficients
@@ -303,16 +318,17 @@ static void af_filter_prewarp(_ftype_t* a, _ftype_t fc, _ftype_t fs)
              biquad section in such a way, as to make it the
              coefficient by which to multiply the overall filter gain
              in order to achieve a desired overall filter gain,
-             specified in initial value of k.  
+             specified in initial value of k.
    fs 	   - sampling rate (Hz)
    coef    - array of z-domain coefficients to be filled in.
- 
+
    Return: On return, set coef z-domain coefficients and k to the gain
    required to maintain overall gain = 1.0;
 */
-static void af_filter_bilinear(_ftype_t* a, _ftype_t* b, _ftype_t* k, _ftype_t fs, _ftype_t *coef)
+static void af_filter_bilinear(const FLOAT_TYPE* a, const FLOAT_TYPE* b, FLOAT_TYPE* k,
+                               FLOAT_TYPE fs, FLOAT_TYPE *coef)
 {
-  _ftype_t ad, bd;
+  FLOAT_TYPE ad, bd;
 
   /* alpha (Numerator in s-domain) */
   ad = 4. * a[2] * fs * fs + 2. * a[1] * fs + a[0];
@@ -336,26 +352,26 @@ static void af_filter_bilinear(_ftype_t* a, _ftype_t* b, _ftype_t* k, _ftype_t f
 /* IIR filter design using bilinear transform and prewarp. Transforms
    2nd order s domain analog filter into a digital IIR biquad link. To
    create a filter fill in a, b, Q and fs and make space for coef and k.
-   
 
-   Example Butterworth design: 
+
+   Example Butterworth design:
 
    Below are Butterworth polynomials, arranged as a series of 2nd
    order sections:
 
    Note: n is filter order.
-   
+
    n  Polynomials
    -------------------------------------------------------------------
    2  s^2 + 1.4142s + 1
    4  (s^2 + 0.765367s + 1) * (s^2 + 1.847759s + 1)
    6  (s^2 + 0.5176387s + 1) * (s^2 + 1.414214 + 1) * (s^2 + 1.931852s + 1)
-   
+
    For n=4 we have following equation for the filter transfer function:
                        1                              1
    T(s) = --------------------------- * ----------------------------
           s^2 + (1/Q) * 0.765367s + 1   s^2 + (1/Q) * 1.847759s + 1
-   
+
    The filter consists of two 2nd order sections since highest s power
    is 2.  Now we can take the coefficients, or the numbers by which s
    is multiplied and plug them into a standard formula to be used by
@@ -398,7 +414,7 @@ static void af_filter_bilinear(_ftype_t* a, _ftype_t* b, _ftype_t* k, _ftype_t f
              biquad section in such a way, as to make it the
              coefficient by which to multiply the overall filter gain
              in order to achieve a desired overall filter gain,
-             specified in initial value of k.  
+             specified in initial value of k.
    fs 	   - sampling rate (Hz)
    coef    - array of z-domain coefficients to be filled in.
 
@@ -410,16 +426,17 @@ static void af_filter_bilinear(_ftype_t* a, _ftype_t* b, _ftype_t* k, _ftype_t f
 
    return -1 if fail 0 if success.
 */
-int af_filter_szxform(_ftype_t* a, _ftype_t* b, _ftype_t Q, _ftype_t fc, _ftype_t fs, _ftype_t *k, _ftype_t *coef)
+int af_filter_szxform(const FLOAT_TYPE* a, const FLOAT_TYPE* b, FLOAT_TYPE Q, FLOAT_TYPE fc,
+                      FLOAT_TYPE fs, FLOAT_TYPE *k, FLOAT_TYPE *coef)
 {
-  _ftype_t at[3];
-  _ftype_t bt[3];
+  FLOAT_TYPE at[3];
+  FLOAT_TYPE bt[3];
 
-  if(!a || !b || !k || !coef || (Q>1000.0 || Q< 1.0)) 
+  if(!a || !b || !k || !coef || (Q>1000.0 || Q< 1.0))
     return -1;
 
-  memcpy(at,a,3*sizeof(_ftype_t));
-  memcpy(bt,b,3*sizeof(_ftype_t));
+  memcpy(at,a,3*sizeof(FLOAT_TYPE));
+  memcpy(bt,b,3*sizeof(FLOAT_TYPE));
 
   bt[1]/=Q;
 
@@ -431,4 +448,3 @@ int af_filter_szxform(_ftype_t* a, _ftype_t* b, _ftype_t Q, _ftype_t fc, _ftype_
 
   return 0;
 }
-

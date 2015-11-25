@@ -2,13 +2,24 @@
  * avisubdump
  *
  * avi vobsub subtitle stream dumper (c) 2004 Tobias Diedrich
- * Licensed under GNU GPLv2 or (at your option) any later version.
  *
  * The subtitles are dumped to stdout.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#define _LARGEFILE_SOURCE
-#define _FILE_OFFSET_BITS 64
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -169,8 +180,12 @@ int main(int argc,char* argv[])
 		exit(1);
 	}
 
-	if (strcmp(argv[argc-1], "-") == 0) f=stdin;
-	else f=fopen(argv[argc-1],"rb");
+	if (strcmp(argv[argc-1], "-") == 0) {
+		dump(stdin);
+		return 0;
+	}
+
+	f=fopen(argv[argc-1],"rb");
 
 	if (!f) {
 		fprintf(stderr, "Could not open '%s': %s\n",
@@ -179,7 +194,7 @@ int main(int argc,char* argv[])
 	}
 
 	dump(f);
+	fclose(f);
 
 	return 0;
 }
-

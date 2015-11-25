@@ -1,17 +1,17 @@
 /*
  * Modified for use with MPlayer, detailed changelog at
  * http://svn.mplayerhq.hu/mplayer/trunk/
- * $Id: DS_Filter.c,v 1.3 2007-04-10 19:33:30 Narflex Exp $
  */
 
 #include "config.h"
 #include "DS_Filter.h"
-#include "driver.h"
-#include "com.h"
+#include "graph.h"
+#include "loader/drv.h"
+#include "loader/com.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include "win32.h" // printf macro
+#include "loader/win32.h" // printf macro
 
 typedef long STDCALL (*GETCLASS) (const GUID*, const GUID*, void**);
 
@@ -27,11 +27,9 @@ const GUID IID_IClassFactory =
     {0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}
 };
 
-HRESULT STDCALL CoInitialize(LPVOID pvReserved); 
-void STDCALL CoUninitialize(void); 
+HRESULT STDCALL CoInitialize(LPVOID pvReserved);
+void STDCALL CoUninitialize(void);
 #endif
-
-//void trapbug();
 
 static void DS_Filter_Start(DS_Filter* This)
 {
@@ -96,11 +94,11 @@ void DS_Filter_Destroy(DS_Filter* This)
 }
 
 static HRESULT STDCALL DS_Filter_CopySample(void* pUserData,IMediaSample* pSample){
-    char* pointer;
+    BYTE* pointer;
     int len;
-    SampleProcUserData* pData=(SampleProcUserData*)pUserData;
+    SampleProcUserData* pData=pUserData;
     Debug printf("CopySample called(%p,%p)\n",pSample,pUserData);
-    if (pSample->vt->GetPointer(pSample, (BYTE**) &pointer))
+    if (pSample->vt->GetPointer(pSample, &pointer))
 	return 1;
     len = pSample->vt->GetActualDataLength(pSample);
     if (len == 0)
@@ -128,9 +126,9 @@ DS_Filter* DS_FilterCreate(const char* dllname, const GUID* id,
 //    char eb[250];
     const char* em = NULL;
     MemAllocator* tempAll;
+    FilterGraph* graph;
     ALLOCATOR_PROPERTIES props,props1;
-    HRESULT result;
-    DS_Filter* This = (DS_Filter*) malloc(sizeof(DS_Filter));
+    DS_Filter* This = malloc(sizeof(DS_Filter));
     if (!This)
 	return NULL;
 
@@ -141,9 +139,9 @@ DS_Filter* DS_FilterCreate(const char* dllname, const GUID* id,
 #endif
 
     /*
-        tempAll is not used  anywhere. 
+        tempAll is not used  anywhere.
 	MemAllocatorCreate() is called to ensure that RegisterComObject for IMemoryAllocator
-	will be	called before possible call 
+	will be	called before possible call
 	to CoCreateInstance(...,&IID_IMemoryAllocator,...) from binary codec.
     */
     tempAll=MemAllocatorCreate();
@@ -168,7 +166,9 @@ DS_Filter* DS_FilterCreate(const char* dllname, const GUID* id,
 	IEnumPins* enum_pins = 0;
 	IPin* array[256];
 	ULONG fetched;
+        HRESULT result;
         unsigned int i;
+        static const uint16_t filter_name[] = { 'F', 'i', 'l', 't', 'e', 'r', 0 };
 
 	This->m_iHandle = LoadLibraryA(dllname);
 	if (!This->m_iHandle)
@@ -182,26 +182,30 @@ DS_Filter* DS_FilterCreate(const char* dllname, const GUID* id,
 	    em = "illegal or corrupt DirectShow DLL";
 	    break;
 	}
-	result = func(id, &IID_IClassFactory, (void**)&factory);
+	result = func(id, &IID_IClassFactory, (void*)&factory);
 	if (result || !factory)
 	{
 	    em = "no such class object";
 	    break;
 	}
-	result = factory->vt->CreateInstance(factory, 0, &IID_IUnknown, (void**)&object);
+	result = factory->vt->CreateInstance(factory, 0, &IID_IUnknown, (void*)&object);
 	factory->vt->Release((IUnknown*)factory);
 	if (result || !object)
 	{
 	    em = "class factory failure";
 	    break;
 	}
-	result = object->vt->QueryInterface(object, &IID_IBaseFilter, (void**)&This->m_pFilter);
+	result = object->vt->QueryInterface(object, &IID_IBaseFilter, (void*)&This->m_pFilter);
 	object->vt->Release((IUnknown*)object);
 	if (result || !This->m_pFilter)
 	{
 	    em = "object does not provide IBaseFilter interface";
             break;
 	}
+
+	graph = FilterGraphCreate();
+	result = This->m_pFilter->vt->JoinFilterGraph(This->m_pFilter, (IFilterGraph*)graph, filter_name);
+
 	// enumerate pins
 	result = This->m_pFilter->vt->EnumPins(This->m_pFilter, &enum_pins);
 	if (result || !enum_pins)
@@ -212,18 +216,19 @@ DS_Filter* DS_FilterCreate(const char* dllname, const GUID* id,
 
 	enum_pins->vt->Reset(enum_pins);
 	result = enum_pins->vt->Next(enum_pins, (ULONG)256, (IPin**)array, &fetched);
+	enum_pins->vt->Release(enum_pins);
 	Debug printf("Pins enumeration returned %ld pins, error is %x\n", fetched, (int)result);
 
 	for (i = 0; i < fetched; i++)
 	{
-	    int direction = -1;
-	    array[i]->vt->QueryDirection(array[i], (PIN_DIRECTION*)&direction);
-	    if (!This->m_pInputPin && direction == 0)
+	    PIN_DIRECTION direction = -1;
+	    array[i]->vt->QueryDirection(array[i], &direction);
+	    if (!This->m_pInputPin && direction == PINDIR_INPUT)
 	    {
 		This->m_pInputPin = array[i];
 		This->m_pInputPin->vt->AddRef((IUnknown*)This->m_pInputPin);
 	    }
-	    if (!This->m_pOutputPin && direction == 1)
+	    if (!This->m_pOutputPin && direction == PINDIR_OUTPUT)
 	    {
 		This->m_pOutputPin = array[i];
 		This->m_pOutputPin->vt->AddRef((IUnknown*)This->m_pOutputPin);
@@ -242,7 +247,7 @@ DS_Filter* DS_FilterCreate(const char* dllname, const GUID* id,
 	}
 	result = This->m_pInputPin->vt->QueryInterface((IUnknown*)This->m_pInputPin,
 						       &IID_IMemInputPin,
-						       (void**)&This->m_pImp);
+						       (void*)&This->m_pImp);
 	if (result)
 	{
 	    em = "could not get IMemInputPin interface";
@@ -306,7 +311,7 @@ DS_Filter* DS_FilterCreate(const char* dllname, const GUID* id,
     if (!init)
     {
 	DS_Filter_Destroy(This);
-	printf("Warning: DS_Filter() %s.  (DLL=%.200s, r=0x%x)\n", em, dllname, result);
+	printf("Warning: DS_Filter() %s.  (DLL=%.200s)\n", em, dllname);
         This = 0;
     }
     return This;

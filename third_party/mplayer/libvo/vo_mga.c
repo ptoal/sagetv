@@ -1,5 +1,21 @@
-/* 
- *    output through mga_vid kernel driver
+/*
+ * video output through mga_vid kernel driver
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include <stdio.h>
@@ -10,6 +26,7 @@
 #include "mp_msg.h"
 #include "help_mp.h"
 #include "video_out.h"
+#define NO_DRAW_FRAME
 #include "video_out_internal.h"
 
 #include <sys/ioctl.h>
@@ -19,10 +36,10 @@
 #include <linux/fb.h>
 
 #include "drivers/mga_vid.h"
-#include "sub.h"
+#include "sub/sub.h"
 #include "aspect.h"
 
-static vo_info_t info = 
+static const vo_info_t info =
 {
 	"Matrox G200/G4x0/G550 overlay (/dev/mga_vid)",
 	"mga",
@@ -30,9 +47,9 @@ static vo_info_t info =
 	"Based on some code by Aaron Holtzman <aholtzma@ess.engr.uvic.ca>"
 };
 
-LIBVO_EXTERN(mga)
+const LIBVO_EXTERN(mga)
 
-#include "mga_common.c"
+#include "mga_template.c"
 
 #define FBDEV	"/dev/fb0"
 
@@ -61,7 +78,7 @@ static int config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_
 		aspect_save_orig(width,height);
 		aspect_save_prescale(d_width,d_height);
 		aspect_save_screenres(vo_screenwidth,vo_screenheight);
-	
+
 		if(flags&VOFLAG_FULLSCREEN) { /* -fs */
 			aspect(&d_width,&d_height,A_ZOOM);
 			vo_fs = VO_TRUE;
@@ -81,7 +98,7 @@ static int config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_
 		mga_vid_config.x_org=(vo_screenwidth-d_width)/2;
 		mga_vid_config.y_org=(vo_screenheight-d_height)/2;
 	}
-	
+
     return mga_init(width,height,format);
 }
 
@@ -100,4 +117,3 @@ static void flip_page(void)
 static void check_events(void)
 {
 }
-

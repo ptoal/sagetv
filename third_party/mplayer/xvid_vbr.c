@@ -1,7 +1,7 @@
 /******************************************************************************
  *
  *   XviD VBR Library
- *   
+ *
  *   Copyright (C) 2002 Edouard Gomez <ed.gomez@wanadoo.fr>
  *
  *   The curve treatment algorithm is based on work done by Foxer <email?> and
@@ -96,7 +96,7 @@ static vbr_finish_function vbr_finish_2pass2;
  * Inline utility functions
  *****************************************************************************/
 
-static __inline int util_frametype(vbr_control_t *state)
+static inline int util_frametype(vbr_control_t *state)
 {
 
 	if(state->credits_start) {
@@ -120,7 +120,7 @@ static __inline int util_frametype(vbr_control_t *state)
 
 }
 
-static __inline int util_creditsframes(vbr_control_t *state)
+static inline int util_creditsframes(vbr_control_t *state)
 {
 
 	int frames = 0;
@@ -152,7 +152,7 @@ int vbrSetDefaults(vbr_control_t *state)
 {
 
 	/* Set all the structure to zero */
-	memset(state, 0, sizeof(state));
+	memset(state, 0, sizeof(*state));
 
 	/* Default mode is CBR */
 	state->mode = VBR_MODE_1PASS;
@@ -196,7 +196,7 @@ int vbrSetDefaults(vbr_control_t *state)
 
 	/* Alt curve */
 	state->use_alt_curve = 1;
-	state->alt_curve_type = VBR_ALT_CURVE_LINEAR; 
+	state->alt_curve_type = VBR_ALT_CURVE_LINEAR;
 	state->alt_curve_low_dist = 90;
 	state->alt_curve_high_dist = 500;
 	state->alt_curve_min_rel_qual = 50;
@@ -227,7 +227,7 @@ int vbrSetDefaults(vbr_control_t *state)
  * Function description :
  *
  * This function initialiaze the vbr_control_t state passed in parameter.
- * 
+ *
  * The initialization depends on state->mode, there are 4 modes allowed.
  * Each mode description is done in the README file shipped with the lib.
  *
@@ -296,7 +296,7 @@ int vbrInit(vbr_control_t *state)
 	default:
 		return(-1);
 	}
-	
+
 	return(state->init(state));
 
 }
@@ -386,7 +386,7 @@ int vbrUpdate(vbr_control_t *state,
 
 		idx--;
 
-		state->debug_quant_count[idx]++; 
+		state->debug_quant_count[idx]++;
 
 	}
 
@@ -508,7 +508,7 @@ static int vbr_init_2pass1(void *sstate)
 	if(state->filename == NULL || state->filename[0] == '\0')
 		return(-1);
 
-	/* Initialize safe defaults for 2pass 1 */ 
+	/* Initialize safe defaults for 2pass 1 */
 	state->pass1_file = NULL;
 	state->nb_frames = 0;
 	state->nb_keyframes = 0;
@@ -530,7 +530,7 @@ static int vbr_init_2pass1(void *sstate)
 	fprintf(f, "# frames    :           \n");
 	fprintf(f, "# keyframes :           \n");
 	fprintf(f, "#\n# quant | intra | header bytes | total bytes | kblocks |"
-		" mblocks | ublocks\n\n"); 
+		" mblocks | ublocks\n\n");
 
 	/* Save file pointer */
 	state->pass1_file   = f;
@@ -561,7 +561,7 @@ static int vbr_update_2pass1(void *sstate,
 			     int kblocks,
 			     int mblocks,
 			     int ublocks)
-			     
+
 
 {
 
@@ -586,7 +586,7 @@ static int vbr_update_2pass1(void *sstate,
 	state->cur_frame++;
 
 	return(0);
-	
+
 }
 
 static int vbr_finish_2pass1(void *sstate)
@@ -654,7 +654,7 @@ static int vbr_init_2pass2(void *sstate)
 	if(state->filename == NULL || state->filename[0] == '\0')
 		return(-1);
 
-	/* Initialize safe defaults for 2pass 2 */ 
+	/* Initialize safe defaults for 2pass 2 */
 	state->pass1_file = NULL;
 	state->nb_frames = 0;
 	state->nb_keyframes = 0;
@@ -703,7 +703,9 @@ static int vbr_init_2pass2(void *sstate)
 	fscanf(state->pass1_file, "# keyframes : %d\n", &state->nb_keyframes);
 
 	/* Allocate memory space for the keyframe_location array */
-	if((state->keyframe_locations
+	if(state->nb_keyframes < 0 ||
+           state->nb_keyframes >= 0x7fffffff / sizeof(int) ||
+           (state->keyframe_locations
 	    = malloc((state->nb_keyframes+1)*sizeof(int))) == NULL) {
 		fclose(state->pass1_file);
 		state->pass1_file = NULL;
@@ -767,7 +769,7 @@ static int vbr_init_2pass2(void *sstate)
 			state->keyframe_locations[c++] = state->cur_frame;
 		}
 
-		total_bytes += frame_bytes;		
+		total_bytes += frame_bytes;
 
 	}
 
@@ -996,7 +998,7 @@ static int vbr_init_2pass2(void *sstate)
 						default:
 						case VBR_ALT_CURVE_LINEAR:
 							total2 +=
-								dbytes * 
+								dbytes *
 								(state->alt_curve_mid_qual - state->alt_curve_qual_dev *
 								 (dbytes - state->average_frame) / state->alt_curve_low_diff);
 							break;
@@ -1025,7 +1027,7 @@ static int vbr_init_2pass2(void *sstate)
 			}
 		}
 	}
-	
+
 	state->curve_comp_scale = total1 / total2;
 
 	if (state->use_alt_curve) {
@@ -1104,7 +1106,7 @@ static int vbr_init_2pass2(void *sstate)
 				}
 
 			}
-		      
+
 		}
 
 	}
@@ -1133,7 +1135,7 @@ static int vbr_init_2pass2(void *sstate)
 	/* Get back to the beginning of frame statistics */
 	fseek(state->pass1_file, pos_firstframe, SEEK_SET);
 
-	/* 
+	/*
 	 * Small hack : We have to get next frame stats before the
 	 * getintra/quant calls
 	 * User clients update the data when they call vbrUpdate
@@ -1144,7 +1146,7 @@ static int vbr_init_2pass2(void *sstate)
 
 		/* Fake vars */
 		int next_hbytes, next_kblocks, next_mblocks, next_ublocks;
- 
+
 		fscanf(state->pass1_file, "%d %d %d %d %d %d %d\n",
 		       &state->pass1_quant, &state->pass1_intra, &next_hbytes,
 		       &state->pass1_bytes, &next_kblocks, &next_mblocks,
@@ -1444,7 +1446,7 @@ static int vbr_getintra_2pass2(void *sstate)
 	int intra;
 	vbr_control_t *state = sstate;
 
-	
+
 	/* Get next intra state (fetched by update) */
 	intra = state->pass1_intra;
 
@@ -1492,7 +1494,7 @@ static int vbr_update_2pass2(void *sstate,
 			     int kblocks,
 			     int mblocks,
 			     int ublocks)
-			     
+
 
 {
 
@@ -1562,7 +1564,7 @@ static int vbr_update_2pass2(void *sstate,
 
 	/* Ok next frame */
 	state->cur_frame++;
-	   
+
 	return(0);
 
 }
@@ -1580,8 +1582,7 @@ static int vbr_finish_2pass2(void *sstate)
 		return(-1);
 
 	/* Free the memory */
-	if(state->keyframe_locations)
-		free(state->keyframe_locations);
+	free(state->keyframe_locations);
 
 	return(0);
 
@@ -1634,7 +1635,7 @@ static int vbr_getquant_fixedquant(void *sstate)
 		return(quant);
 
 	}
-		
+
 	/* No credit frame - return fixed quant */
 	return(state->fixed_quant);
 

@@ -1,7 +1,7 @@
 /* $XFree86: xc/programs/Xserver/hw/xfree86/drivers/glint/pm3_regs.h,v 1.9 2001/11/20 00:09:15 alanh Exp $ */
 
 /*
- * glint register file 
+ * glint register file
  *
  * Copyright by Sven Luther
  * Authors: Sven Luther, <luther@dpt-info.u-strasbg.fr>
@@ -9,10 +9,10 @@
  *
  * this work is sponsored by Appian Graphics.
  *
- */ 
+ */
 
-#ifndef _PM3_REG_H_
-#define _PM3_REG_H_
+#ifndef MPLAYER_PM3_REGS_H
+#define MPLAYER_PM3_REGS_H
 
 /**********************************************
 *  GLINT Permedia3 Control Status registers   *
@@ -82,7 +82,7 @@
 	#define PM3ByApertureMode_DOUBLE_WRITE_32MB		(6<<22)
 
 #define PM3ByAperture2Mode					0x0328
-	
+
 /**********************************************
 *  GLINT Permedia3 Memory Control (0x1000)    *
 ***********************************************/
@@ -1051,8 +1051,6 @@
 	#define PM3FillRectanglePosition_XOffset(x)            ((x)&0xffff)
 	#define PM3FillRectanglePosition_YOffset(y)            (((y)&0xffff)<<16)
 
-#if 1
-
 /**********************************************
 *  GLINT Permedia3 Macros                     *
 ***********************************************/
@@ -1061,7 +1059,7 @@ extern void *pm3_reg_base;
 
 #define WRITE_REG(offset,val)				\
     *(volatile unsigned long *)(((unsigned char *)(pm3_reg_base)) + (offset)) = (val)
-	
+
 #define READ_REG(offset)					\
     *(volatile unsigned long *)(((unsigned char *)(pm3_reg_base)) + (offset))
 
@@ -1070,7 +1068,7 @@ extern void *pm3_reg_base;
 	unsigned long temp;					\
 	temp = READ_REG(offset);				\
 	WRITE_REG(offset,temp|(val));			\
-    } 
+    }
 
 #define UPDATE_CLEAR_REG(offset,val)			\
     {								\
@@ -1081,8 +1079,7 @@ extern void *pm3_reg_base;
 
 #define RAMDAC_DELAY(x) do {					\
 	int delay = x;						\
-	unsigned char tmp;					\
-	while(delay--){tmp = READ_REG(PM3InFIFOSpace);};	\
+	while(delay--){READ_REG(PM3InFIFOSpace);};		\
 } while(0)
 
 #define SLOW_WRITE_REG(v,r)			\
@@ -1109,5 +1106,5 @@ do{						\
     RAMDAC_SET_INDEX(index);					\
     temp = READ_REG(PM3RD_IndexedData);			\
 }
-#endif
-#endif /* _PM3_REG_H_ */
+
+#endif /* MPLAYER_PM3_REGS_H */

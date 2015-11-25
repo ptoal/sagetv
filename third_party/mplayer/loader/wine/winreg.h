@@ -1,15 +1,11 @@
 /*
  * 		Win32 registry defines (see also winnt.h)
  */
-#ifndef __WINE_WINREG_H
-#define __WINE_WINREG_H
+#ifndef MPLAYER_WINREG_H
+#define MPLAYER_WINREG_H
 
 #include "winbase.h"
 #include "winnt.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif /* defined(__cplusplus) */
 
 /*
 #define SHELL_ERROR_SUCCESS           0L
@@ -34,7 +30,7 @@ extern "C" {
 /*
  *	registry provider structs
  */
-typedef struct value_entA 
+typedef struct value_entA
 {   LPSTR	ve_valuename;
     DWORD	ve_valuelen;
     DWORD_PTR	ve_valueptr;
@@ -50,8 +46,4 @@ typedef struct value_entW {
 
 typedef ACCESS_MASK REGSAM;
 
-#ifdef __cplusplus
-} /* extern "C" */
-#endif /* defined(__cplusplus) */
-
-#endif  /* __WINE_WINREG_H */
+#endif /* MPLAYER_WINREG_H */

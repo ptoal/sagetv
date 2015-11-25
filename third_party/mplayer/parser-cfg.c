@@ -1,3 +1,20 @@
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 /// \defgroup ConfigParsers Config parsers
 ///
@@ -19,6 +36,7 @@
 #include <assert.h>
 #endif
 
+#include "parser-cfg.h"
 #include "mp_msg.h"
 #include "m_option.h"
 #include "m_config.h"
@@ -32,16 +50,17 @@ static int recursion_depth = 0;
 /// Setup the \ref Config from a config file.
 /** \param config The config object.
  *  \param conffile Path to the config file.
+ *  \param silent print message when failing to open file only at verbose level
  *  \return 1 on sucess, -1 on error.
  */
-int m_config_parse_config_file(m_config_t* config, char *conffile)
+int m_config_parse_config_file(m_config_t* config, const char *conffile, int silent)
 {
 #define PRINT_LINENUM	mp_msg(MSGT_CFGPARSER,MSGL_V,"%s(%d): ", conffile, line_num)
 #define MAX_LINE_LEN	10000
 #define MAX_OPT_LEN	1000
 #define MAX_PARAM_LEN	1500
-	FILE *fp;
-	char *line;
+	FILE *fp = NULL;
+	char *line = NULL;
 	char opt[MAX_OPT_LEN + 1];
 	char param[MAX_PARAM_LEN + 1];
 	char c;		/* for the "" and '' check */
@@ -61,15 +80,15 @@ int m_config_parse_config_file(m_config_t* config, char *conffile)
 #endif
 	mp_msg(MSGT_CFGPARSER,MSGL_V,"Reading config file %s", conffile);
 
-	if (recursion_depth > MAX_RECURSION_DEPTH) {
+	if (++recursion_depth > MAX_RECURSION_DEPTH) {
 		mp_msg(MSGT_CFGPARSER,MSGL_ERR,": too deep 'include'. check your configfiles\n");
 		ret = -1;
 		goto out;
 	} else
-	  
+
 	config->mode = M_CONFIG_FILE;
 
-	if ((line = (char *) malloc(MAX_LINE_LEN + 1)) == NULL) {
+	if ((line = malloc(MAX_LINE_LEN + 1)) == NULL) {
 		mp_msg(MSGT_CFGPARSER,MSGL_FATAL,"\ncan't get memory for 'line': %s", strerror(errno));
 		ret = -1;
 		goto out;
@@ -78,9 +97,8 @@ int m_config_parse_config_file(m_config_t* config, char *conffile)
 	mp_msg(MSGT_CFGPARSER,MSGL_V,"\n");
 
 	if ((fp = fopen(conffile, "r")) == NULL) {
-	  mp_msg(MSGT_CFGPARSER,MSGL_V,": %s\n", strerror(errno));
-		free(line);
-		ret = 0;
+	  mp_msg(MSGT_CFGPARSER,silent?MSGL_V:MSGL_ERR,"Failed to read %s: %s\n", conffile, strerror(errno));
+		ret = silent ? 0 : -1;
 		goto out;
 	}
 
@@ -123,7 +141,7 @@ int m_config_parse_config_file(m_config_t* config, char *conffile)
 			continue;
 		}
 		opt[opt_pos] = '\0';
-		
+
 		/* Profile declaration */
 		if(opt_pos > 2 && opt[0] == '[' && opt[opt_pos-1] == ']') {
 			opt[opt_pos-1] = '\0';
@@ -231,16 +249,52 @@ int m_config_parse_config_file(m_config_t* config, char *conffile)
 			errors++;
 			continue;
 			/* break */
-		}	
+		}
 nextline:
 		;
 	}
 
-	free(line);
-	fclose(fp);
 out:
+	free(line);
+	if (fp) fclose(fp);
 	config->mode = prev_mode;
 	--recursion_depth;
+	return ret;
+}
+
+/// Parse the command line option that must be handled at startup.
+int m_config_preparse_command_line(m_config_t *config, int argc, char **argv)
+{
+	int msg_lvl, i, r, ret = 0;
+	char* arg;
+
+	// Hack to shutup the parser error messages.
+	msg_lvl = mp_msg_levels[MSGT_CFGPARSER];
+	mp_msg_levels[MSGT_CFGPARSER] = -11;
+
+	config->mode = M_COMMAND_LINE_PRE_PARSE;
+
+	for(i = 1 ; i < argc ; i++) {
+		const m_option_t* opt;
+		arg = argv[i];
+		// Ignore non option
+		if(arg[0] != '-' || arg[1] == 0) continue;
+		arg++;
+		// No more options after --
+		if(arg[0] == '-' && arg[1] == 0) break;
+
+		opt = m_config_get_option(config,arg);
+		// Ignore invalid option
+		if(!opt) continue;
+		// Set, non-pre-parse options will be ignored
+		r = m_config_set_option(config,arg,
+					i+1 < argc ? argv[i+1] : NULL);
+		if(r < 0) ret = r;
+		else i += r;
+	}
+
+	mp_msg_levels[MSGT_CFGPARSER] = msg_lvl;
+
 	return ret;
 }
 

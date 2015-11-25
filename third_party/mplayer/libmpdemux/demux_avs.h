@@ -5,28 +5,35 @@
  * Avisynth C Interface Version 0.20
  * Copyright 2003 Kevin Atkinson
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Library General Public
- * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * This file is part of MPlayer.
  *
- * This library is distributed in the hope that it will be useful,
+ * MPlayer is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * Library General Public License for more details.
+ * Lesser General Public License for more details.
  *
- * You should have received a copy of the GNU Library General Public
- * License along with this library; if not, write to the
- * Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301 USA.
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
+
+#ifndef MPLAYER_DEMUX_AVS_H
+#define MPLAYER_DEMUX_AVS_H
+
+#include <stdint.h>
+#include "loader/wine/windef.h"
 
 enum { AVISYNTH_INTERFACE_VERSION = 2 };
 
 enum
 {
   AVS_SAMPLE_INT8  = 1<<0,
-  AVS_SAMPLE_INT16 = 1<<1, 
+  AVS_SAMPLE_INT16 = 1<<1,
   AVS_SAMPLE_INT24 = 1<<2,
   AVS_SAMPLE_INT32 = 1<<3,
   AVS_SAMPLE_FLOAT = 1<<4
@@ -46,7 +53,7 @@ enum
 // Colorspace properties.
 enum
 {
-  AVS_CS_BGR = 1<<28,  
+  AVS_CS_BGR = 1<<28,
   AVS_CS_YUV = 1<<29,
   AVS_CS_INTERLEAVED = 1<<30,
   AVS_CS_PLANAR = 1<<31
@@ -89,7 +96,7 @@ typedef struct AVS_VideoInfo {
   int num_frames;
 
   int pixel_type;
-  
+
   int audio_samples_per_second;   // 0 means no audio
   int sample_type;
   uint64_t num_audio_samples;
@@ -116,43 +123,43 @@ typedef struct AVS_VideoFrame {
   int offset, pitch, row_size, height, offsetU, offsetV, pitchUV;  // U&V offsets are from top of picture.
 } AVS_VideoFrame;
 
-static __inline AVS_Value avs_new_value_string(const char * v0)
+static inline AVS_Value avs_new_value_string(const char * v0)
 { AVS_Value v; v.type = 's'; v.d.string = v0; return v; }
 
-static __inline AVS_Value avs_new_value_array(AVS_Value * v0, int size)
+static inline AVS_Value avs_new_value_array(AVS_Value * v0, int size)
 { AVS_Value v; v.type = 'a'; v.d.array = v0; v.array_size = size; return v; }
 
 
-static __inline int avs_is_error(AVS_Value v) { return v.type == 'e'; }
-static __inline int avs_is_clip(AVS_Value v) { return v.type == 'c'; }
-static __inline int avs_is_string(AVS_Value v) { return v.type == 's'; }
-static __inline int avs_has_video(const AVS_VideoInfo * p) { return (p->width!=0); }
-static __inline int avs_has_audio(const AVS_VideoInfo * p) { return (p->audio_samples_per_second!=0); }
+static inline int avs_is_error(AVS_Value v) { return v.type == 'e'; }
+static inline int avs_is_clip(AVS_Value v) { return v.type == 'c'; }
+static inline int avs_is_string(AVS_Value v) { return v.type == 's'; }
+static inline int avs_has_video(const AVS_VideoInfo * p) { return p->width != 0; }
+static inline int avs_has_audio(const AVS_VideoInfo * p) { return p->audio_samples_per_second != 0; }
 
-static __inline const char * avs_as_string(AVS_Value v)
+static inline const char * avs_as_string(AVS_Value v)
 { return avs_is_error(v) || avs_is_string(v) ? v.d.string : 0; }
 
 /* Color spaces */
-static __inline int avs_is_rgb(const AVS_VideoInfo * p)
-{ return (p->pixel_type&AVS_CS_BGR); }
+static inline int avs_is_rgb(const AVS_VideoInfo * p)
+{ return p->pixel_type & AVS_CS_BGR; }
 
-static __inline int avs_is_rgb24(const AVS_VideoInfo * p)
+static inline int avs_is_rgb24(const AVS_VideoInfo * p)
 { return (p->pixel_type&AVS_CS_BGR24)==AVS_CS_BGR24; } // Clear out additional properties
 
-static __inline int avs_is_rgb32(const AVS_VideoInfo * p)
+static inline int avs_is_rgb32(const AVS_VideoInfo * p)
 { return (p->pixel_type & AVS_CS_BGR32) == AVS_CS_BGR32 ; }
 
-static __inline int avs_is_yuy(const AVS_VideoInfo * p)
-{ return (p->pixel_type&AVS_CS_YUV ); }
+static inline int avs_is_yuy(const AVS_VideoInfo * p)
+{ return p->pixel_type & AVS_CS_YUV; }
 
-static __inline int avs_is_yuy2(const AVS_VideoInfo * p)
-{ return (p->pixel_type & AVS_CS_YUY2) == AVS_CS_YUY2; }  
+static inline int avs_is_yuy2(const AVS_VideoInfo * p)
+{ return (p->pixel_type & AVS_CS_YUY2) == AVS_CS_YUY2; }
 
-static __inline int avs_is_yv12(const AVS_VideoInfo * p)
-{ return ((p->pixel_type & AVS_CS_YV12) == AVS_CS_YV12)||((p->pixel_type & AVS_CS_I420) == AVS_CS_I420); }       
+static inline int avs_is_yv12(const AVS_VideoInfo * p)
+{ return ((p->pixel_type & AVS_CS_YV12) == AVS_CS_YV12)||((p->pixel_type & AVS_CS_I420) == AVS_CS_I420); }
 
-static __inline int avs_bits_per_pixel(const AVS_VideoInfo * p) 
-{ 
+static inline int avs_bits_per_pixel(const AVS_VideoInfo * p)
+{
   switch (p->pixel_type) {
       case AVS_CS_BGR24: return 24;
       case AVS_CS_BGR32: return 32;
@@ -162,3 +169,5 @@ static __inline int avs_bits_per_pixel(const AVS_VideoInfo * p)
       default:           return 0;
     }
 }
+
+#endif /* MPLAYER_DEMUX_AVS_H */

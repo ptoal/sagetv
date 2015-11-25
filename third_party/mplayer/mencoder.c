@@ -1,3 +1,21 @@
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
 #define VCODEC_COPY 0
 #define VCODEC_FRAMENO 1
 // real codecs:
@@ -19,120 +37,99 @@
 #define ACODEC_FAAC 6
 #define ACODEC_TWOLAME 7
 
+#ifdef __MINGW32__
+#define SIGHUP   1
+#define SIGQUIT  3
+#define SIGPIPE 13
+#endif
+
+#include "config.h"
+
+#include <inttypes.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <signal.h>
-#include "config.h"
-
-#ifdef __MINGW32__
-#define        SIGHUP 1
-#define        SIGQUIT 3
-#define        SIGPIPE 13
-#endif
-#ifdef WIN32
+#include <strings.h>
+#include <sys/time.h>
+#if defined(__MINGW32__) || defined(__CYGWIN__)
 #include <windows.h>
 #endif
 
-#include <sys/time.h>
-
-
-#include "version.h"
-#include "mp_msg.h"
-#include "help_mp.h"
-
-#include "cpudetect.h"
-
-#include "codec-cfg.h"
-#include "m_option.h"
-#include "m_config.h"
-#include "parser-mecmd.h"
-
-#include "get_path.c"
-
-#include "stream/stream.h"
-#include "libmpdemux/demuxer.h"
-#include "libmpdemux/stheader.h"
-#include "libmpdemux/mp3_hdr.h"
-#include "libmpdemux/muxer.h"
-
-
-#include "libvo/video_out.h"
-
+#include "input/input.h"
 #include "libaf/af_format.h"
-
-#include "libmpcodecs/mp_image.h"
+#include "libao2/audio_out.h"
+#include "libavcodec/avcodec.h"
+#include "libmpcodecs/ae.h"
 #include "libmpcodecs/dec_audio.h"
 #include "libmpcodecs/dec_video.h"
+#include "libmpcodecs/mp_image.h"
+#include "libmpcodecs/vd.h"
 #include "libmpcodecs/vf.h"
-
-// for MPEGLAYER3WAVEFORMAT:
+#include "libmpdemux/aviprint.h"
+#include "libmpdemux/demuxer.h"
+#include "libmpdemux/mp3_hdr.h"
 #include "libmpdemux/ms_hdr.h"
-
-#include <inttypes.h>
-
+#include "libmpdemux/muxer.h"
+#include "libmpdemux/stheader.h"
 #include "libvo/fastmemcpy.h"
-
+#include "sub/font_load.h"
+#include "sub/sub.h"
+#include "libvo/video_out.h"
 #include "osdep/timer.h"
-
-#ifdef USE_DVDREAD
+#include "stream/stream.h"
+#include "stream/stream_bd.h"
+#ifdef CONFIG_DVDREAD
 #include "stream/stream_dvd.h"
 #endif
+#include "stream/stream_dvdnav.h"
+#include "sub/ass_mp.h"
+#include "codec-cfg.h"
+#include "edl.h"
+#include "help_mp.h"
+#include "m_config.h"
+#include "m_option.h"
+#include "mp_fifo.h"
+#include "mp_msg.h"
+#include "mpcommon.h"
+#include "parser-cfg.h"
+#include "parser-mecmd.h"
+#include "path.h"
+#include "sub/spudec.h"
+#include "sub/vobsub.h"
+#include "sub/eosd.h"
+#include "mencoder.h"
 
-#ifdef USE_LIBAVCODEC
-#ifdef USE_LIBAVCODEC_SO
-#include <ffmpeg/avcodec.h>
-#else
-#include "avcodec.h"
-#endif
-#endif
 
-#include "libmpcodecs/ae.h"
 int vo_doublebuffering=0;
 int vo_directrendering=0;
 int vo_config_count=1;
-int forced_subs_only=0;
 
 //--------------------------
 
 // cache2:
 int stream_cache_size=-1;
-#ifdef USE_STREAM_CACHE
-extern int cache_fill_status;
-
+#ifdef CONFIG_STREAM_CACHE
 float stream_cache_min_percent=20.0;
 float stream_cache_seek_min_percent=50.0;
-#else
-#define cache_fill_status 0
 #endif
 
 int audio_id=-1;
 int video_id=-1;
-int dvdsub_id=-2;
+int dvdsub_id=-1;
 int vobsub_id=-1;
 char* audio_lang=NULL;
 char* dvdsub_lang=NULL;
-static char* spudec_ifo=NULL;
 
 static char** audio_codec_list=NULL;  // override audio codec
 static char** video_codec_list=NULL;  // override video codec
-static char** audio_fm_list=NULL;     // override audio codec family 
-static char** video_fm_list=NULL;     // override video codec family 
-extern char *demuxer_name; // override demuxer
-extern char *audio_demuxer_name; // override audio demuxer
-extern char *sub_demuxer_name; // override sub demuxer
+static char** audio_fm_list=NULL;     // override audio codec family
+static char** video_fm_list=NULL;     // override video codec family
 
 static int out_audio_codec=-1;
 static int out_video_codec=-1;
 
 int out_file_format=MUXER_TYPE_AVI;	// default to AVI
-
-// audio stream skip/resync functions requires only for seeking.
-// (they should be implemented in the audio codec layer)
-//void skip_audio_frame(sh_audio_t *sh_audio){}
-//void resync_audio_stream(sh_audio_t *sh_audio){}
-
-extern int verbose; // must be global!
 int quiet=0;
 double video_time_usage=0;
 double vout_time_usage=0;
@@ -142,15 +139,7 @@ double cur_video_time_usage=0;
 double cur_vout_time_usage=0;
 int benchmark=0;
 
-extern int mp_msg_levels[MSGT_MAX];
-extern int mp_msg_level_all;
-
-#ifdef WIN32
-char * proc_priority=NULL;
-#endif
-
 // A-V sync:
-int delay_corrected=1;
 static float default_max_pts_correction=-1;//0.01f;
 static float max_pts_correction=0;//default_max_pts_correction;
 static float c_total=0;
@@ -161,13 +150,13 @@ static float audio_delay=0.0;
 static int ignore_start=0;
 static int audio_density=2;
 
-float force_fps=0;
-static float force_ofps=0; // set to 24 for inverse telecine
+double force_fps=0;
+static double force_ofps=0; // set to 24 for inverse telecine
 static int skip_limit=-1;
 float playback_speed=1.0;
 
 static int force_srate=0;
-static int audio_output_format=0;
+static int audio_output_format=AF_FORMAT_UNKNOWN;
 
 char *vobsub_out=NULL;
 unsigned int vobsub_out_index=0;
@@ -183,19 +172,16 @@ char* passtmpfile="divx2pass.log";
 static int play_n_frames=-1;
 static int play_n_frames_mf=-1;
 
-#include "libvo/font_load.h"
-#include "libvo/sub.h"
-
 // sub:
 char *font_name=NULL;
-#ifdef HAVE_FONTCONFIG
-extern int font_fontconfig;
-#endif
+char *sub_font_name=NULL;
 float font_factor=0.75;
 char **sub_name=NULL;
+char **sub_paths = NULL;
 float sub_delay=0;
 float sub_fps=0;
 int   sub_auto = 0;
+char *vobsub_name = NULL;
 int   subcc_enabled=0;
 int   suboverlap_enabled = 1;
 
@@ -212,7 +198,7 @@ char *info_sourceform=NULL;
 char *info_comment=NULL;
 
 // Needed by libmpcodecs vf_vo.c
-int config_video_out(vo_functions_t *vo, uint32_t width, uint32_t height,
+int config_video_out(const vo_functions_t *vo, uint32_t width, uint32_t height,
                      uint32_t d_width, uint32_t d_height, uint32_t flags,
                      char *title, uint32_t format) {
   return 1;
@@ -222,32 +208,17 @@ int mp_input_check_interrupt(int time) {
   usec_sleep(time);
   return 0;
 }
+// Needed by getch2
+void mplayer_put_key(int code)
+{
+}
 
-#ifdef USE_ASS
-#include "libass/ass.h"
-#include "libass/ass_mp.h"
-#endif
 char *current_module;
-#include "mpcommon.h"
 
-//char *out_audio_codec=NULL; // override audio codec
-//char *out_video_codec=NULL; // override video codec
-
-//#include "libmpeg2/mpeg2.h"
-//#include "libmpeg2/mpeg2_internal.h"
-
-//static int vo_w=0, vo_h=0;
-
-//-------------------------- config stuff:
-
-m_config_t* mconfig;
-
-extern int m_config_parse_config_file(m_config_t* config, char *conffile);
-
-static int cfg_inc_verbose(m_option_t *conf){ ++verbose; return 0;}
-
-static int cfg_include(m_option_t *conf, char *filename){
-	return m_config_parse_config_file(mconfig, filename);
+// Needed by mpcommon.c
+void set_osd_subtitle(subtitle *subs) {
+    vo_sub = subs;
+    vo_osd_changed(OSDTYPE_SUBTITLE);
 }
 
 static double seek_to_sec;
@@ -257,47 +228,24 @@ static m_time_size_t end_at = { .type = END_AT_NONE, .pos = 0 };
 
 static char * frameno_filename=NULL;
 
-//static uint8_t* flip_upside_down(uint8_t* dst, const uint8_t* src, int width, int height);
-
 typedef struct {
     unsigned char* start;
     int in_size;
     float frame_time;
     int already_read;
+    int flush;
 } s_frame_data;
 
-/// Returns a_pts
-static float calc_a_pts(demux_stream_t *d_audio);
-/** \brief Seeks audio forward to pts by dumping audio packets
-    \return The current audio pts.
-*/
-static float forward_audio(float pts, demux_stream_t *d_audio, muxer_stream_t* mux_a);
-/** \brief Seeks slowly by dumping frames.
-    \return 1 for success, 2 for EOF.
-*/
-static int slowseek(float end_pts, demux_stream_t *d_video, demux_stream_t *d_audio, muxer_stream_t* mux_a, s_frame_data * frame_data, int framecopy, int print_info);
-/// Deletes audio or video as told by -delay to sync
-static void fixdelay(demux_stream_t *d_video, demux_stream_t *d_audio, muxer_stream_t* mux_a, s_frame_data * frame_data, int framecopy);
-
-#include "edl.h"
 static edl_record_ptr edl_records = NULL; ///< EDL entries memory area
 static edl_record_ptr next_edl_record = NULL; ///< only for traversing edl_records
 static short edl_muted; ///< Stores whether EDL is currently in muted mode.
 static short edl_seeking; ///< When non-zero, stream is seekable.
-static short edl_seek_type; ///< When non-zero, frames are discarded instead of seeking.
-/** \brief Seeks for EDL
-    \return 1 for success, 0 for failure, 2 for EOF.
-*/
-static int edl_seek(edl_record_ptr next_edl_record, demuxer_t* demuxer, demux_stream_t *d_audio, muxer_stream_t* mux_a, s_frame_data * frame_data, int framecopy);
+static int edl_seek_type; ///< When non-zero, frames are discarded instead of seeking.
 
+/* This header requires all the global variable declarations. */
 #include "cfg-mencoder.h"
 
-#ifdef USE_DVDREAD
-#include "spudec.h"
-#endif
-#include "vobsub.h"
 
-#include "libao2/audio_out.h"
 /* FIXME */
 static void mencoder_exit(int level, const char *how)
 {
@@ -312,12 +260,18 @@ static void mencoder_exit(int level, const char *how)
 static void parse_cfgfiles( m_config_t* conf )
 {
   char *conffile;
-  if ((conffile = get_path("mencoder.conf")) == NULL) {
-    mp_msg(MSGT_CPLAYER,MSGL_ERR,MSGTR_GetpathProblem);
-  } else {
-    if (m_config_parse_config_file(conf, conffile) < 0)
-      mencoder_exit(1,MSGTR_ConfigFileError);
-    free(conffile);
+  if (!disable_system_conf &&
+      m_config_parse_config_file(conf, MPLAYER_CONFDIR "/mencoder.conf", 1) < 0)
+    mencoder_exit(1,MSGTR_ConfigFileError);
+
+  if (!disable_user_conf) {
+    if ((conffile = get_path("mencoder.conf")) == NULL) {
+      mp_msg(MSGT_CPLAYER,MSGL_ERR,MSGTR_GetpathProblem);
+    } else {
+      if (m_config_parse_config_file(conf, conffile, 1) < 0)
+        mencoder_exit(1,MSGTR_ConfigFileError);
+      free(conffile);
+    }
   }
 }
 
@@ -328,42 +282,256 @@ static int dec_audio(sh_audio_t *sh_audio,unsigned char* buffer,int total){
     int size=0;
     int at_eof=0;
     while(size<total && !at_eof){
+	int res;
 	int len=total-size;
 		if(len>MAX_OUTBURST) len=MAX_OUTBURST;
-		if(len>sh_audio->a_out_buffer_size) len=sh_audio->a_out_buffer_size;
-		if(len>sh_audio->a_out_buffer_len){
-		    int ret=decode_audio(sh_audio,
-			&sh_audio->a_out_buffer[sh_audio->a_out_buffer_len],
-    			len-sh_audio->a_out_buffer_len,
-			sh_audio->a_out_buffer_size-sh_audio->a_out_buffer_len);
-		    if(ret>0) sh_audio->a_out_buffer_len+=ret; else at_eof=1;
-		}
+		res = mp_decode_audio(sh_audio, len);
+		if (res == -2)
+		    mp_msg(MSGT_MENCODER, MSGL_FATAL, "Audio format change detected!\n"
+		           "MEncoder currently cannot handle format changes - patches welcome!\n");
+		if (res < 0)
+                    at_eof = 1;
 		if(len>sh_audio->a_out_buffer_len) len=sh_audio->a_out_buffer_len;
-		memcpy(buffer+size,sh_audio->a_out_buffer,len);
+		fast_memcpy(buffer+size,sh_audio->a_out_buffer,len);
 		sh_audio->a_out_buffer_len-=len; size+=len;
 		if(sh_audio->a_out_buffer_len>0)
-		    memcpy(sh_audio->a_out_buffer,&sh_audio->a_out_buffer[len],sh_audio->a_out_buffer_len);
+		    memmove(sh_audio->a_out_buffer,&sh_audio->a_out_buffer[len],sh_audio->a_out_buffer_len);
     }
     return size;
 }
 
 //---------------------------------------------------------------------------
 
-// this function returns the absoloute time for which MEncoder will switch files or move in the file.
-// so audio can be cut correctly. -1 if there is no limit.
-static float stop_time(demuxer_t* demuxer, muxer_stream_t* mux_v);
-
-static int at_eof=0;
-static int interrupted=0;
+static volatile int at_eof=0;
+static volatile int interrupted=0;
 
 static void exit_sighandler(int x){
-    at_eof=1;
+    at_eof=3;
     interrupted=2; /* 1 means error */
 }
 
 static muxer_t* muxer=NULL;
 
-extern void print_wave_header(WAVEFORMATEX *h, int verbose_level);
+static void add_subtitles(char *filename, float fps, int silent)
+{
+    sub_data *subd;
+#ifdef CONFIG_ASS
+    ASS_Track *asst = 0;
+#endif
+
+    if (!filename) return;
+
+    subd = sub_read_file(filename, fps);
+#ifdef CONFIG_ASS
+    if (ass_enabled)
+#ifdef CONFIG_ICONV
+        asst = ass_read_file(ass_library, filename, sub_cp);
+#else
+        asst = ass_read_file(ass_library, filename, 0);
+#endif
+    if (ass_enabled && subd && !asst)
+        asst = ass_read_subdata(ass_library, subd, fps);
+
+    if (!asst && !subd && !silent)
+#else
+    if (!subd && !silent)
+#endif
+        mp_msg(MSGT_CPLAYER, MSGL_ERR, MSGTR_CantLoadSub,
+		    filename_recode(filename));
+
+#ifdef CONFIG_ASS
+    if (!asst && !subd) return;
+    ass_track = asst;
+#else
+    if (!subd) return;
+#endif
+    mp_msg(MSGT_IDENTIFY, MSGL_INFO, "ID_FILE_SUB_FILENAME=%s\n",
+	   filename_recode(filename));
+    subdata = subd;
+}
+
+/* Provide a timer value suitable for use in A/V sync calculations.
+ * mux->timer records the current position of the muxer stream.
+ * mux->encoder_delay is how many frames are currently buffered by the
+ * encoder. To mencoder core, encoder-buffered frames have been "dealt with"--
+ * they'll get to the muxer eventually. So, for the purposes of A/V sync,
+ * we need to add the total time length of buffered frames to the muxer stream
+ * position. */
+static double adjusted_muxer_time(muxer_stream_t *mux)
+{
+    if (! mux) return MP_NOPTS_VALUE;
+    return mux->timer + (double) mux->encoder_delay * mux->h.dwScale/mux->h.dwRate;
+}
+
+/* This function returns the absolute time for which MEncoder will switch files
+ * or move in the file so audio can be cut correctly. -1 if there is no limit. */
+static float stop_time(demuxer_t* demuxer, muxer_stream_t* mux_v)
+{
+	float timeleft = -1;
+	if (play_n_frames >= 0)
+		timeleft = adjusted_muxer_time(mux_v) + play_n_frames * (double)(mux_v->h.dwScale) / mux_v->h.dwRate;
+	if (end_at.type == END_AT_TIME && (timeleft > end_at.pos || timeleft == -1))
+		timeleft = end_at.pos;
+	if (next_edl_record && demuxer && demuxer->video) { // everything is OK to be checked
+		float tmp = adjusted_muxer_time(mux_v) + next_edl_record->start_sec - demuxer->video->pts;
+		if (timeleft == -1 || timeleft > tmp) {
+			// There's less time in EDL than what we already know
+			if (next_edl_record->action == EDL_SKIP && edl_seeking) {
+				timeleft = tmp;
+			} else if (next_edl_record->action == EDL_MUTE) {
+				//timeleft = next_edl_record->start_sec - demuxer->video->pts;
+				// For the moment (and probably forever) EDL mute doesn't work in MEncoder
+			}
+		}
+	}
+	return timeleft;
+}
+
+/** \brief Seeks audio forward to pts by dumping audio packets
+ *  \return The current audio pts. */
+static float forward_audio(float pts, demux_stream_t *d_audio, muxer_stream_t* mux_a)
+{
+    sh_audio_t * sh_audio = d_audio ? d_audio->sh : NULL;
+    int samplesize, avg;
+    float a_pts = calc_a_pts(sh_audio, d_audio);
+
+    if (!sh_audio) return a_pts;
+
+    if (sh_audio->audio.dwScale) samplesize = sh_audio->audio.dwSampleSize;
+    else samplesize = (sh_audio->wf ? sh_audio->wf->nBlockAlign : 1);
+    avg = (sh_audio->wf ? sh_audio->wf->nAvgBytesPerSec : sh_audio->i_bps);
+
+    // after a demux_seek, a_pts will be zero until you read some audio.
+    // carefully checking if a_pts is truely correct by reading tiniest amount of data possible.
+    if (pts > a_pts && a_pts == 0.0 && samplesize) {
+        if (demux_read_data(sh_audio->ds,mux_a->buffer,samplesize) <= 0) return a_pts; // EOF
+        a_pts = calc_a_pts(sh_audio, d_audio);
+    }
+
+    while (pts > a_pts) {
+        int len;
+        if (samplesize) {
+            len = avg * (pts - a_pts > 0.5 ? 0.5 : pts - a_pts);
+            len/= samplesize; if(len<1) len=1;
+            len*= samplesize;
+            len = demux_read_data(sh_audio->ds,mux_a->buffer,len);
+        } else {
+            unsigned char * crap;
+            len = ds_get_packet(sh_audio->ds, &crap);
+        }
+        if (len <= 0) break; // EOF of audio.
+        a_pts = calc_a_pts(sh_audio, d_audio);
+    }
+    return a_pts;
+}
+
+/** \brief Seeks slowly by dumping frames.
+ *  \return 1 for success, 2 for EOF. */
+static int slowseek(float end_pts, demux_stream_t *d_video,
+                    demux_stream_t *d_audio, muxer_stream_t *mux_a,
+                    s_frame_data *frame_data, int framecopy, int print_info)
+{
+    sh_video_t * sh_video = d_video->sh;
+    vf_instance_t * vfilter = sh_video ? sh_video->vfilter : NULL;
+    int done = 0;
+
+    while (!interrupted) {
+        float a_pts = 0.;
+
+        if (!frame_data->already_read) { // when called after fixdelay, a frame is already read
+            frame_data->in_size = video_read_frame(sh_video, &frame_data->frame_time, &frame_data->start, force_fps);
+            frame_data->flush = frame_data->in_size < 0 && d_video->eof;
+            if (frame_data->flush) {
+                frame_data->in_size = 0;
+                frame_data->start = NULL;
+            }
+            if(frame_data->in_size<0) return 2;
+            sh_video->timer += frame_data->frame_time;
+        }
+        frame_data->already_read = 0;
+
+        a_pts = forward_audio(sh_video->pts - frame_data->frame_time + audio_delay, d_audio, mux_a);
+
+        if (done) {
+            // wait for keyframe in case of -ovc copy
+            if (!framecopy || (sh_video->ds->flags & 1)) {
+                frame_data->already_read = 1;
+                return 1;
+            }
+        }
+        if (sh_video->pts >= end_pts) done = 1;
+
+        if (vfilter) {
+            int softskip = (vfilter->control(vfilter, VFCTRL_SKIP_NEXT_FRAME, 0) == CONTROL_TRUE);
+            void *decoded_frame = decode_video(sh_video, frame_data->start, frame_data->in_size, !softskip, MP_NOPTS_VALUE, NULL);
+	    if (decoded_frame)
+		filter_video(sh_video, decoded_frame, MP_NOPTS_VALUE);
+	    else if (frame_data->flush)
+		return 2;
+        }
+
+        if (print_info) mp_msg(MSGT_MENCODER, MSGL_STATUS,
+               MSGTR_EdlSkipStartEndCurrent,
+               next_edl_record->start_sec, next_edl_record->stop_sec,
+               sh_video->pts, a_pts);
+    }
+    if (interrupted) return 2;
+    return 1;
+}
+
+/// Deletes audio or video as told by -delay to sync
+static void fixdelay(demux_stream_t *d_video, demux_stream_t *d_audio,
+                     muxer_stream_t *mux_a, s_frame_data *frame_data,
+                     int framecopy)
+{
+    // TODO: Find a way to encode silence instead of deleting video
+    sh_video_t * sh_video = d_video->sh;
+    float a_pts;
+
+    // demux_seek has a weirdness that sh_video->pts is meaningless,
+    // until a single frame is read... Same for audio actually too.
+    // Reading one frame, and keeping it.
+    frame_data->in_size = video_read_frame(sh_video, &frame_data->frame_time, &frame_data->start, force_fps);
+    if(frame_data->in_size<0) return;
+    sh_video->timer += frame_data->frame_time;
+    frame_data->already_read = 1;
+
+    a_pts = forward_audio(sh_video->pts - frame_data->frame_time + audio_delay, d_audio, mux_a);
+
+    if (audio_delay > 0) return;
+    else if (sh_video->pts - frame_data->frame_time + audio_delay >= a_pts) return;
+
+    slowseek(a_pts - audio_delay, d_video, d_audio, mux_a, frame_data, framecopy, 0);
+}
+
+/** \brief Seeks for EDL
+ *  \return 1 for success, 0 for failure, 2 for EOF. */
+static int edl_seek(edl_record_ptr next_edl_record, demuxer_t *demuxer,
+                    demux_stream_t *d_audio, muxer_stream_t *mux_a,
+                    s_frame_data *frame_data, int framecopy)
+{
+    sh_video_t * sh_video = demuxer->video ? demuxer->video->sh : NULL;
+
+    if (!sh_video) return 0;
+    if (sh_video->pts >= next_edl_record->stop_sec) return 1; // nothing to do...
+
+    if (!edl_seek_type) {
+        if(demux_seek(demuxer, next_edl_record->stop_sec - sh_video->pts, audio_delay, 0)){
+            sh_video->pts = demuxer->video->pts;
+            //if (vo_vobsub) vobsub_seek(vo_vobsub,sh_video->pts);
+            //if(vo_spudec) spudec_reset(vo_spudec);
+            if (audio_delay != 0.0) fixdelay(demuxer->video, d_audio, mux_a, frame_data, framecopy);
+            return 1;
+        }
+        // non-seekable stream.
+        return 0;
+    }
+
+    // slow seek, read every frame.
+
+    return slowseek(next_edl_record->stop_sec, demuxer->video, d_audio, mux_a, frame_data, framecopy, 1);
+}
+
 
 int main(int argc,char* argv[]){
 
@@ -397,6 +565,8 @@ off_t muxer_f_size=0;
 
 double v_pts_corr=0;
 double v_timer_corr=0;
+double sub_offset=0;
+int did_seek=0;
 
 m_entry_t* filelist = NULL;
 char* filename=NULL;
@@ -405,7 +575,6 @@ int decoded_frameno=0;
 int next_frameno=-1;
 int curfile=0;
 int new_srate=0;
-int fformat=DEMUXER_TYPE_UNKNOWN;
 
 unsigned int timer_start=0;
 ao_data_t ao_data = {0,0,0,0,OUTBURST,-1,0};
@@ -413,75 +582,35 @@ ao_data_t ao_data = {0,0,0,0,OUTBURST,-1,0};
 audio_encoding_params_t aparams;
 audio_encoder_t *aencoder = NULL;
 
-  mp_msg_init();
-  mp_msg(MSGT_CPLAYER,MSGL_INFO, "MEncoder " VERSION " (C) 2000-2006 MPlayer Team\n");
+user_correct_pts = 0;
 
-  /* Test for cpu capabilities (and corresponding OS support) for optimizing */
-  GetCpuCaps(&gCpuCaps);
-#ifdef ARCH_X86
-  mp_msg(MSGT_CPLAYER,MSGL_INFO,"CPUflags: Type: %d MMX: %d MMX2: %d 3DNow: %d 3DNow2: %d SSE: %d SSE2: %d\n",
-      gCpuCaps.cpuType,gCpuCaps.hasMMX,gCpuCaps.hasMMX2,
-      gCpuCaps.has3DNow, gCpuCaps.has3DNowExt,
-      gCpuCaps.hasSSE, gCpuCaps.hasSSE2);
-#ifdef RUNTIME_CPUDETECT
-  mp_msg(MSGT_CPLAYER,MSGL_INFO, MSGTR_CompiledWithRuntimeDetection);
-#else
-  mp_msg(MSGT_CPLAYER,MSGL_INFO, MSGTR_CompiledWithCPUExtensions);
-#ifdef HAVE_MMX
-  mp_msg(MSGT_CPLAYER,MSGL_INFO," MMX");
-#endif
-#ifdef HAVE_MMX2
-  mp_msg(MSGT_CPLAYER,MSGL_INFO," MMX2");
-#endif
-#ifdef HAVE_3DNOW
-  mp_msg(MSGT_CPLAYER,MSGL_INFO," 3DNow");
-#endif
-#ifdef HAVE_3DNOWEX
-  mp_msg(MSGT_CPLAYER,MSGL_INFO," 3DNowEx");
-#endif
-#ifdef HAVE_SSE
-  mp_msg(MSGT_CPLAYER,MSGL_INFO," SSE");
-#endif
-#ifdef HAVE_SSE2
-  mp_msg(MSGT_CPLAYER,MSGL_INFO," SSE2");
-#endif
-  mp_msg(MSGT_CPLAYER,MSGL_INFO,"\n\n");
-#endif
-#endif
+  common_preinit(&argc, &argv);
 
-#if defined(WIN32) && defined(USE_WIN32DLL)
-  set_path_env();
-#endif /*WIN32 && USE_WIN32DLL*/
-  
-  InitTimer();
+  // Create the config context and register the options
+  mconfig = m_config_new();
+  m_config_register_options(mconfig,mencoder_opts);
+  m_config_register_options(mconfig, common_opts);
 
-// check codec.conf
-if(!codecs_file || !parse_codec_cfg(codecs_file)){
-  if(!parse_codec_cfg(get_path("codecs.conf"))){
-    if(!parse_codec_cfg(MPLAYER_CONFDIR "/codecs.conf")){
-      if(!parse_codec_cfg(NULL)){
-	mencoder_exit(1,NULL);
-      }
-      mp_msg(MSGT_MENCODER,MSGL_V,MSGTR_BuiltinCodecsConf);
-    }
-  }
-}
+  // Preparse the command line
+  m_config_preparse_command_line(mconfig,argc,argv);
 
- mconfig = m_config_new();
- m_config_register_options(mconfig,mencoder_opts);
+  print_version("MEncoder");
+
  parse_cfgfiles(mconfig);
  filelist = m_config_parse_me_command_line(mconfig, argc, argv);
  if(!filelist) mencoder_exit(1, MSGTR_ErrorParsingCommandLine);
+ if (!common_init())
+   mencoder_exit(1,NULL);
 
 {
 	char *extension;
-	
+
 	if (!out_filename) mencoder_exit(1,MSGTR_MissingOutputFilename);
 	extension=strrchr(out_filename,'.');
 	if (extension != NULL && strlen(extension) > 3 && strlen(extension) < 6)
 	{
 		extension++;
-		
+
 		switch (out_file_format)
 		{
 			case MUXER_TYPE_AVI:
@@ -492,62 +621,24 @@ if(!codecs_file || !parse_codec_cfg(codecs_file)){
 			case MUXER_TYPE_MPEG:
 			if (strcasecmp(extension,"mpg") &&
 				strcasecmp(extension,"mpeg") &&
-				strcasecmp(extension,"vob")) 
+				strcasecmp(extension,"vob"))
 				mp_msg(MSGT_MENCODER, MSGL_WARN, MSGTR_MencoderWrongFormatMPG);
 			break;
 		}
 	}
-}				
+}
  /* Display what configure line was used */
  mp_msg(MSGT_MENCODER, MSGL_V, "Configuration: " CONFIGURATION "\n");
 
 
 if (frameno_filename) {
-  stream2=open_stream(frameno_filename,0,&i);
+  stream2=open_stream(frameno_filename, NULL, NULL);
   if(stream2){
     demuxer2=demux_open(stream2,DEMUXER_TYPE_AVI,-1,-1,-2,NULL);
     if(demuxer2) mp_msg(MSGT_MENCODER, MSGL_INFO, MSGTR_UsingPass3ControlFile, frameno_filename);
     else mp_msg(MSGT_DEMUXER,MSGL_ERR,MSGTR_FormatNotRecognized);
   }
 }
-
-#ifdef WIN32
-  if(proc_priority){
-    int i;
-    for(i=0; priority_presets_defs[i].name; i++){
-      if(strcasecmp(priority_presets_defs[i].name, proc_priority) == 0)
-        break;
-    }
-    mp_msg(MSGT_CPLAYER,MSGL_STATUS,MSGTR_SettingProcessPriority,
-					priority_presets_defs[i].name);
-    SetPriorityClass(GetCurrentProcess(), priority_presets_defs[i].prio);
-  }
-#endif	
-
-// check font
-#ifdef HAVE_FREETYPE
-  init_freetype();
-#endif
-#ifdef HAVE_FONTCONFIG
-  if(!font_fontconfig)
-  {
-#endif
-#ifdef HAVE_BITMAP_FONT
-  if(font_name){
-       vo_font=read_font_desc(font_name,font_factor,verbose>1);
-       if(!vo_font) mp_msg(MSGT_CPLAYER,MSGL_ERR,MSGTR_CantLoadFont,font_name);
-  } else {
-      // try default:
-       vo_font=read_font_desc(get_path("font/font.desc"),font_factor,verbose>1);
-       if(!vo_font)
-       vo_font=read_font_desc(MPLAYER_DATADIR "/font/font.desc",font_factor,verbose>1);
-  }
-#endif
-#ifdef HAVE_FONTCONFIG
-  }
-#endif
-
-  vo_init_osd();
 
   /* HACK, for some weird reason, push() has to be called twice,
      otherwise options are not saved correctly */
@@ -556,11 +647,21 @@ play_next_file:
   m_config_push(mconfig);
   m_entry_set_options(mconfig,&filelist[curfile]);
   filename = filelist[curfile].name;
- 
+
   if(!filename){
 	mp_msg(MSGT_CPLAYER, MSGL_FATAL, MSGTR_MissingFilename);
 	mencoder_exit(1,NULL);
   }
+
+  if (vobsub_name)
+    vo_vobsub = vobsub_open(vobsub_name, spudec_ifo, 1, &vo_spudec);
+#ifdef CONFIG_ASS
+  // must be before demuxer open, since the settings are
+  // used in generating the ASSTrack
+  if (ass_enabled && ass_library)
+    ass_mp_reset_config(ass_library);
+#endif
+
   stream=open_stream(filename,0,&file_format);
 
   if(!stream){
@@ -570,25 +671,74 @@ play_next_file:
 
   mp_msg(MSGT_CPLAYER, MSGL_INFO, MSGTR_OpenedStream, file_format, (int)(stream->start_pos), (int)(stream->end_pos));
 
-#ifdef USE_DVDREAD
+if(stream->type==STREAMTYPE_BD){
+  if(audio_lang && audio_id==-1) audio_id=bd_aid_from_lang(stream,audio_lang);
+  if(dvdsub_lang && dvdsub_id==-1) dvdsub_id=bd_sid_from_lang(stream,dvdsub_lang);
+}
+
+#ifdef CONFIG_LIBBLURAY
+if(stream->type==STREAMTYPE_BLURAY){
+  if(audio_lang && audio_id==-1) audio_id=bluray_id_from_lang(stream,stream_ctrl_audio,audio_lang);
+  if(dvdsub_lang && dvdsub_id==-1) dvdsub_id=bluray_id_from_lang(stream,stream_ctrl_sub,dvdsub_lang);
+}
+#endif
+
+#ifdef CONFIG_DVDREAD
 if(stream->type==STREAMTYPE_DVD){
   if(audio_lang && audio_id==-1) audio_id=dvd_aid_from_lang(stream,audio_lang);
-  if(dvdsub_lang && dvdsub_id==-2) dvdsub_id=dvd_sid_from_lang(stream,dvdsub_lang);
+  if(dvdsub_lang && dvdsub_id==-1) dvdsub_id=dvd_sid_from_lang(stream,dvdsub_lang);
+}
+#endif
+
+#ifdef CONFIG_DVDNAV
+if(stream->type==STREAMTYPE_DVDNAV){
+  if(audio_lang && audio_id==-1) audio_id=mp_dvdnav_aid_from_lang(stream,audio_lang);
+  if(dvdsub_lang && dvdsub_id==-1) dvdsub_id=mp_dvdnav_sid_from_lang(stream,dvdsub_lang);
 }
 #endif
 
   stream->start_pos+=seek_to_byte;
 
-  if(stream_cache_size>0) stream_enable_cache(stream,stream_cache_size*1024,0,0);
+  if(stream_cache_size>0) stream_enable_cache(stream,stream_cache_size*1024ull,0,0);
 
   if(demuxer2) audio_id=-2; /* do NOT read audio packets... */
 
-  //demuxer=demux_open(stream,file_format,video_id,audio_id,dvdsub_id);
   demuxer=demux_open(stream,file_format,audio_id,video_id,dvdsub_id,filename);
   if(!demuxer){
     mp_msg(MSGT_DEMUXER, MSGL_FATAL, MSGTR_FormatNotRecognized);
     mp_msg(MSGT_DEMUXER, MSGL_FATAL, MSGTR_CannotOpenDemuxer);
 	mencoder_exit(1,NULL);
+  }
+
+  if (ts_prog) {
+    demux_program_t prog = { .progid = ts_prog };
+    if (demux_control(demuxer, DEMUXER_CTRL_IDENTIFY_PROGRAM, &prog) != DEMUXER_CTRL_NOTIMPL) {
+      audio_id = prog.aid; // switching is handled by select_audio below
+      video_id = prog.vid; // switching is handled by select_video below
+    }
+  }
+  select_video(demuxer, video_id);
+  select_audio(demuxer, audio_id, audio_lang);
+
+  if (dvdsub_id == -1 && dvdsub_lang)
+    dvdsub_id = demuxer_sub_track_by_lang(demuxer, dvdsub_lang);
+
+  if (dvdsub_id == -1)
+    dvdsub_id = demuxer_default_sub_track(demuxer);
+
+  for (i = 0; i < MAX_S_STREAMS; i++) {
+    sh_sub_t *sh = demuxer->s_streams[i];
+    if (sh && sh->sid == dvdsub_id) {
+      demuxer->sub->id = i;
+      demuxer->sub->sh = sh;
+      break;
+    }
+  }
+
+  if(dvd_chapter>1) {
+    float pts;
+    if (demuxer_seek_chapter(demuxer, dvd_chapter-1, 1, &pts, NULL, NULL) >= 0 && pts > -1.0)
+      seek_to_sec = pts;
   }
 
 d_audio=demuxer2 ? demuxer2->audio : demuxer->audio;
@@ -599,7 +749,7 @@ sh_video=d_video->sh;
 
   if(!sh_video)
   {
-	mp_msg(MSGT_CPLAYER,MSGL_FATAL,MSGTR_VideoStreamRequired); 
+	mp_msg(MSGT_CPLAYER,MSGL_FATAL,MSGTR_VideoStreamRequired);
 	mencoder_exit(1,NULL);
   }
 
@@ -650,26 +800,6 @@ if(sh_audio && (out_audio_codec || seek_to_sec || !sh_audio->wf || playback_spee
     }
   }
 
-// after reading video params we should load subtitles because
-// we know fps so now we can adjust subtitles time to ~6 seconds AST
-// check .sub
-//  current_module="read_subtitles_file";
-  if(sub_name && sub_name[0]){
-    subdata=sub_read_file(sub_name[0], sh_video->fps);
-    if(!subdata) mp_msg(MSGT_CPLAYER,MSGL_ERR,MSGTR_CantLoadSub,sub_name[0]);
-  } else
-  if(sub_auto && filename) { // auto load sub file ...
-    char **tmp = NULL;
-    int i = 0;
-    char *psub = get_path( "sub/" );
-    tmp = sub_filenames((psub ? psub : ""), filename);
-    free(psub);
-    subdata=sub_read_file(tmp[0], sh_video->fps);
-    while (tmp[i])
-      free(tmp[i++]);
-    free(tmp);
-  }
-
 // set up video encoder:
 
 if (!curfile) { // curfile is non zero when a second file is opened
@@ -679,7 +809,7 @@ if (vobsub_out) {
     if (spudec_ifo && vobsub_parse_ifo(NULL,spudec_ifo, palette, &width, &height, 1, dvdsub_id, tmp) >= 0)
 	vobsub_writer = vobsub_out_open(vobsub_out, palette, sh_video->disp_w, sh_video->disp_h,
 					vobsub_out_id?vobsub_out_id:(char *)tmp, vobsub_out_index);
-#ifdef USE_DVDREAD
+#ifdef CONFIG_DVDREAD
     if (vobsub_writer == NULL) {
 	char tmp[3];
 	if (vobsub_out_id == NULL && stream->type == STREAMTYPE_DVD) {
@@ -699,22 +829,9 @@ if (vobsub_out) {
     }
 #endif
 }
-else {
-if (spudec_ifo) {
-  unsigned int palette[16], width, height;
-  if (vobsub_parse_ifo(NULL,spudec_ifo, palette, &width, &height, 1, -1, NULL) >= 0)
-    vo_spudec=spudec_new_scaled(palette, sh_video->disp_w, sh_video->disp_h);
+else if (!vo_spudec) {
+init_vo_spudec(stream, sh_video, d_dvdsub ? d_dvdsub->sh : NULL);
 }
-#ifdef USE_DVDREAD
-if (vo_spudec==NULL) {
-vo_spudec=spudec_new_scaled(stream->type==STREAMTYPE_DVD?((dvd_priv_t *)(stream->priv))->cur_pgc->palette:NULL,
-			    sh_video->disp_w, sh_video->disp_h);
-}
-#endif
-}
-
-// Apply current settings for forced subs
-spudec_set_forced_subs_only(vo_spudec,forced_subs_only);
 
 ostream = open_output_stream(out_filename, 0);
 if(!ostream) {
@@ -738,15 +855,16 @@ muxer->audio_delay_fix = audio_delay_fix;
 
 mux_v=muxer_new_stream(muxer,MUXER_TYPE_VIDEO);
 
-mux_v->buffer_size=0x200000; // 2MB
+mux_v->buffer_size=0x800000; // 8MB
 mux_v->buffer=malloc(mux_v->buffer_size);
 
 mux_v->source=sh_video;
 
 mux_v->h.dwSampleSize=0; // VBR
-#ifdef USE_LIBAVCODEC
+#ifdef CONFIG_FFMPEG
 {
-    AVRational q= av_d2q(force_ofps?force_ofps:sh_video->fps*playback_speed, 30000);
+    double fps = force_ofps?force_ofps:sh_video->fps*playback_speed;
+    AVRational q= av_d2q(fps, fps*1001+2);
     mux_v->h.dwScale= q.den;
     mux_v->h.dwRate = q.num;
 }
@@ -760,7 +878,6 @@ mux_v->codec=out_video_codec;
 mux_v->bih=NULL;
 }
 sh_video->codec=NULL;
-sh_video->video_out=NULL;
 sh_video->vfilter=NULL; // fixme!
 
 switch(mux_v->codec){
@@ -772,8 +889,8 @@ case VCODEC_COPY:
 		}
     else
     {
-	mux_v->bih=calloc(1,sizeof(BITMAPINFOHEADER));
-	mux_v->bih->biSize=sizeof(BITMAPINFOHEADER);
+	mux_v->bih=calloc(1,sizeof(*mux_v->bih));
+	mux_v->bih->biSize=sizeof(*mux_v->bih);
 	mux_v->bih->biWidth=sh_video->disp_w;
 	mux_v->bih->biHeight=sh_video->disp_h;
 	mux_v->bih->biCompression=sh_video->format;
@@ -812,8 +929,8 @@ case VCODEC_COPY:
     break;
 case VCODEC_FRAMENO:
 	if (!curfile) {
-    mux_v->bih=calloc(1,sizeof(BITMAPINFOHEADER));
-    mux_v->bih->biSize=sizeof(BITMAPINFOHEADER);
+    mux_v->bih=calloc(1,sizeof(*mux_v->bih));
+    mux_v->bih->biSize=sizeof(*mux_v->bih);
     mux_v->bih->biWidth=sh_video->disp_w;
     mux_v->bih->biHeight=sh_video->disp_h;
     mux_v->bih->biPlanes=1;
@@ -838,7 +955,7 @@ default: {
         sh_video->vfilter=vf_open_encoder(NULL,"xvid",(char *)mux_v); break;
     case VCODEC_QTVIDEO:
         sh_video->vfilter=vf_open_encoder(NULL,"qtvideo",(char *)mux_v); break;
-    case VCODEC_NUV:        
+    case VCODEC_NUV:
         sh_video->vfilter=vf_open_encoder(NULL,"nuv",(char *)mux_v); break;
     case VCODEC_X264:
         sh_video->vfilter=vf_open_encoder(NULL,"x264",(char *)mux_v); break;
@@ -850,16 +967,64 @@ default: {
     ve = sh_video->vfilter;
   } else sh_video->vfilter = ve;
     // append 'expand' filter, it fixes stride problems and renders osd:
+#ifdef CONFIG_ASS
+    if (auto_expand && !ass_enabled) { /* we do not want both */
+#else
     if (auto_expand) {
+#endif
       char* vf_args[] = { "osd", "1", NULL };
       sh_video->vfilter=vf_open_filter(sh_video->vfilter,"expand",vf_args);
     }
-    sh_video->vfilter=append_filters(sh_video->vfilter);
+
+#ifdef CONFIG_ASS
+  if(ass_enabled) {
+    int i;
+    int insert = 1;
+    if (vf_settings)
+      for (i = 0; vf_settings[i].name; ++i)
+        if (strcmp(vf_settings[i].name, "ass") == 0) {
+          insert = 0;
+          break;
+        }
+    if (insert) {
+      char* vf_arg[] = {"auto", "1", NULL};
+      vf_instance_t* vf_ass = vf_open_filter(sh_video->vfilter,"ass",vf_arg);
+      if (vf_ass)
+        sh_video->vfilter=vf_ass;
+      else
+        mp_msg(MSGT_CPLAYER,MSGL_ERR, "ASS: cannot add video filter\n");
+    }
+
+    if (ass_library) {
+      for (i = 0; i < demuxer->num_attachments; ++i) {
+        demux_attachment_t* att = demuxer->attachments + i;
+        if (extract_embedded_fonts &&
+            att->name && att->type && att->data && att->data_size &&
+            (strcmp(att->type, "application/x-truetype-font") == 0 ||
+             strcmp(att->type, "application/x-font") == 0))
+          ass_add_font(ass_library, att->name, att->data, att->data_size);
+      }
+    }
+  }
+#endif
+
+  sh_video->vfilter=append_filters(sh_video->vfilter);
+  eosd_init(sh_video->vfilter);
+
+#ifdef CONFIG_ASS
+  if (ass_enabled)
+    eosd_ass_init(ass_library);
+#endif
+
+// after reading video params we should load subtitles because
+// we know fps so now we can adjust subtitles time to ~6 seconds AST
+// check .sub
+    load_subtitles(filename, sh_video->fps, add_subtitles);
 
     mp_msg(MSGT_CPLAYER,MSGL_INFO,"==========================================================================\n");
     init_best_video_codec(sh_video,video_codec_list,video_fm_list);
     mp_msg(MSGT_CPLAYER,MSGL_INFO,"==========================================================================\n");
-    if(!sh_video->inited) mencoder_exit(1,NULL);
+    if(!sh_video->initialized) mencoder_exit(1,NULL);
  }
 }
 
@@ -904,10 +1069,9 @@ mux_a->codec=out_audio_codec;
 ao_data.samplerate = force_srate;
 ao_data.channels = 0;
 ao_data.format = audio_output_format;
-if(!preinit_audio_filters(sh_audio,
+if(!init_audio_filters(sh_audio,
    // input:
    new_srate,
-   sh_audio->channels, sh_audio->sample_format,
    // output:
    &ao_data.samplerate, &ao_data.channels, &ao_data.format)) {
      mp_msg(MSGT_CPLAYER,MSGL_ERR,MSGTR_AudioFilterChainPreinitError);
@@ -916,18 +1080,21 @@ if(!preinit_audio_filters(sh_audio,
 
 aparams.channels = ao_data.channels;
 aparams.sample_rate = ao_data.samplerate;
+aparams.sample_format = ao_data.format;
 aparams.audio_preload = 1000 * audio_preload;
 if(mux_a->codec != ACODEC_COPY) {
     aencoder = new_audio_encoder(mux_a, &aparams);
     if(!aencoder)
         mencoder_exit(1, NULL);
-    if(!init_audio_filters(sh_audio, 
-        new_srate, sh_audio->channels, sh_audio->sample_format,  
-        &aparams.sample_rate, &aparams.channels, &aencoder->input_format, 
-        aencoder->min_buffer_size, aencoder->max_buffer_size)) {
+    if(!init_audio_filters(sh_audio,
+        new_srate,
+        &aparams.sample_rate, &aparams.channels, &aencoder->input_format)) {
       mp_msg(MSGT_CPLAYER,MSGL_FATAL,MSGTR_NoMatchingFilter);
       mencoder_exit(1,NULL);
     }
+    ao_data.format = aencoder->input_format;
+    ao_data.channels = aparams.channels;
+    ao_data.samplerate = aparams.sample_rate;
 }
 switch(mux_a->codec){
 case ACODEC_COPY:
@@ -937,11 +1104,11 @@ case ACODEC_COPY:
 	mencoder_exit(1,NULL);
     }
     if (sh_audio->wf){
-	mux_a->wf=malloc(sizeof(WAVEFORMATEX) + sh_audio->wf->cbSize);
-	memcpy(mux_a->wf, sh_audio->wf, sizeof(WAVEFORMATEX) + sh_audio->wf->cbSize);
+	mux_a->wf=malloc(sizeof(*mux_a->wf) + sh_audio->wf->cbSize);
+	memcpy(mux_a->wf, sh_audio->wf, sizeof(*mux_a->wf) + sh_audio->wf->cbSize);
 	if(!sh_audio->i_bps) sh_audio->i_bps=mux_a->wf->nAvgBytesPerSec;
     } else {
-	mux_a->wf = malloc(sizeof(WAVEFORMATEX));
+	mux_a->wf = malloc(sizeof(*mux_a->wf));
 	mux_a->wf->nBlockAlign = 1; //mux_a->h.dwSampleSize;
 	mux_a->wf->wFormatTag = sh_audio->format;
 	mux_a->wf->nChannels = sh_audio->channels;
@@ -1021,11 +1188,9 @@ else {
 		int out_srate = mux_a->wf->nSamplesPerSec;
 		int out_channels = mux_a->wf->nChannels;
 		int out_format = aencoder->input_format;
-		int out_minsize = aencoder->min_buffer_size;
-		int out_maxsize = aencoder->max_buffer_size;
-		if (!init_audio_filters(sh_audio, new_srate, sh_audio->channels,
-					sh_audio->sample_format, &out_srate, &out_channels,
-					&out_format, out_minsize, out_maxsize)) {
+		if (!init_audio_filters(sh_audio, new_srate,
+					&out_srate, &out_channels,
+					&out_format)) {
 			mp_msg(MSGT_CPLAYER, MSGL_FATAL, MSGTR_NoMatchingFilter);
 			mencoder_exit(1, NULL);
 		}
@@ -1055,7 +1220,7 @@ if (out_file_format == MUXER_TYPE_MPEG)
 	}
 	}
 
-if(file_format == DEMUXER_TYPE_TV) 
+if(file_format == DEMUXER_TYPE_TV)
 	{
 	mp_msg(MSGT_MENCODER, MSGL_WARN, MSGTR_ZeroingAudioPreloadAndMaxPtsCorrection);
 	audio_preload = 0.0;
@@ -1063,7 +1228,7 @@ if(file_format == DEMUXER_TYPE_TV)
 	}
 
 play_n_frames=play_n_frames_mf;
-if (curfile && end_at.type == END_AT_TIME) end_at.pos += mux_v->timer;
+if (curfile && end_at.type == END_AT_TIME) end_at.pos += adjusted_muxer_time(mux_v);
 
 if (edl_records) free_edl(edl_records);
 next_edl_record = edl_records = NULL;
@@ -1075,20 +1240,35 @@ if (edl_filename) {
 
 if (sh_audio && audio_delay != 0.) fixdelay(d_video, d_audio, mux_a, &frame_data, mux_v->codec==VCODEC_COPY);
 
-while(!at_eof){
+// Just assume a seek. Also works if time stamps do not start with 0
+did_seek = 1;
+
+while(at_eof != 3){
 
     int blit_frame=0;
     float a_pts=0;
     float v_pts=0;
     int skip_flag=0; // 1=skip  -1=duplicate
+    double a_muxer_time;
+    double v_muxer_time;
+    int force_audio = at_eof & 1;
+
+    a_muxer_time = adjusted_muxer_time(mux_a);
+    v_muxer_time = adjusted_muxer_time(mux_v);
+    at_eof = sh_audio ? 0 : 2;
 
     if((end_at.type == END_AT_SIZE && end_at.pos <= stream_tell(muxer->stream))  ||
-       (end_at.type == END_AT_TIME && end_at.pos < mux_v->timer))
+       (end_at.type == END_AT_TIME && end_at.pos < v_muxer_time))
         break;
 
     if(play_n_frames>=0){
       --play_n_frames;
       if(play_n_frames<0) break;
+    }
+    if(dvd_last_chapter>0) {
+      int cur_chapter = demuxer_get_current_chapter(demuxer);
+      if(cur_chapter!=-1 && cur_chapter+1>dvd_last_chapter)
+        break;
     }
 
 goto_redo_edl:
@@ -1101,9 +1281,10 @@ goto_redo_edl:
 
             result = edl_seek(next_edl_record, demuxer, d_audio, mux_a, &frame_data, mux_v->codec==VCODEC_COPY);
 
-            if (result == 2) { at_eof=1; break; } // EOF
+            if (result == 2) { at_eof=3; break; } // EOF
             else if (result == 0) edl_seeking = 0; // no seeking
             else { // sucess
+                did_seek = 1;
                 edl_muted = 0;
                 if (last_pos >= sh_video->pts) {
                     // backwards seek detected!! Forget about this EDL skip altogether.
@@ -1132,16 +1313,17 @@ goto_redo_edl:
 
 if(sh_audio){
     // get audio:
-    while(mux_a->timer-audio_preload<mux_v->timer){
+    while(force_audio || a_muxer_time-audio_preload<v_muxer_time){
         float tottime;
-	int len=0;
+	int bytes_to_mux=0;
+	force_audio = 0;
 
 	ptimer_start = GetTimerMS();
 	// CBR - copy 0.5 sec of audio
 	// or until the end of video:
 	tottime = stop_time(demuxer, mux_v);
 	if (tottime != -1) {
-		tottime -= mux_a->timer;
+		tottime -= a_muxer_time;
 		if (tottime > 1./audio_density) tottime = 1./audio_density;
 	}
 	else tottime = 1./audio_density;
@@ -1153,6 +1335,7 @@ if(sh_audio){
 	{
 		if(mux_a->h.dwSampleSize) /* CBR */
 		{
+			int len;
 			if(aencoder->set_decoded_len)
 			{
 				len = mux_a->h.dwSampleSize*(int)(mux_a->h.dwRate*tottime);
@@ -1162,70 +1345,73 @@ if(sh_audio){
 				len = aencoder->decode_buffer_size;
 
 			len = dec_audio(sh_audio, aencoder->decode_buffer, len);
-			mux_a->buffer_len += aencoder->encode(aencoder, mux_a->buffer + mux_a->buffer_len, 
-				aencoder->decode_buffer, len, mux_a->buffer_size-mux_a->buffer_len);
-			if(mux_a->buffer_len < mux_a->wf->nBlockAlign)
-				len = 0;
-			else 
-				len = mux_a->wf->nBlockAlign*(mux_a->buffer_len/mux_a->wf->nBlockAlign);
+			mux_a->buffer_len += aencoder->encode(aencoder, mux_a->buffer + mux_a->buffer_len,
+				len <= 0 && sh_audio->ds->eof ? NULL : aencoder->decode_buffer, len, mux_a->buffer_size-mux_a->buffer_len);
+			if(mux_a->buffer_len >= mux_a->wf->nBlockAlign)
+				bytes_to_mux = mux_a->wf->nBlockAlign*(mux_a->buffer_len/mux_a->wf->nBlockAlign);
 		}
 		else	/* VBR */
 		{
 			int sz = 0;
 			while(1)
 			{
-				len = 0;
+				int len;
 				if(! sz)
 					sz = aencoder->get_frame_size(aencoder);
 				if(sz > 0 && mux_a->buffer_len >= sz)
 				{
-					len = sz;
+					bytes_to_mux = sz;
 					break;
 				}
 				len = dec_audio(sh_audio,aencoder->decode_buffer, aencoder->decode_buffer_size);
 				if(len <= 0)
 				{
-					len = 0;
-					break;
-				}
-				len = aencoder->encode(aencoder, mux_a->buffer + mux_a->buffer_len, aencoder->decode_buffer, len, mux_a->buffer_size-mux_a->buffer_len);
+					// try flushing encoder
+					if (sh_audio->ds->eof)
+						len = aencoder->encode(aencoder, mux_a->buffer + mux_a->buffer_len, NULL, 0, mux_a->buffer_size-mux_a->buffer_len);
+					if (len <= 0)
+						break;
+				} else
+					len = aencoder->encode(aencoder, mux_a->buffer + mux_a->buffer_len, aencoder->decode_buffer, len, mux_a->buffer_size-mux_a->buffer_len);
 				mux_a->buffer_len += len;
 			}
 	    }
-	    if (mux_v->timer == 0) mux_a->h.dwInitialFrames++;
+	    if (v_muxer_time == 0) mux_a->h.dwInitialFrames++;
 	}
-	else {
+	else if (mux_a->codec == ACODEC_COPY) {
 	if(mux_a->h.dwSampleSize){
-	    switch(mux_a->codec){
-	    case ACODEC_COPY: // copy
+	    int len;
 		len=mux_a->wf->nAvgBytesPerSec*tottime;
 		len/=mux_a->h.dwSampleSize;if(len<1) len=1;
 		len*=mux_a->h.dwSampleSize;
-		len=demux_read_data(sh_audio->ds,mux_a->buffer,len);
-		break;
-	    }
+		bytes_to_mux=demux_read_data(sh_audio->ds,mux_a->buffer,len);
 	} else {
 	    // VBR - encode/copy an audio frame
-	    switch(mux_a->codec){
-	    case ACODEC_COPY: // copy
-		len=ds_get_packet(sh_audio->ds,(unsigned char**) &mux_a->buffer);
-		break;
-		}
+		bytes_to_mux=ds_get_packet(sh_audio->ds,(unsigned char**) &mux_a->buffer);
 	    }
 	}
-	if(len<=0) break; // EOF?
-	muxer_write_chunk(mux_a,len,0x10, MP_NOPTS_VALUE, MP_NOPTS_VALUE);
-	if(!mux_a->h.dwSampleSize && mux_a->timer>0)
-	    mux_a->wf->nAvgBytesPerSec=0.5f+(double)mux_a->size/mux_a->timer; // avg bps (VBR)
-	if(mux_a->buffer_len>=len){
-	    mux_a->buffer_len-=len;
-	    memcpy(mux_a->buffer,mux_a->buffer+len,mux_a->buffer_len);
+	if(bytes_to_mux<=0) {
+	    // EOF?
+	    if (!sh_audio->a_out_buffer_len && sh_audio->ds->eof) {
+		if (mux_a->buffer_len)
+	           mp_msg(MSGT_MENCODER, MSGL_WARN, "Audio data left in buffer at end of file. Probably bug in audio encoder, please report.");
+	        at_eof |= 2;
+	    }
+	    break;
+	}
+	muxer_write_chunk(mux_a,bytes_to_mux,AVIIF_KEYFRAME, MP_NOPTS_VALUE, MP_NOPTS_VALUE);
+	a_muxer_time = adjusted_muxer_time(mux_a); // update after muxing
+	if(!mux_a->h.dwSampleSize && a_muxer_time>0)
+	    mux_a->wf->nAvgBytesPerSec=0.5f+(double)mux_a->size/a_muxer_time; // avg bps (VBR)
+	if(mux_a->buffer_len>=bytes_to_mux){
+	    mux_a->buffer_len-=bytes_to_mux;
+	    memmove(mux_a->buffer,mux_a->buffer+bytes_to_mux,mux_a->buffer_len);
 	}
 
 
 	audiosamples++;
 	audiorate+= (GetTimerMS() - ptimer_start);
-	
+
     }
 }
 
@@ -1233,10 +1419,17 @@ if(sh_audio){
 
     if (!frame_data.already_read) {
         frame_data.in_size=video_read_frame(sh_video,&frame_data.frame_time,&frame_data.start,force_fps);
+        frame_data.flush = frame_data.in_size < 0 && d_video->eof && (at_eof & 2) &&
+                           mux_v->codec != VCODEC_COPY &&
+                           mux_v->codec != VCODEC_FRAMENO;
+        if (frame_data.flush) {
+            frame_data.in_size = 0;
+            frame_data.start = NULL;
+        }
         sh_video->timer+=frame_data.frame_time;
     }
     frame_data.frame_time /= playback_speed;
-    if(frame_data.in_size<0){ at_eof=1; break; }
+    if(frame_data.in_size<0){ frame_data.already_read = 0; at_eof|=1; continue; }
     ++decoded_frameno;
 
     v_timer_corr-=frame_data.frame_time-(float)mux_v->h.dwScale/mux_v->h.dwRate;
@@ -1246,28 +1439,24 @@ if(demuxer2){	// 3-pass encoding, read control file (frameno.avi)
 	while(next_frameno<decoded_frameno){
 	    int* start;
 	    int len=ds_get_packet(demuxer2->video,(unsigned char**) &start);
-	    if(len<0){ at_eof=1;break;}
+	    if(len<0){ at_eof|=1;break;}
 	    if(len==0) --skip_flag; else  // duplicate
 	    if(len==4) next_frameno=start[0];
 	}
-    if(at_eof) break;
-	// if(skip_flag) printf("!!!!!!!!!!!!\n");
+    if(at_eof) continue;
 	skip_flag=next_frameno-decoded_frameno;
     // find next frame:
 	while(next_frameno<=decoded_frameno){
 	    int* start;
 	    int len=ds_get_packet(demuxer2->video,(unsigned char**) &start);
-	    if(len<0){ at_eof=1;break;}
+	    if(len<0){ at_eof|=1;break;}
 	    if(len==0) --skip_flag; else  // duplicate
 	    if(len==4) next_frameno=start[0];
 	}
-//    if(at_eof) break;
-//	    printf("Current fno=%d  requested=%d  skip=%d  \n",decoded_frameno,fno,skip_flag);
 } else {
 
 // check frame duplicate/drop:
 
-//printf("\r### %5.3f ###\n",v_timer_corr);
 float mux_frametime = (float)mux_v->h.dwScale/mux_v->h.dwRate;
 
 if (v_timer_corr >= mux_frametime && (skip_limit<0 || skip_flag < skip_limit)) {
@@ -1300,20 +1489,37 @@ ptimer_start = GetTimerMS();
 switch(mux_v->codec){
 case VCODEC_COPY:
     mux_v->buffer=frame_data.start;
-    if(skip_flag<=0) muxer_write_chunk(mux_v,frame_data.in_size,(sh_video->ds->flags&1)?0x10:0, MP_NOPTS_VALUE, MP_NOPTS_VALUE);
+    if(skip_flag<=0) muxer_write_chunk(mux_v,frame_data.in_size,(sh_video->ds->flags&1)?AVIIF_KEYFRAME:0, MP_NOPTS_VALUE, MP_NOPTS_VALUE);
     break;
 case VCODEC_FRAMENO:
     mux_v->buffer=(unsigned char *)&decoded_frameno; // tricky
-    if(skip_flag<=0) muxer_write_chunk(mux_v,sizeof(int),0x10, MP_NOPTS_VALUE, MP_NOPTS_VALUE);
+    if(skip_flag<=0) muxer_write_chunk(mux_v,sizeof(int),AVIIF_KEYFRAME, MP_NOPTS_VALUE, MP_NOPTS_VALUE);
     break;
 default:
     // decode_video will callback down to ve_*.c encoders, through the video filters
-    {void *decoded_frame = decode_video(sh_video,frame_data.start,frame_data.in_size,
-      skip_flag>0 && (!sh_video->vfilter || ((vf_instance_t *)sh_video->vfilter)->control(sh_video->vfilter, VFCTRL_SKIP_NEXT_FRAME, 0) != CONTROL_TRUE), MP_NOPTS_VALUE);
-    blit_frame = decoded_frame && filter_video(sh_video, decoded_frame, MP_NOPTS_VALUE);}
-    
-    if (sh_video->vf_inited < 0) mencoder_exit(1, NULL);
-    
+    {
+    int drop_frame = skip_flag > 0 &&
+                     (!sh_video->vfilter ||
+                      ((vf_instance_t *)sh_video->vfilter)->control(sh_video->vfilter, VFCTRL_SKIP_NEXT_FRAME, 0) != CONTROL_TRUE);
+    void *decoded_frame = decode_video(sh_video,frame_data.start,frame_data.in_size,
+                                       drop_frame, MP_NOPTS_VALUE, NULL);
+    if (frame_data.flush && !decoded_frame)
+        at_eof = 3;
+    if (did_seek && sh_video->pts != MP_NOPTS_VALUE) {
+        did_seek = 0;
+        sub_offset = sh_video->pts;
+    }
+    // NOTE: this is not really correct, but it allows -ass to work mostly
+    // v_muxer_time was tried before, but it is completely off when -ss is used
+    // (see bug #1960).
+    // sh_video->pts causes flickering with subtitles and complaints from MPEG-4
+    // encoder due to not being monotonic.
+    // If you change this please note the reason here!
+    blit_frame = decoded_frame && filter_video(sh_video, decoded_frame, v_muxer_time + sub_offset);}
+    v_muxer_time = adjusted_muxer_time(mux_v); // update after muxing
+
+    if (sh_video->vf_initialized < 0) mencoder_exit(1, NULL);
+
     if(!blit_frame){
       if (play_n_frames >= 0)
         play_n_frames++;
@@ -1368,27 +1574,19 @@ if(sh_audio && !demuxer2){
         unsigned int samples=(sh_audio->audio.dwSampleSize)?
           ((ds_tell(d_audio)-sh_audio->a_in_buffer_len)/sh_audio->audio.dwSampleSize) :
           (d_audio->block_no); // <- used for VBR audio
-//	printf("samples=%d  \n",samples);
         a_pts=samples*(float)sh_audio->audio.dwScale/(float)sh_audio->audio.dwRate;
-      delay_corrected=1;
-    } else 
+    } else
 #endif
     {
       // PTS = (last timestamp) + (bytes after last timestamp)/(bytes per sec)
-      a_pts=d_audio->pts;
-      if(!delay_corrected) if(a_pts) delay_corrected=1;
-      //printf("*** %5.3f ***\n",a_pts);
-      a_pts+=(ds_tell_pts(d_audio)-sh_audio->a_in_buffer_len)/(float)sh_audio->i_bps;
+      a_pts=calc_a_pts(sh_audio, d_audio);
     }
     v_pts=sh_video ? sh_video->pts : d_video->pts;
     // av = compensated (with out buffering delay) A-V diff
     AV_delay=(a_pts-v_pts);
     AV_delay-=audio_delay;
     AV_delay /= playback_speed;
-    AV_delay-=mux_a->timer-(mux_v->timer-(v_timer_corr+v_pts_corr));
-    // adjust for encoder delays
-    AV_delay -= (float) mux_a->encoder_delay * mux_a->h.dwScale/mux_a->h.dwRate;
-    AV_delay += (float) mux_v->encoder_delay * mux_v->h.dwScale/mux_v->h.dwRate;
+    AV_delay-=a_muxer_time-(v_muxer_time-(v_timer_corr+v_pts_corr));
 	// compensate input video timer by av:
         x=AV_delay*0.1f;
         if(x<-max_pts_correction) x=-max_pts_correction; else
@@ -1402,26 +1600,10 @@ if(sh_audio && !demuxer2){
 	v_pts_corr+=x;
 }
 
-//    printf("A:%6.1f V:%6.1f A-V:%7.3f oAV:%7.3f diff:%7.3f ct:%7.3f vpc:%7.3f   \r",
-//	a_pts,v_pts,a_pts-v_pts,
-//	(float)(mux_a->timer-mux_v->timer),
-//	AV_delay, c_total, v_pts_corr );
-//    printf("V:%6.1f \r", d_video->pts );
-
-#if 0
-    mp_msg(MSGT_AVSYNC,MSGL_STATUS,"A:%6.1f V:%6.1f A-V:%7.3f ct:%7.3f  %3d/%3d  %2d%% %2d%% %4.1f%%  %d%%\r",
-	  a_pts,v_pts,a_pts-v_pts,c_total,
-          (int)sh_video->num_frames,(int)sh_video->num_frames_decoded,
-          (sh_video->timer>0.5)?(int)(100.0*video_time_usage/(double)sh_video->timer):0,
-          (sh_video->timer>0.5)?(int)(100.0*vout_time_usage/(double)sh_video->timer):0,
-          (sh_video->timer>0.5)?(100.0*audio_time_usage/(double)sh_video->timer):0
-	  ,cache_fill_status
-        );
-#endif
-
     {	float t=(GetTimerMS()-timer_start)*0.001f;
 	float len=(demuxer->movi_end-demuxer->movi_start);
-	float p=len>1000 ? (float)(demuxer->filepos-demuxer->movi_start) / len :
+	off_t pos = demuxer->filepos >= 0 ? demuxer->filepos : stream_tell(demuxer->stream);
+	float p=len>1000 ? (float)(pos-demuxer->movi_start) / len :
                 (demuxer_get_percent_pos(demuxer) / 100.0);
 #if 0
 	if(!len && sh_audio && sh_audio->audio.dwLength>100){
@@ -1429,53 +1611,46 @@ if(sh_audio && !demuxer2){
 	     / (float)(sh_audio->audio.dwLength);
 	}
 #endif
-#if 0
-	mp_msg(MSGT_AVSYNC,MSGL_STATUS,"%d < %d < %d  \r",
-	    (int)demuxer->movi_start,
-	    (int)demuxer->filepos,
-	    (int)demuxer->movi_end);
-#else
       if(!quiet) {
-	if( mp_msg_test(MSGT_AVSYNC,MSGL_V) ) {
-		mp_msg(MSGT_AVSYNC,MSGL_STATUS,"Pos:%6.1fs %6df (%2d%%) %3dfps Trem:%4dmin %3dmb  A-V:%5.3f [%d:%d] A/Vms %d/%d D/B/S %d/%d/%d \r",
-	    	mux_v->timer, decoded_frameno, (int)(p*100),
+	if( mp_msg_test(MSGT_STATUSLINE,MSGL_V) ) {
+		mp_msg(MSGT_STATUSLINE,MSGL_STATUS,"VPos:%6.1fs APos:%6.1fs %6df (%2d%%) %3dfps Trem:%4dmin %3dmb  A-V:%5.3f [%d:%d] A/Vms %d/%d D/B/S %d/%d/%d \r",
+	    	v_muxer_time, a_muxer_time, decoded_frameno, (int)(p*100),
 	    	(t>1) ? (int)(decoded_frameno/t+0.5) : 0,
-	    	(p>0.001) ? (int)((t/p-t)/60) : 0, 
+	    	(p>0.001) ? (int)((t/p-t)/60) : 0,
 	    	(p>0.001) ? (int)(stream_tell(muxer->stream)/p/1024/1024) : 0,
 	    	v_pts_corr,
-	    	(mux_v->timer>1) ? (int)(mux_v->size/mux_v->timer/125) : 0,
-	    	(mux_a && mux_a->timer>1) ? (int)(mux_a->size/mux_a->timer/125) : 0,
+	    	(v_muxer_time>1) ? (int)(mux_v->size/v_muxer_time/125) : 0,
+	    	(mux_a && a_muxer_time>1) ? (int)(mux_a->size/a_muxer_time/125) : 0,
 			audiorate/audiosamples, videorate/videosamples,
 			duplicatedframes, badframes, skippedframes
 		);
 	} else
-	mp_msg(MSGT_AVSYNC,MSGL_STATUS,"Pos:%6.1fs %6df (%2d%%) %5.2ffps Trem:%4dmin %3dmb  A-V:%5.3f [%d:%d]\r",
-	    mux_v->timer, decoded_frameno, (int)(p*100),
+	mp_msg(MSGT_STATUSLINE,MSGL_STATUS,"Pos:%6.1fs %6df (%2d%%) %5.2ffps Trem:%4dmin %3dmb  A-V:%5.3f [%d:%d]\r",
+	    v_muxer_time, decoded_frameno, (int)(p*100),
 	    (t>1) ? (float)(decoded_frameno/t) : 0,
-	    (p>0.001) ? (int)((t/p-t)/60) : 0, 
+	    (p>0.001) ? (int)((t/p-t)/60) : 0,
 	    (p>0.001) ? (int)(stream_tell(muxer->stream)/p/1024/1024) : 0,
 	    v_pts_corr,
-	    (mux_v->timer>1) ? (int)(mux_v->size/mux_v->timer/125) : 0,
-	    (mux_a && mux_a->timer>1) ? (int)(mux_a->size/mux_a->timer/125) : 0
+	    (v_muxer_time>1) ? (int)(mux_v->size/v_muxer_time/125) : 0,
+	    (mux_a && a_muxer_time>1) ? (int)(mux_a->size/a_muxer_time/125) : 0
 	);
       }
-#endif
     }
         fflush(stdout);
 
-#ifdef USE_DVDREAD
+#ifdef CONFIG_DVDREAD
 // DVD sub:
  if(vobsub_writer){
      unsigned char* packet=NULL;
      int len;
-     while((len=ds_get_packet_sub(d_dvdsub,&packet))>0){
+     while((len=ds_get_packet_sub(d_dvdsub,&packet, NULL, NULL))>0){
 	 mp_msg(MSGT_MENCODER,MSGL_V,"\rDVD sub: len=%d  v_pts=%5.3f  s_pts=%5.3f  \n",len,sh_video->pts,d_dvdsub->pts);
-	     vobsub_out_output(vobsub_writer,packet,len,mux_v->timer + d_dvdsub->pts - sh_video->pts);
+	     vobsub_out_output(vobsub_writer,packet,len,v_muxer_time + d_dvdsub->pts - sh_video->pts);
      }
  }
  else
 #endif
-    update_subtitles(sh_video, d_dvdsub, 0);
+    update_subtitles(sh_video, sh_video->pts, d_dvdsub, 0);
 
  frame_data = (s_frame_data){ .start = NULL, .in_size = 0, .frame_time = 0., .already_read = 0 };
 
@@ -1523,6 +1698,9 @@ if(aencoder)
     if(aencoder->fixup)
         aencoder->fixup(aencoder);
 
+/* flush muxer just in case, this is a no-op unless
+ * we created a stream but never wrote frames to it... */
+muxer_flush(muxer);
 if (muxer->cont_write_index) muxer_write_index(muxer);
 muxer_f_size=stream_tell(muxer->stream);
 stream_seek(muxer->stream,0);
@@ -1557,175 +1735,4 @@ if(demuxer) free_demuxer(demuxer);
 if(stream) free_stream(stream); // kill cache thread
 
 return interrupted;
-}
-
-
-#if 0
-/* Flip the image in src and store the result in dst. src and dst may overlap.
-   width is the size of each line in bytes. */
-static uint8_t* flip_upside_down(uint8_t* dst, const uint8_t* src, int width,
-                                 int height)
-{
-    uint8_t* tmp = malloc(width);
-    int i;
-
-    for(i = 0; i < height/2; i++) {
-        memcpy(tmp, &src[i*width], width);
-        memcpy(&dst[i * width], &src[(height - i) * width], width);
-        memcpy(&dst[(height - i) * width], tmp, width);
-    }
-
-    free(tmp);
-    return dst;
-}
-#endif
-
-
-static float stop_time(demuxer_t* demuxer, muxer_stream_t* mux_v) {
-	float timeleft = -1;
-	if (play_n_frames >= 0) timeleft = mux_v->timer + play_n_frames * (double)(mux_v->h.dwScale) / mux_v->h.dwRate;
-	if (end_at.type == END_AT_TIME && (timeleft > end_at.pos || timeleft == -1)) timeleft = end_at.pos;
-	if (next_edl_record && demuxer && demuxer->video) { // everything is OK to be checked
-		float tmp = mux_v->timer + next_edl_record->start_sec - demuxer->video->pts;
-		if (timeleft == -1 || timeleft > tmp) {
-			// There's less time in EDL than what we already know
-			if (next_edl_record->action == EDL_SKIP && edl_seeking) {
-				timeleft = tmp;
-			} else if (next_edl_record->action == EDL_MUTE) {
-				//timeleft = next_edl_record->start_sec - demuxer->video->pts;
-				// For the moment (and probably forever) EDL mute doesn't work in MEncoder
-			}
-		}
-	}
-	return timeleft;
-}
-
-static float calc_a_pts(demux_stream_t *d_audio) {
-    sh_audio_t * sh_audio = d_audio ? d_audio->sh : NULL;
-    float a_pts = 0.;
-    if (sh_audio)
-        a_pts = d_audio->pts + (ds_tell_pts(d_audio) - sh_audio->a_in_buffer_len)/(float)sh_audio->i_bps;
-    return a_pts;
-}
-
-static float forward_audio(float pts, demux_stream_t *d_audio, muxer_stream_t* mux_a) {
-    sh_audio_t * sh_audio = d_audio ? d_audio->sh : NULL;
-    int samplesize, avg;
-    float a_pts = calc_a_pts(d_audio);
-
-    if (!sh_audio) return a_pts;
-
-    if (sh_audio->audio.dwScale) samplesize = sh_audio->audio.dwSampleSize;
-    else samplesize = (sh_audio->wf ? sh_audio->wf->nBlockAlign : 1);
-    avg = (sh_audio->wf ? sh_audio->wf->nAvgBytesPerSec : sh_audio->i_bps);
-
-    // after a demux_seek, a_pts will be zero until you read some audio.
-    // carefully checking if a_pts is truely correct by reading tiniest amount of data possible.
-    if (pts > a_pts && a_pts == 0.0 && samplesize) {
-        if (demux_read_data(sh_audio->ds,mux_a->buffer,samplesize) <= 0) return a_pts; // EOF
-        a_pts = calc_a_pts(d_audio);
-    }
-
-    while (pts > a_pts) {
-        int len;
-        if (samplesize) {
-            len = avg * (pts - a_pts > 0.5 ? 0.5 : pts - a_pts);
-            len/= samplesize; if(len<1) len=1;
-            len*= samplesize;
-            len = demux_read_data(sh_audio->ds,mux_a->buffer,len);
-        } else {
-            unsigned char * crap;
-            len = ds_get_packet(sh_audio->ds, &crap);
-        }
-        if (len <= 0) break; // EOF of audio.
-        a_pts = calc_a_pts(d_audio);
-    }
-    return a_pts;
-}
-
-static int slowseek(float end_pts, demux_stream_t *d_video, demux_stream_t *d_audio, muxer_stream_t* mux_a, s_frame_data * frame_data, int framecopy, int print_info) {
-    sh_video_t * sh_video = d_video->sh;
-    vf_instance_t * vfilter = sh_video ? sh_video->vfilter : NULL;
-    int done = 0;
-
-    while (!interrupted) {
-        float a_pts = 0.;
-
-        if (!frame_data->already_read) { // when called after fixdelay, a frame is already read
-            frame_data->in_size = video_read_frame(sh_video, &frame_data->frame_time, &frame_data->start, force_fps);
-            if(frame_data->in_size<0) return 2;
-            sh_video->timer += frame_data->frame_time;
-        }
-        frame_data->already_read = 0;
-
-        a_pts = forward_audio(sh_video->pts - frame_data->frame_time + audio_delay, d_audio, mux_a);
-
-        if (done) {
-            // wait for keyframe in case of -ovc copy
-            if (!framecopy || (sh_video->ds->flags & 1)) {
-                frame_data->already_read = 1;
-                return 1;
-            }
-        }
-        if (sh_video->pts >= end_pts) done = 1;
-
-        if (vfilter) {
-            int softskip = (vfilter->control(vfilter, VFCTRL_SKIP_NEXT_FRAME, 0) == CONTROL_TRUE);
-            void *decoded_frame = decode_video(sh_video, frame_data->start, frame_data->in_size, !softskip, MP_NOPTS_VALUE);
-	    if (decoded_frame)
-		filter_video(sh_video, decoded_frame, MP_NOPTS_VALUE);
-        }
-
-        if (print_info) mp_msg(MSGT_MENCODER, MSGL_STATUS,
-               MSGTR_EdlSkipStartEndCurrent,
-               next_edl_record->start_sec, next_edl_record->stop_sec,
-               sh_video->pts, a_pts);
-    }
-    if (interrupted) return 2;
-    return 1;
-}
-
-static void fixdelay(demux_stream_t *d_video, demux_stream_t *d_audio, muxer_stream_t* mux_a, s_frame_data * frame_data, int framecopy) {
-    // TODO: Find a way to encode silence instead of deleting video
-    sh_video_t * sh_video = d_video->sh;
-    float a_pts;
-
-    // demux_seek has a weirdness that sh_video->pts is meaningless,
-    // until a single frame is read... Same for audio actually too.
-    // Reading one frame, and keeping it.
-    frame_data->in_size = video_read_frame(sh_video, &frame_data->frame_time, &frame_data->start, force_fps);
-    if(frame_data->in_size<0) return;
-    sh_video->timer += frame_data->frame_time;
-    frame_data->already_read = 1;
-
-    a_pts = forward_audio(sh_video->pts - frame_data->frame_time + audio_delay, d_audio, mux_a);
-
-    if (audio_delay > 0) return;
-    else if (sh_video->pts - frame_data->frame_time + audio_delay >= a_pts) return;
-
-    slowseek(a_pts - audio_delay, d_video, d_audio, mux_a, frame_data, framecopy, 0);
-}
-
-static int edl_seek(edl_record_ptr next_edl_record, demuxer_t* demuxer, demux_stream_t *d_audio, muxer_stream_t* mux_a, s_frame_data * frame_data, int framecopy) {
-    sh_video_t * sh_video = demuxer->video ? demuxer->video->sh : NULL;
-
-    if (!sh_video) return 0;
-    if (sh_video->pts >= next_edl_record->stop_sec) return 1; // nothing to do...
-
-    if (!edl_seek_type) {
-        if(demux_seek(demuxer, next_edl_record->stop_sec - sh_video->pts, audio_delay, 0)){
-            sh_video->pts = demuxer->video->pts;
-            //if (vo_vobsub) vobsub_seek(vo_vobsub,sh_video->pts);
-            resync_video_stream(sh_video);
-            //if(vo_spudec) spudec_reset(vo_spudec);
-            if (audio_delay != 0.0) fixdelay(demuxer->video, d_audio, mux_a, frame_data, framecopy);
-            return 1;
-        }
-        // non-seekable stream.
-        return 0;
-    }
-
-    // slow seek, read every frame.
-
-    return slowseek(next_edl_record->stop_sec, demuxer->video, d_audio, mux_a, frame_data, framecopy, 1);
 }

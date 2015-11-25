@@ -1,33 +1,29 @@
 /*
-Copyright 2005 Robert Edele.
-
-e-mail: yartrebo@earthlink.net
-
-This program is free software; you can redistribute it and/or modify it
-under the terms of the GNU General Public License as published by the Free
-Software Foundation; either version 2 of the License, or (at your option)
-any later version.
-
-This program is distributed in the hope that it will be useful, but
-WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
-or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Public License for more
-details.
-
-You should have reveived a copy of the GNU General Public License
-along with this program; if not, write to the
-Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
-02110-1301 USA
-
-__________________________________________________________________________
-| Robert Edele                                           Fri. 4-Feb-2005 |
-| This program loads a .pgm mask file showing where a logo is and uses   |
-| a blur transform to remove the logo.                                   |
-|________________________________________________________________________|
-*/
+ * This filter loads a .pgm mask file showing where a logo is and uses
+ * a blur transform to remove the logo.
+ *
+ * Copyright (C) 2005 Robert Edele <yartrebo@earthlink.net>
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 /**
- * \file vf_remove_logo.c
- * 
+ * \file
+ *
  * \brief Advanced blur-based logo removing filter.
 
  *     Hello and welcome. This code implements a filter to remove annoying TV
@@ -84,13 +80,13 @@ __________________________________________________________________________
  * anything based on derivatives hopelessly noisy.
  */
 
-#include "config.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
 #include <inttypes.h>
 
+#include "config.h"
 #include "mp_msg.h"
 #include "libvo/fastmemcpy.h"
 
@@ -145,7 +141,7 @@ typedef struct
  * Variables stored here are kept from frame to frame, and separate instances of
  * the filter will get their own separate copies.
  */
-typedef struct
+struct vf_priv_s
 {
   unsigned int fmt; /* Not exactly sure of the use for this. It came with the example filter I used as a basis for this, and it looks like a lot of stuff will break if I remove it. */
   int max_mask_size; /* The largest possible mask size that will be needed with the given filter and corresponding half_size_filter. The half_size_filter can have a larger requirment in some rare (but not degenerate) cases. */
@@ -174,7 +170,7 @@ typedef struct
  * of how MPlayer works, it cannot safely halt execution, but at least the user
  * will get an error message before the segfault happens.
  */
-static void * safe_malloc(int size)
+static void * safe_malloc(size_t size)
 {
   void * answer = malloc(size);
   if (answer == NULL)
@@ -199,7 +195,7 @@ static void calculate_bounding_rectangle(int * posx1, int * posy1, int * posx2, 
   int x; /* Temporary variables to run  */
   int y; /* through each row or column. */
   int start_x;
-  int start_y; 
+  int start_y;
   int end_x = filter->width - 1;
   int end_y = filter->height - 1;
   int did_we_find_a_logo_pixel = 0;
@@ -268,8 +264,8 @@ static void destroy_masks(vf_instance_t * vf)
   int a, b;
 
   /* Load values from the vf->priv struct for faster dereferencing. */
-  int * * * mask = ((vf_priv_s *)vf->priv)->mask;
-  int max_mask_size = ((vf_priv_s *)vf->priv)->max_mask_size;
+  int * * * mask = vf->priv->mask;
+  int max_mask_size = vf->priv->max_mask_size;
 
   if (mask == NULL)
     return; /* Nothing allocated, so return before we segfault. */
@@ -286,7 +282,7 @@ static void destroy_masks(vf_instance_t * vf)
   free(mask); /* Free the array of pointers pointing to the masks. */
 
   /* Set the pointer to NULL, so that any duplicate calls to this function will not cause a crash. */
-  ((vf_priv_s *)vf->priv)->mask = NULL;
+  vf->priv->mask = NULL;
 
   return;
 }
@@ -305,30 +301,30 @@ static void initialize_masks(vf_instance_t * vf)
   int a, b, c;
 
   /* Load values from the vf->priv struct for faster dereferencing. */
-  int * * * mask = ((vf_priv_s *)vf->priv)->mask;
-  int max_mask_size = ((vf_priv_s *)vf->priv)->max_mask_size; /* This tells us how many masks we'll need to generate. */
+  int * * * mask = vf->priv->mask;
+  int max_mask_size = vf->priv->max_mask_size; /* This tells us how many masks we'll need to generate. */
 
   /* Create a circular mask for each size up to max_mask_size. When the filter is applied, the mask size is
      determined on a pixel by pixel basis, with pixels nearer the edge of the logo getting smaller mask sizes. */
-  mask = (int * * *) safe_malloc(sizeof(int * *) * (max_mask_size + 1));
+  mask = safe_malloc(sizeof(int * *) * (max_mask_size + 1));
   for (a = 0; a <= max_mask_size; a++)
   {
-    mask[a] = (int * *) safe_malloc(sizeof(int *) * ((a * 2) + 1));
+    mask[a] = safe_malloc(sizeof(int *) * ((a * 2) + 1));
     for (b = -a; b <= a; b++)
     {
-      mask[a][b + a] = (int *) safe_malloc(sizeof(int) * ((a * 2) + 1));
+      mask[a][b + a] = safe_malloc(sizeof(int) * ((a * 2) + 1));
       for (c = -a; c <= a; c++)
       {
         if ((b * b) + (c * c) <= (a * a)) /* Circular 0/1 mask. */
           mask[a][b + a][c + a] = 1;
         else
-          mask[a][b + a][c + a] = 0; 
+          mask[a][b + a][c + a] = 0;
       }
     }
   }
 
   /* Store values back to vf->priv so they aren't lost after the function returns. */
-  ((vf_priv_s *)vf->priv)->mask = mask;
+  vf->priv->mask = mask;
 
   return;
 }
@@ -408,7 +404,7 @@ static void convert_mask_to_strength_mask(vf_instance_t * vf, pgm_structure * ma
   max_mask_size = current_pass + 1; /* As a side-effect, we now know the maximum mask size, which we'll use to generate our masks. */
   max_mask_size = apply_mask_fudge_factor(max_mask_size); /* Apply the fudge factor to this number too, since we must
                                                              ensure that enough masks are generated. */
-  ((vf_priv_s *)vf->priv)->max_mask_size = max_mask_size; /* Commit the newly calculated max_mask_size to the vf->priv struct. */
+  vf->priv->max_mask_size = max_mask_size; /* Commit the newly calculated max_mask_size to the vf->priv struct. */
 
   return;
 }
@@ -434,7 +430,7 @@ static void get_blur(const vf_instance_t * const vf, unsigned int * const value_
 {
   int mask_size; /* Mask size tells how large a circle to use. The radius is about (slightly larger than) mask size. */
   /* Get values from vf->priv for faster dereferencing. */
-  int * * * mask = ((vf_priv_s *)vf->priv)->mask;
+  int * * * mask = vf->priv->mask;
 
   int start_posx, start_posy, end_posx, end_posy;
   int i, j;
@@ -514,7 +510,7 @@ static void load_pgm_skip(FILE *f) {
   ungetc(c, f);
 }
 
-#define REMOVE_LOGO_LOAD_PGM_ERROR_MESSAGE(message) {mp_msg(MSGT_VFILTER, MSGL_ERR, message); return NULL;}
+#define REMOVE_LOGO_LOAD_PGM_ERROR_MESSAGE(message) {mp_msg(MSGT_VFILTER, MSGL_ERR, message); goto err_out;}
 
 /**
  * \brief Loads a raw pgm or ppm file into a newly created pgm_structure object.
@@ -537,7 +533,7 @@ static pgm_structure * load_pgm(const char * file_name)
   int maximum_greyscale_value;
   FILE * input;
   int pnm_number;
-  pgm_structure * new_pgm = (pgm_structure *) safe_malloc (sizeof(pgm_structure));
+  pgm_structure * new_pgm = safe_malloc (sizeof(*new_pgm));
   char * write_position;
   char * end_position;
   int image_size; /* width * height */
@@ -557,11 +553,14 @@ static pgm_structure * load_pgm(const char * file_name)
   if (maximum_greyscale_value >= 256) REMOVE_LOGO_LOAD_PGM_ERROR_MESSAGE("[vf]remove_logo: Only 1 byte per pixel (pgm) or 1 byte per color value (ppm) are supported.\n");
   load_pgm_skip(input);
 
-  new_pgm->pixel = (unsigned char *) safe_malloc (sizeof(unsigned char) * new_pgm->width * new_pgm->height);
+  if (new_pgm->width <= 0 || new_pgm->width > 0x7fff ||
+      new_pgm->height <= 0 || new_pgm->height > 0x7fff)
+    REMOVE_LOGO_LOAD_PGM_ERROR_MESSAGE("[vf]remove_logo: Invalid PGM dimensions.\n");
+  image_size = new_pgm->width * new_pgm->height;
+  new_pgm->pixel = safe_malloc (image_size);
 
   /* Load the pixels. */
   /* Note: I am aware that fgetc(input) isn't the fastest way of doing things, but it is quite compact and the code only runs once when the filter is initialized.*/
-  image_size = new_pgm->width * new_pgm->height;
   end_position = new_pgm->pixel + image_size;
   for (write_position = new_pgm->pixel; write_position < end_position; write_position++)
   {
@@ -572,8 +571,15 @@ static pgm_structure * load_pgm(const char * file_name)
       *write_position |= fgetc(input);
     }
   }
+  fclose(input);
 
   return new_pgm;
+
+err_out:
+  if (input)
+    fclose(input);
+  free(new_pgm);
+  return NULL;
 }
 
 /**
@@ -596,7 +602,7 @@ static pgm_structure * load_pgm(const char * file_name)
 static pgm_structure * generate_half_size_image(vf_instance_t * vf, pgm_structure * input_image)
 {
   int x, y;
-  pgm_structure * new_pgm = (pgm_structure *) safe_malloc (sizeof(pgm_structure));
+  pgm_structure * new_pgm = safe_malloc (sizeof(*new_pgm));
   int has_anything_changed = 1;
   int current_pass;
   int max_mask_size;
@@ -604,7 +610,7 @@ static pgm_structure * generate_half_size_image(vf_instance_t * vf, pgm_structur
 
   new_pgm->width = input_image->width / 2;
   new_pgm->height = input_image->height / 2;
-  new_pgm->pixel = (unsigned char *) safe_malloc (sizeof(unsigned char) * new_pgm->width * new_pgm->height);
+  new_pgm->pixel = safe_malloc (new_pgm->width * new_pgm->height);
 
   /* Copy over the image data, using the average of 4 pixels for to calculate each downsampled pixel. */
   for (y = 0; y < new_pgm->height; y++)
@@ -666,7 +672,7 @@ static pgm_structure * generate_half_size_image(vf_instance_t * vf, pgm_structur
   max_mask_size = current_pass + 1; /* As a side-effect, we now know the maximum mask size, which we'll use to generate our masks. */
   max_mask_size = apply_mask_fudge_factor(max_mask_size);
   /* Commit the newly calculated max_mask_size to the vf->priv struct. */
-  ((vf_priv_s *)vf->priv)->max_mask_size = max(max_mask_size, ((vf_priv_s *)vf->priv)->max_mask_size);
+  vf->priv->max_mask_size = max(max_mask_size, vf->priv->max_mask_size);
 
   return new_pgm;
 }
@@ -674,7 +680,7 @@ static pgm_structure * generate_half_size_image(vf_instance_t * vf, pgm_structur
 /**
  * \brief Checks if YV12 is supported by the next filter.
  */
-static unsigned int find_best(struct vf_instance_s* vf){
+static unsigned int find_best(struct vf_instance *vf){
   int is_format_okay = vf->next->query_format(vf->next, IMGFMT_YV12);
   if ((is_format_okay & VFCAP_CSP_SUPPORTED_BY_HW) || (is_format_okay & VFCAP_CSP_SUPPORTED))
     return IMGFMT_YV12;
@@ -687,12 +693,12 @@ static unsigned int find_best(struct vf_instance_s* vf){
 /**
  * \brief Configure the filter and call the next filter's config function.
  */
-static int config(struct vf_instance_s* vf, int width, int height, int d_width, int d_height, unsigned int flags, unsigned int outfmt)
+static int config(struct vf_instance *vf, int width, int height, int d_width, int d_height, unsigned int flags, unsigned int outfmt)
 {
-  if(!(((vf_priv_s *)vf->priv)->fmt=find_best(vf)))
+  if(!(vf->priv->fmt=find_best(vf)))
     return 0;
   else
-    return vf_next_config(vf,width,height,d_width,d_height,flags,((vf_priv_s *)vf->priv)->fmt);
+    return vf_next_config(vf,width,height,d_width,d_height,flags,vf->priv->fmt);
 }
 
 /**
@@ -768,18 +774,18 @@ static void convert_yv12(const vf_instance_t * const vf, const char * const sour
  * filter, has the logo removed by the filter, and is then sent to the next
  * filter.
  */
-static int put_image(struct vf_instance_s* vf, mp_image_t *mpi, double pts){
+static int put_image(struct vf_instance *vf, mp_image_t *mpi, double pts){
     mp_image_t *dmpi;
-    
-    dmpi=vf_get_image(vf->next,((vf_priv_s *)vf->priv)->fmt,
-	MP_IMGTYPE_TEMP, MP_IMGFLAG_ACCEPT_STRIDE,
-	mpi->w, mpi->h);
+
+    dmpi=vf_get_image(vf->next,vf->priv->fmt,
+        MP_IMGTYPE_TEMP, MP_IMGFLAG_ACCEPT_STRIDE,
+        mpi->w, mpi->h);
 
     /* Check to make sure that the filter image and the video stream are the same size. */
-    if ((((vf_priv_s *)vf->priv)->filter->width != mpi->w) || (((vf_priv_s *)vf->priv)->filter->height != mpi->h))
+    if (vf->priv->filter->width != mpi->w || vf->priv->filter->height != mpi->h)
     {
       mp_msg(MSGT_VFILTER,MSGL_ERR, "Filter image and video stream are not of the same size. (Filter: %d x %d, Stream: %d x %d)\n",
-             ((vf_priv_s *)vf->priv)->filter->width, ((vf_priv_s *)vf->priv)->filter->height, mpi->w, mpi->h);
+             vf->priv->filter->width, vf->priv->filter->height, mpi->w, mpi->h);
       return 0;
     }
 
@@ -787,24 +793,24 @@ static int put_image(struct vf_instance_s* vf, mp_image_t *mpi, double pts){
     case IMGFMT_YV12:
           convert_yv12(vf, mpi->planes[0],  mpi->stride[0], mpi, mpi->w, mpi->h,
                           dmpi->planes[0], dmpi->stride[0],
-                          mpi->flags & MP_IMGFLAG_DIRECT, ((vf_priv_s *)vf->priv)->filter, 0,
-                          ((vf_priv_s *)vf->priv)->bounding_rectangle_posx1, ((vf_priv_s *)vf->priv)->bounding_rectangle_posy1,
-                          ((vf_priv_s *)vf->priv)->bounding_rectangle_posx2, ((vf_priv_s *)vf->priv)->bounding_rectangle_posy2);
+                          mpi->flags & MP_IMGFLAG_DIRECT, vf->priv->filter, 0,
+                          vf->priv->bounding_rectangle_posx1, vf->priv->bounding_rectangle_posy1,
+                          vf->priv->bounding_rectangle_posx2, vf->priv->bounding_rectangle_posy2);
           convert_yv12(vf, mpi->planes[1],  mpi->stride[1], mpi, mpi->w / 2, mpi->h / 2,
                           dmpi->planes[1], dmpi->stride[1],
-                          mpi->flags & MP_IMGFLAG_DIRECT, ((vf_priv_s *)vf->priv)->half_size_filter, 1,
-                          ((vf_priv_s *)vf->priv)->bounding_rectangle_half_size_posx1, ((vf_priv_s *)vf->priv)->bounding_rectangle_half_size_posy1,
-                          ((vf_priv_s *)vf->priv)->bounding_rectangle_half_size_posx2, ((vf_priv_s *)vf->priv)->bounding_rectangle_half_size_posy2);
+                          mpi->flags & MP_IMGFLAG_DIRECT, vf->priv->half_size_filter, 1,
+                          vf->priv->bounding_rectangle_half_size_posx1, vf->priv->bounding_rectangle_half_size_posy1,
+                          vf->priv->bounding_rectangle_half_size_posx2, vf->priv->bounding_rectangle_half_size_posy2);
           convert_yv12(vf, mpi->planes[2],  mpi->stride[2], mpi, mpi->w / 2, mpi->h / 2,
                           dmpi->planes[2], dmpi->stride[2],
-                          mpi->flags & MP_IMGFLAG_DIRECT, ((vf_priv_s *)vf->priv)->half_size_filter, 2,
-                          ((vf_priv_s *)vf->priv)->bounding_rectangle_half_size_posx1, ((vf_priv_s *)vf->priv)->bounding_rectangle_half_size_posy1,
-                          ((vf_priv_s *)vf->priv)->bounding_rectangle_half_size_posx2, ((vf_priv_s *)vf->priv)->bounding_rectangle_half_size_posy2);
+                          mpi->flags & MP_IMGFLAG_DIRECT, vf->priv->half_size_filter, 2,
+                          vf->priv->bounding_rectangle_half_size_posx1, vf->priv->bounding_rectangle_half_size_posy1,
+                          vf->priv->bounding_rectangle_half_size_posx2, vf->priv->bounding_rectangle_half_size_posy2);
           break;
 
     default:
-	mp_msg(MSGT_VFILTER,MSGL_ERR,"Unhandled format: 0x%X\n",dmpi->imgfmt);
-	return 0;
+        mp_msg(MSGT_VFILTER,MSGL_ERR,"Unhandled format: 0x%X\n",dmpi->imgfmt);
+        return 0;
     }
 
     return vf_next_put_image(vf,dmpi, pts);
@@ -815,12 +821,30 @@ static int put_image(struct vf_instance_s* vf, mp_image_t *mpi, double pts){
 /**
  * \brief Checks to see if the next filter accepts YV12 images.
  */
-static int query_format(struct vf_instance_s * vf, unsigned int fmt)
+static int query_format(struct vf_instance *vf, unsigned int fmt)
 {
   if (fmt == IMGFMT_YV12)
     return vf->next->query_format(vf->next, IMGFMT_YV12);
   else
     return 0;
+}
+
+/**
+ * \brief Frees memory that our filter allocated.
+ *
+ * This is called at exit-time.
+ */
+static void uninit(vf_instance_t *vf)
+{
+  /* Destroy our masks and images. */
+  destroy_pgm(vf->priv->filter);
+  destroy_pgm(vf->priv->half_size_filter);
+  destroy_masks(vf);
+
+  /* Destroy our private structure that had been used to store those masks and images. */
+  free(vf->priv);
+
+  return;
 }
 
 /**
@@ -832,13 +856,14 @@ static int query_format(struct vf_instance_s * vf, unsigned int fmt)
  *
  * This sets up our instance variables and parses the arguments to the filter.
  */
-static int open(vf_instance_t * vf, char * args)
+static int vf_open(vf_instance_t *vf, char *args)
 {
   vf->priv = safe_malloc(sizeof(vf_priv_s));
+  vf->uninit = uninit;
 
   /* Load our filter image. */
   if (args)
-    ((vf_priv_s *)vf->priv)->filter = load_pgm(args);
+    vf->priv->filter = load_pgm(args);
   else
   {
     mp_msg(MSGT_VFILTER, MSGL_ERR, "[vf]remove_logo usage: remove_logo=/path/to/filter_image_file.pgm\n");
@@ -846,7 +871,7 @@ static int open(vf_instance_t * vf, char * args)
     return 0;
   }
 
-  if (((vf_priv_s *)vf->priv)->filter == NULL)
+  if (vf->priv->filter == NULL)
   {
     /* Error message was displayed by load_pgm(). */
     free(vf->priv);
@@ -854,21 +879,21 @@ static int open(vf_instance_t * vf, char * args)
   }
 
   /* Create the scaled down filter image for the chroma planes. */
-  convert_mask_to_strength_mask(vf, ((vf_priv_s *)vf->priv)->filter);
-  ((vf_priv_s *)vf->priv)->half_size_filter = generate_half_size_image(vf, ((vf_priv_s *)vf->priv)->filter);
+  convert_mask_to_strength_mask(vf, vf->priv->filter);
+  vf->priv->half_size_filter = generate_half_size_image(vf, vf->priv->filter);
 
   /* Now that we know how many masks we need (the info is in vf), we can generate the masks. */
   initialize_masks(vf);
 
   /* Calculate our bounding rectangles, which determine in what region the logo resides for faster processing. */
-  calculate_bounding_rectangle(&((vf_priv_s *)vf->priv)->bounding_rectangle_posx1, &((vf_priv_s *)vf->priv)->bounding_rectangle_posy1,
-                               &((vf_priv_s *)vf->priv)->bounding_rectangle_posx2, &((vf_priv_s *)vf->priv)->bounding_rectangle_posy2,
-                                ((vf_priv_s *)vf->priv)->filter);
-  calculate_bounding_rectangle(&((vf_priv_s *)vf->priv)->bounding_rectangle_half_size_posx1,
-                               &((vf_priv_s *)vf->priv)->bounding_rectangle_half_size_posy1,
-                               &((vf_priv_s *)vf->priv)->bounding_rectangle_half_size_posx2,
-                               &((vf_priv_s *)vf->priv)->bounding_rectangle_half_size_posy2,
-                                ((vf_priv_s *)vf->priv)->half_size_filter);
+  calculate_bounding_rectangle(&vf->priv->bounding_rectangle_posx1, &vf->priv->bounding_rectangle_posy1,
+                               &vf->priv->bounding_rectangle_posx2, &vf->priv->bounding_rectangle_posy2,
+                                vf->priv->filter);
+  calculate_bounding_rectangle(&vf->priv->bounding_rectangle_half_size_posx1,
+                               &vf->priv->bounding_rectangle_half_size_posy1,
+                               &vf->priv->bounding_rectangle_half_size_posx2,
+                               &vf->priv->bounding_rectangle_half_size_posy2,
+                                vf->priv->half_size_filter);
 
   vf->config=config;
   vf->put_image=put_image;
@@ -877,32 +902,14 @@ static int open(vf_instance_t * vf, char * args)
 }
 
 /**
- * \brief Frees memory that our filter allocated.
- *
- * This is called at exit-time.
- */
-void uninit(vf_instance_t * vf)
-{
-  /* Destroy our masks and images. */
-  destroy_pgm(((vf_priv_s *)vf->priv)->filter);
-  destroy_pgm(((vf_priv_s *)vf->priv)->half_size_filter);
-  destroy_masks(vf);
-
-  /* Destroy our private structure that had been used to store those masks and images. */
-  free(vf->priv);
-
-  return;
-}
-
-/**
  * \brief Meta data about our filter.
  */
-vf_info_t vf_info_remove_logo = {
+const vf_info_t vf_info_remove_logo = {
     "Removes a tv logo based on a mask image.",
     "remove-logo",
     "Robert Edele",
     "",
-    open,
+    vf_open,
     NULL
 };
 

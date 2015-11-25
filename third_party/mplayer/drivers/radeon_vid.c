@@ -1,20 +1,29 @@
 /*
- *
- * radeon_vid.c
+ * BES YUV video overlay driver for Radeon/Rage128Pro/Rage128 cards
  *
  * Copyright (C) 2001 Nick Kurshev
- * 
- * BES YUV video overlay driver for Radeon/Rage128Pro/Rage128 cards
- * 
- * This software has been released under the terms of the GNU Public
- * license. See http://www.gnu.org/copyleft/gpl.html for details.
  *
- * This file is partly based on mga_vid and sis_vid stuff from
- * mplayer's package.
- * Also here was used code from CVS of GATOS project and X11 trees.
+ * This file is partly based on mga_vid and sis_vid from MPlayer.
+ * Code from CVS of GATOS project and X11 trees was also used.
  *
  * SPECIAL THANKS TO: Hans-Peter Raschke for active testing and hacking
  * Rage128(pro) stuff of this driver.
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #define RADEON_VID_VERSION "1.2.1"
@@ -58,7 +67,7 @@
 #include "radeon_vid.h"
 #include "radeon.h"
 
-#ifdef CONFIG_MTRR 
+#ifdef CONFIG_MTRR
 #include <asm/mtrr.h>
 #endif
 
@@ -81,7 +90,7 @@ MODULE_DESCRIPTION("Accelerated YUV BES driver for Radeons. Version: "RADEON_VID
 #ifdef MODULE_LICENSE
 MODULE_LICENSE("GPL");
 #endif
-#ifdef CONFIG_MTRR 
+#ifdef CONFIG_MTRR
 MODULE_PARM(mtrr, "i");
 MODULE_PARM_DESC(mtrr, "Tune MTRR (touch=1(default))");
 static int mtrr __initdata = 1;
@@ -117,23 +126,23 @@ static int swap_fourcc __initdata = 0;
 #if defined(__i386__)
 /* Ugly but only way */
 #undef AVOID_FPU
-static double inline __FastSin(double x) 
+static inline double FastSin(double x)
 {
    register double res;
-   __asm __volatile("fsin":"=t"(res):"0"(x));
+   __asm__ volatile("fsin":"=t"(res):"0"(x));
    return res;
 }
 #undef sin
-#define sin(x) __FastSin(x)
+#define sin(x) FastSin(x)
 
-static double inline __FastCos(double x) 
+static inline double FastCos(double x)
 {
    register double res;
-   __asm __volatile("fcos":"=t"(res):"0"(x));
+   __asm__ volatile("fcos":"=t"(res):"0"(x));
    return res;
 }
 #undef cos
-#define cos(x) __FastCos(x)
+#define cos(x) FastCos(x)
 #else
 #include "generic_math.h"
 #endif /*__386__*/
@@ -184,17 +193,17 @@ typedef struct bes_registers_s
   uint32_t test;
   /* Configurable stuff */
   int double_buff;
-  
+
   int brightness;
   int saturation;
-  
+
   int ckey_on;
   uint32_t graphics_key_clr;
   uint32_t graphics_key_msk;
-  
+
   int deinterlace_on;
   uint32_t deinterlace_pattern;
-  
+
 } bes_registers_t;
 
 typedef struct video_registers_s
@@ -216,7 +225,7 @@ static int IsR200=0;
 #define DECLARE_VREG(name) { name, 0 }
 #endif
 #ifdef DEBUG
-static video_registers_t vregs[] = 
+static video_registers_t vregs[] =
 {
   DECLARE_VREG(VIDEOMUX_CNTL),
   DECLARE_VREG(VIPPAD_MASK),
@@ -314,60 +323,60 @@ static video_registers_t vregs[] =
 static uint32_t radeon_vid_in_use = 0;
 
 static uint8_t *radeon_mmio_base = 0;
-static uint32_t radeon_mem_base = 0; 
+static uint32_t radeon_mem_base = 0;
 static int32_t radeon_overlay_off = 0;
 static uint32_t radeon_ram_size = 0;
 #define PARAM_BUFF_SIZE 4096
 static uint8_t *radeon_param_buff = NULL;
 static uint32_t radeon_param_buff_size=0;
 static uint32_t radeon_param_buff_len=0; /* real length of buffer */
-static mga_vid_config_t radeon_config; 
+static mga_vid_config_t radeon_config;
 
 static char *fourcc_format_name(int format)
 {
     switch(format)
     {
-	case IMGFMT_RGB8: return("RGB 8-bit");
-	case IMGFMT_RGB15: return("RGB 15-bit");
-	case IMGFMT_RGB16: return("RGB 16-bit");
-	case IMGFMT_RGB24: return("RGB 24-bit");
-	case IMGFMT_RGB32: return("RGB 32-bit");
-	case IMGFMT_BGR8: return("BGR 8-bit");
-	case IMGFMT_BGR15: return("BGR 15-bit");
-	case IMGFMT_BGR16: return("BGR 16-bit");
-	case IMGFMT_BGR24: return("BGR 24-bit");
-	case IMGFMT_BGR32: return("BGR 32-bit");
-	case IMGFMT_YVU9: return("Planar YVU9");
-	case IMGFMT_IF09: return("Planar IF09");
-	case IMGFMT_YV12: return("Planar YV12");
-	case IMGFMT_I420: return("Planar I420");
-	case IMGFMT_IYUV: return("Planar IYUV");
-	case IMGFMT_CLPL: return("Planar CLPL");
-	case IMGFMT_Y800: return("Planar Y800");
-	case IMGFMT_Y8: return("Planar Y8");
-	case IMGFMT_IUYV: return("Packed IUYV");
-	case IMGFMT_IY41: return("Packed IY41");
-	case IMGFMT_IYU1: return("Packed IYU1");
-	case IMGFMT_IYU2: return("Packed IYU2");
-	case IMGFMT_UYNV: return("Packed UYNV");
-	case IMGFMT_cyuv: return("Packed CYUV");
-	case IMGFMT_Y422: return("Packed Y422");
-	case IMGFMT_YUY2: return("Packed YUY2");
-	case IMGFMT_YUNV: return("Packed YUNV");
-	case IMGFMT_UYVY: return("Packed UYVY");
-//	case IMGFMT_YVYU: return("Packed YVYU");
-	case IMGFMT_Y41P: return("Packed Y41P");
-	case IMGFMT_Y211: return("Packed Y211");
-	case IMGFMT_Y41T: return("Packed Y41T");
-	case IMGFMT_Y42T: return("Packed Y42T");
-	case IMGFMT_V422: return("Packed V422");
-	case IMGFMT_V655: return("Packed V655");
-	case IMGFMT_CLJR: return("Packed CLJR");
-	case IMGFMT_YUVP: return("Packed YUVP");
-	case IMGFMT_UYVP: return("Packed UYVP");
-	case IMGFMT_MPEGPES: return("Mpeg PES");
+	case IMGFMT_RGB8: return "RGB 8-bit";
+	case IMGFMT_RGB15: return "RGB 15-bit";
+	case IMGFMT_RGB16: return "RGB 16-bit";
+	case IMGFMT_RGB24: return "RGB 24-bit";
+	case IMGFMT_RGB32: return "RGB 32-bit";
+	case IMGFMT_BGR8: return "BGR 8-bit";
+	case IMGFMT_BGR15: return "BGR 15-bit";
+	case IMGFMT_BGR16: return "BGR 16-bit";
+	case IMGFMT_BGR24: return "BGR 24-bit";
+	case IMGFMT_BGR32: return "BGR 32-bit";
+	case IMGFMT_YVU9: return "Planar YVU9";
+	case IMGFMT_IF09: return "Planar IF09";
+	case IMGFMT_YV12: return "Planar YV12";
+	case IMGFMT_I420: return "Planar I420";
+	case IMGFMT_IYUV: return "Planar IYUV";
+	case IMGFMT_CLPL: return "Planar CLPL";
+	case IMGFMT_Y800: return "Planar Y800";
+	case IMGFMT_Y8: return "Planar Y8";
+	case IMGFMT_IUYV: return "Packed IUYV";
+	case IMGFMT_IY41: return "Packed IY41";
+	case IMGFMT_IYU1: return "Packed IYU1";
+	case IMGFMT_IYU2: return "Packed IYU2";
+	case IMGFMT_UYNV: return "Packed UYNV";
+	case IMGFMT_cyuv: return "Packed CYUV";
+	case IMGFMT_Y422: return "Packed Y422";
+	case IMGFMT_YUY2: return "Packed YUY2";
+	case IMGFMT_YUNV: return "Packed YUNV";
+	case IMGFMT_UYVY: return "Packed UYVY";
+//	case IMGFMT_YVYU: return "Packed YVYU";
+	case IMGFMT_Y41P: return "Packed Y41P";
+	case IMGFMT_Y211: return "Packed Y211";
+	case IMGFMT_Y41T: return "Packed Y41T";
+	case IMGFMT_Y42T: return "Packed Y42T";
+	case IMGFMT_V422: return "Packed V422";
+	case IMGFMT_V655: return "Packed V655";
+	case IMGFMT_CLJR: return "Packed CLJR";
+	case IMGFMT_YUVP: return "Packed YUVP";
+	case IMGFMT_UYVP: return "Packed UYVP";
+	case IMGFMT_MPEGPES: return "Mpeg PES";
     }
-    return("Unknown");
+    return "Unknown";
 }
 
 
@@ -381,10 +390,10 @@ static char *fourcc_format_name(int format)
 #define OUTREG(addr,val)	writel(val, (radeon_mmio_base)+addr)
 #define OUTREGP(addr,val,mask)  					\
 	do {								\
-		unsigned int _tmp = INREG(addr);			\
-		_tmp &= (mask);						\
-		_tmp |= (val);						\
-		OUTREG(addr, _tmp);					\
+		unsigned int tmp = INREG(addr);				\
+		tmp &= (mask);						\
+		tmp |= (val);						\
+		OUTREG(addr, tmp);					\
 	} while (0)
 
 static uint32_t radeon_vid_get_dbpp( void )
@@ -412,7 +421,7 @@ static int radeon_is_interlace( void )
   return (INREG(CRTC_GEN_CNTL))&CRTC_INTERLACE_EN;
 }
 
-static __inline__ void radeon_engine_flush ( void )
+static inline void radeon_engine_flush(void)
 {
 	int i;
 
@@ -427,7 +436,7 @@ static __inline__ void radeon_engine_flush ( void )
 }
 
 
-static __inline__ void _radeon_fifo_wait (int entries)
+static inline void radeon_fifo_wait(int entries)
 {
 	int i;
 
@@ -437,12 +446,12 @@ static __inline__ void _radeon_fifo_wait (int entries)
 }
 
 
-static __inline__ void _radeon_engine_idle ( void )
+static inline void radeon_engine_idle(void)
 {
 	int i;
 
 	/* ensure FIFO is empty before waiting for idle */
-	_radeon_fifo_wait (64);
+	radeon_fifo_wait (64);
 
 	for (i=0; i<2000000; i++) {
 		if (((INREG(RBBM_STATUS) & GUI_ACTIVE)) == 0) {
@@ -451,9 +460,6 @@ static __inline__ void _radeon_engine_idle ( void )
 		}
 	}
 }
-
-#define radeon_engine_idle()		_radeon_engine_idle()
-#define radeon_fifo_wait(entries)	_radeon_fifo_wait(entries)
 
 #if 0
 static void __init radeon_vid_save_state( void )
@@ -556,7 +562,7 @@ static void radeon_set_transform(float bright, float cont, float sat,
 	CAdjGCr = sat * (OvHueSin * trans[ref].RefGCb + OvHueCos * trans[ref].RefGCr);
 	CAdjBCb = sat * OvHueCos * trans[ref].RefBCb;
 	CAdjBCr = sat * OvHueSin * trans[ref].RefBCb;
-    
+
 #if 0 /* default constants */
         CAdjLuma = 1.16455078125;
 
@@ -576,16 +582,16 @@ static void radeon_set_transform(float bright, float cont, float sat,
 	OvBCr = CAdjBCr;
 	OvROff = CAdjOff -
 		OvLuma * Loff - (OvRCb + OvRCr) * Coff;
-	OvGOff = CAdjOff - 
+	OvGOff = CAdjOff -
 		OvLuma * Loff - (OvGCb + OvGCr) * Coff;
-	OvBOff = CAdjOff - 
+	OvBOff = CAdjOff -
 		OvLuma * Loff - (OvBCb + OvBCr) * Coff;
 #if 0 /* default constants */
 	OvROff = -888.5;
 	OvGOff = 545;
 	OvBOff = -1104;
-#endif 
-   
+#endif
+
 	dwOvROff = ((int)(OvROff * 2.0)) & 0x1fff;
 	dwOvGOff = (int)(OvGOff * 2.0) & 0x1fff;
 	dwOvBOff = (int)(OvBOff * 2.0) & 0x1fff;
@@ -621,7 +627,7 @@ static void radeon_set_transform(float bright, float cont, float sat,
 
 #ifndef RAGE128
 /* Gamma curve definition */
-typedef struct 
+typedef struct
 {
 	unsigned int gammaReg;
 	unsigned int gammaSlope;
@@ -629,7 +635,7 @@ typedef struct
 }GAMMA_SETTINGS;
 
 /* Recommended gamma curve parameters */
-GAMMA_SETTINGS r200_def_gamma[18] = 
+GAMMA_SETTINGS r200_def_gamma[18] =
 {
 	{OV0_GAMMA_0_F, 0x100, 0x0000},
 	{OV0_GAMMA_10_1F, 0x100, 0x0020},
@@ -651,7 +657,7 @@ GAMMA_SETTINGS r200_def_gamma[18] =
 	{OV0_GAMMA_3C0_3FF, 0x100, 0x0700}
 };
 
-GAMMA_SETTINGS r100_def_gamma[6] = 
+GAMMA_SETTINGS r100_def_gamma[6] =
 {
 	{OV0_GAMMA_0_F, 0x100, 0x0000},
 	{OV0_GAMMA_10_1F, 0x100, 0x0020},
@@ -858,7 +864,7 @@ RTRACE(RVID_MSG"usr_config: version = %x format=%x card=%x ram=%u src(%ux%u) des
 	/* 4:1:0 */
 	case IMGFMT_IF09:
         case IMGFMT_YVU9:
-	/* 4:2:0 */	
+	/* 4:2:0 */
 	case IMGFMT_IYUV:
 	case IMGFMT_YV12:
 	case IMGFMT_I420:
@@ -1083,7 +1089,7 @@ static int radeon_vid_ioctl(struct inode *inode, struct file *file, unsigned int
 						 radeon_config.colkey_red,
 						 radeon_config.colkey_green,
 						 radeon_config.colkey_blue);
-			if(swap_fourcc) radeon_config.format = swab32(radeon_config.format); 
+			if(swap_fourcc) radeon_config.format = swab32(radeon_config.format);
 			printk(RVID_MSG"configuring for '%s' fourcc\n",fourcc_format_name(radeon_config.format));
 			return radeon_vid_init_video(&radeon_config);
 		break;
@@ -1104,14 +1110,14 @@ static int radeon_vid_ioctl(struct inode *inode, struct file *file, unsigned int
 			if(copy_from_user(&frame,(int *) arg,sizeof(int)))
 			{
 				printk(RVID_MSG"FSEL failed copy from userspace\n");
-				return(-EFAULT);
+				return -EFAULT;
 			}
 			radeon_vid_frame_sel(frame);
 		break;
 
 	        default:
 			printk(RVID_MSG"Invalid ioctl\n");
-			return (-EINVAL);
+			return -EINVAL;
 	}
 
 	return 0;
@@ -1229,9 +1235,9 @@ static int __init radeon_vid_config_card(void)
 	radeon_ram_size /= 0x100000;
 	detected_chip = i;
 	printk(RVID_MSG"Found %s (%uMb memory)\n",ati_card_ids[i].name,radeon_ram_size);
-#ifndef RAGE128	
-	if(ati_card_ids[i].id == PCI_DEVICE_ID_R200_QL || 
-	   ati_card_ids[i].id == PCI_DEVICE_ID_R200_BB || 
+#ifndef RAGE128
+	if(ati_card_ids[i].id == PCI_DEVICE_ID_R200_QL ||
+	   ati_card_ids[i].id == PCI_DEVICE_ID_R200_BB ||
 	   ati_card_ids[i].id == PCI_DEVICE_ID_RV200_QW) IsR200 = 1;
 #endif
 	return TRUE;
@@ -1317,7 +1323,7 @@ static ssize_t radeon_vid_write(struct file *file, const char *buf, size_t count
     {
       long brightness;
       brightness=simple_strtol(&buf[strlen(PARAM_BRIGHTNESS)],NULL,10);
-      if(brightness >= -64 && brightness <= 63) 
+      if(brightness >= -64 && brightness <= 63)
       {
         besr.brightness = brightness;
 	OUTREG(OV0_COLOUR_CNTL, (brightness & 0x7f) |
@@ -1396,13 +1402,13 @@ static int radeon_vid_mmap(struct file *file, struct vm_area_struct *vma)
 
 	RTRACE(RVID_MSG"mapping video memory into userspace\n");
 	if(remap_page_range(vma->vm_start, radeon_mem_base + radeon_overlay_off,
-		 vma->vm_end - vma->vm_start, vma->vm_page_prot)) 
+		 vma->vm_end - vma->vm_start, vma->vm_page_prot))
 	{
 		printk(RVID_MSG"error mapping video memory\n");
-		return(-EAGAIN);
+		return -EAGAIN;
 	}
 
-	return(0);
+	return 0;
 }
 
 static int radeon_vid_release(struct inode *inode, struct file *file)
@@ -1417,21 +1423,21 @@ static int radeon_vid_release(struct inode *inode, struct file *file)
 static long long radeon_vid_lseek(struct file *file, long long offset, int origin)
 {
 	return -ESPIPE;
-}					 
+}
 
 static int radeon_vid_open(struct inode *inode, struct file *file)
 {
 	int minor = MINOR(inode->i_rdev);
 
 	if(minor != 0)
-	 return(-ENXIO);
+	 return -ENXIO;
 
-	if(radeon_vid_in_use == 1) 
-		return(-EBUSY);
+	if(radeon_vid_in_use == 1)
+		return -EBUSY;
 
 	radeon_vid_in_use = 1;
 	MOD_INC_USE_COUNT;
-	return(0);
+	return 0;
 }
 
 #if LINUX_VERSION_CODE >= 0x020400
@@ -1477,8 +1483,8 @@ static struct file_operations radeon_vid_fops =
 };
 #endif
 
-/* 
- * Main Initialization Function 
+/*
+ * Main Initialization Function
  */
 
 static int __init radeon_vid_initialize(void)
@@ -1517,7 +1523,7 @@ static int __init radeon_vid_initialize(void)
 		printk(RVID_MSG"MTRR set to ON\n");
 	}
 #endif /* CONFIG_MTRR */
-	return(0);
+	return 0;
 }
 
 int __init init_module(void)
@@ -1541,4 +1547,3 @@ void __exit cleanup_module(void)
                      radeon_ram_size*0x100000);
 #endif /* CONFIG_MTRR */
 }
-

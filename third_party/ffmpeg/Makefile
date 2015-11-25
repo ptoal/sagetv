@@ -32,7 +32,7 @@ DEP_LIBS=libavcodec/$(LIBPREF)avcodec$(LIBSUF) libavformat/$(LIBPREF)avformat$(L
 endif
 
 ALL_TARGETS-$(CONFIG_VHOOK) += videohook
-ALL_TARGETS-$(BUILD_DOC)    += documentation
+#ALL_TARGETS-$(BUILD_DOC)    += documentation
 
 INSTALL_TARGETS-$(CONFIG_VHOOK) += install-vhook
 ifneq ($(PROGS),)
@@ -134,9 +134,9 @@ documentation: $(addprefix doc/, ffmpeg-doc.html faq.html ffserver-doc.html \
                                  ffplay-doc.html general.html hooks.html \
                                  $(ALLMANPAGES))
 
-doc/%.html: doc/%.texi
-	texi2html -monolithic -number $<
-	mv $(@F) $@
+#doc/%.html: doc/%.texi
+#	texi2html -monolithic -number $<
+#	mv $(@F) $@
 
 doc/%.pod: doc/%-doc.texi
 	doc/texi2pod.pl $< $@

@@ -1,49 +1,60 @@
-/**
- * \file vf_zrmjpeg.c
- *
- * \brief Does mjpeg encoding as required by the zrmjpeg filter as well
- * as by the zr video driver.
- */
 /*
- * Copyright (C) 2005 Rik Snel <rsnel@cube.dyndns.org>, license GPL v2
- * - based on vd_lavc.c by A'rpi (C) 2002-2003
- * - parts from ffmpeg Copyright (c) 2000-2003 Fabrice Bellard
- *
  * This files includes a straightforward (to be) optimized JPEG encoder for
  * the YUV422 format, based on mjpeg code from ffmpeg.
  *
  * For an excellent introduction to the JPEG format, see:
  * http://www.ece.purdue.edu/~bouman/grad-labs/lab8/pdf/lab.pdf
+ *
+ * Copyright (C) 2005 Rik Snel <rsnel@cube.dyndns.org>
+ * - based on vd_lavc.c by A'rpi (C) 2002-2003
+ * - parts from ffmpeg Copyright (c) 2000-2003 Fabrice Bellard
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
-#include "config.h"
+
+/**
+ * \file
+ *
+ * \brief Does mjpeg encoding as required by the zrmjpeg filter as well
+ * as by the zr video driver.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <inttypes.h>
 
+#include "config.h"
+#include "av_helpers.h"
 #include "mp_msg.h"
-
 #include "img_format.h"
 #include "mp_image.h"
 #include "vf.h"
-
-#ifdef USE_FASTMEMCPY
-#include "libvo/fastmemcpy.h"
-#endif
 
 /* We need this #define because we need ../libavcodec/common.h to #define
  * be2me_32, otherwise the linker will complain that it doesn't exist */
 #define HAVE_AV_CONFIG_H
 #include "libavcodec/avcodec.h"
-#include "libavcodec/dsputil.h"
-#include "libavcodec/mpegvideo.h"
-//#include "jpeg_enc.h" /* this file is not present yet */
+#include "libavcodec/mjpegenc.h"
 
 #undef malloc
 #undef free
-#undef realloc
-
-extern int avcodec_inited;
+#undef strcasecmp
 
 /* some convenient #define's, is this portable enough? */
 /// Printout  with vf_zrmjpeg: prefix at VERBOSE level
@@ -54,27 +65,8 @@ extern int avcodec_inited;
 #define WARNING(...) mp_msg(MSGT_DECVIDEO, MSGL_WARN, \
 		"vf_zrmjpeg: " __VA_ARGS__)
 
-// "local" flag in vd_ffmpeg.c. If not set, avcodec_init() et. al. need to be called
-// set when init is done, so that initialization is not done twice.
-extern int avcodec_inited;
-
-/// structure copied from mjpeg.c
-/* zrmjpeg_encode_mb needs access to these tables for the black & white
- * option */
-typedef struct MJpegContext {
-	uint8_t huff_size_dc_luminance[12];
-	uint16_t huff_code_dc_luminance[12];
-	uint8_t huff_size_dc_chrominance[12];
-	uint16_t huff_code_dc_chrominance[12];
-
-	uint8_t huff_size_ac_luminance[256];
-	uint16_t huff_code_ac_luminance[256];
-	uint8_t huff_size_ac_chrominance[256];
-	uint16_t huff_code_ac_chrominance[256];
-} MJpegContext;
-
 /// The get_pixels() routine to use. The real routine comes from dsputil
-static void (*get_pixels)(DCTELEM *restrict block, const uint8_t *pixels, int line_size);
+static void (*get_pixels)(int16_t *restrict block, const uint8_t *pixels, int line_size);
 
 /* Begin excessive code duplication ************************************/
 /* Code coming from mpegvideo.c and mjpeg.c in ../libavcodec ***********/
@@ -120,7 +112,7 @@ static void convert_matrix(MpegEncContext *s, int (*qmat)[64],
 
 	for(qscale = qmin; qscale <= qmax; qscale++) {
 		int i;
-		if (s->dsp.fdct == ff_jpeg_fdct_islow) {
+		if (s->dsp.fdct == ff_jpeg_fdct_islow_8) {
 			for (i = 0; i < 64; i++) {
 				const int j = s->dsp.idct_permutation[i];
 /* 16 <= qscale * quant_matrix[i] <= 7905
@@ -132,7 +124,7 @@ static void convert_matrix(MpegEncContext *s, int (*qmat)[64],
 					(QMAT_SHIFT-3))/
 					(qscale*quant_matrix[j]));
 			}
-		} else if (s->dsp.fdct == fdct_ifast) {
+		} else if (s->dsp.fdct == ff_fdct_ifast) {
 			for (i = 0; i < 64; i++) {
 				const int j = s->dsp.idct_permutation[i];
 /* 16 <= qscale * quant_matrix[i] <= 7905
@@ -205,7 +197,7 @@ static inline void encode_dc(MpegEncContext *s, int val,
  *
  * This routine is a duplicate of encode_block in mjpeg.c
  */
-static void encode_block(MpegEncContext *s, DCTELEM *block, int n) {
+static void encode_block(MpegEncContext *s, int16_t *block, int n) {
 	int mant, nbits, code, i, j;
 	int component, dc, run, last_index, val;
 	MJpegContext *m = s->mjpeg_ctx;
@@ -276,7 +268,7 @@ static void encode_block(MpegEncContext *s, DCTELEM *block, int n) {
  * The max and min level, which are clipped to, are stored in
  * s->min_qcoeff and s->max_qcoeff respectively.
  */
-static inline void clip_coeffs(MpegEncContext *s, DCTELEM *block,
+static inline void clip_coeffs(MpegEncContext *s, int16_t *block,
 		int last_index) {
 	int i;
 	const int maxlevel= s->max_qcoeff;
@@ -453,11 +445,10 @@ static jpeg_enc_t *jpeg_enc_init(int w, int h, int y_rsize,
 	j->s->height = h;
 	j->s->qscale = q;		// Encoding quality
 
-	j->s->mjpeg_data_only_frames = 0;
 	j->s->out_format = FMT_MJPEG;
 	j->s->intra_only = 1;		// Generate only intra pictures for jpeg
 	j->s->encoding = 1;		// Set mode to encode
-	j->s->pict_type = I_TYPE;
+	j->s->pict_type = AV_PICTURE_TYPE_I;
 	j->s->y_dc_scale = 8;
 	j->s->c_dc_scale = 8;
 
@@ -469,7 +460,7 @@ static jpeg_enc_t *jpeg_enc_init(int w, int h, int y_rsize,
 	 * The current setup is simply YUV422, with two horizontal Y components
 	 * for every UV component.
 	 */
-	j->s->mjpeg_write_tables = 1;	// setup to write tables
+	//FIXME j->s->mjpeg_write_tables = 1;	// setup to write tables
 	j->s->mjpeg_vsample[0] = 1;	// 1 appearance of Y vertically
 	j->s->mjpeg_vsample[1] = 1;	// 1 appearance of U vertically
 	j->s->mjpeg_vsample[2] = 1;	// 1 appearance of V vertically
@@ -480,18 +471,10 @@ static jpeg_enc_t *jpeg_enc_init(int w, int h, int y_rsize,
 	j->cheap_upsample = cu;
 	j->bw = b;
 
-	// Is this needed?
-	/* if libavcodec is used by the decoder then we must not
-	 * initialize again, but if it is not initialized then we must
-	 * initialize it here. */
-	if (!avcodec_inited) {
-		avcodec_init();
-		avcodec_register_all();
-		avcodec_inited=1;
-	}
+	init_avcodec();
 
 	// Build mjpeg huffman code tables, setting up j->s->mjpeg_ctx
-	if (mjpeg_init(j->s) < 0) {
+	if (ff_mjpeg_encode_init(j->s) < 0) {
 		av_free(j->s);
 		av_free(j);
 		return NULL;
@@ -507,16 +490,18 @@ static jpeg_enc_t *jpeg_enc_init(int w, int h, int y_rsize,
 
 	// Set some a minimum amount of default values that are needed
 	// Indicates that we should generated normal MJPEG
-	j->s->avctx->codec_id = CODEC_ID_MJPEG;
+	j->s->avctx->codec_id = AV_CODEC_ID_MJPEG;
 	// Which DCT method to use. AUTO will select the fastest one
 	j->s->avctx->dct_algo = FF_DCT_AUTO;
 	j->s->intra_quant_bias= 1<<(QUANT_BIAS_SHIFT-1); //(a + x/2)/x
+	// indicate we 'decode' to jpeg 4:2:2
+	j->s->avctx->pix_fmt = AV_PIX_FMT_YUVJ422P;
 
 	j->s->avctx->thread_count = 1;
 
 	/* make MPV_common_init allocate important buffers, like s->block
 	 * Also initializes dsputil */
-	if (MPV_common_init(j->s) < 0) {
+	if (ff_MPV_common_init(j->s) < 0) {
 		av_free(j->s);
 		av_free(j);
 		return NULL;
@@ -575,7 +560,7 @@ static int jpeg_enc_frame(jpeg_enc_t *j, uint8_t *y_data,
 	init_put_bits(&j->s->pb, bufr, 1024*256);
 
 	// Emit the mjpeg header blocks
-	mjpeg_picture_header(j->s);
+	ff_mjpeg_encode_picture_header(j->s);
 
 	j->s->header_bits = put_bits_count(&j->s->pb);
 
@@ -619,13 +604,14 @@ static int jpeg_enc_frame(jpeg_enc_t *j, uint8_t *y_data,
 		}
 	}
 	emms_c();
-	mjpeg_picture_trailer(j->s);
+	ff_mjpeg_encode_picture_trailer(j->s);
 	flush_put_bits(&j->s->pb);
 
-	if (j->s->mjpeg_write_tables == 1)
-		j->s->mjpeg_write_tables = 0;
+	//FIXME
+	//if (j->s->mjpeg_write_tables == 1)
+	//	j->s->mjpeg_write_tables = 0;
 
-	return pbBufPtr(&(j->s->pb)) - j->s->pb.buf;
+	return put_bits_ptr(&(j->s->pb)) - j->s->pb.buf;
 }
 
 /// the real uninit routine
@@ -635,7 +621,7 @@ static int jpeg_enc_frame(jpeg_enc_t *j, uint8_t *y_data,
  * \param j pointer to jpeg_enc structure
  */
 static void jpeg_enc_uninit(jpeg_enc_t *j) {
-	mjpeg_close(j->s);
+	ff_mjpeg_encode_close(j->s);
 	av_free(j->s);
 	av_free(j);
 }
@@ -671,7 +657,7 @@ struct vf_priv_s {
  * arrange to dispatch to the config() entry pointer for the one
  * selected.
  */
-static int config(struct vf_instance_s* vf, int width, int height, int d_width,
+static int config(struct vf_instance *vf, int width, int height, int d_width,
 		int d_height, unsigned int flags, unsigned int outfmt){
 	struct vf_priv_s *priv = vf->priv;
 	float aspect_decision;
@@ -831,7 +817,7 @@ static int config(struct vf_instance_s* vf, int width, int height, int d_width,
  * \param mpi pointer to mp_image_t structure
  * \param pts
  */
-static int put_image(struct vf_instance_s* vf, mp_image_t *mpi, double pts){
+static int put_image(struct vf_instance *vf, mp_image_t *mpi, double pts){
 	struct vf_priv_s *priv = vf->priv;
 	int size = 0;
 	int i;
@@ -860,7 +846,7 @@ static int put_image(struct vf_instance_s* vf, mp_image_t *mpi, double pts){
  * Given the image format specified by \a fmt, this routine is called
  * to ask if the format is supported or not.
  */
-static int query_format(struct vf_instance_s* vf, unsigned int fmt){
+static int query_format(struct vf_instance *vf, unsigned int fmt){
 	VERBOSE("query_format() called\n");
 
 	switch (fmt) {
@@ -897,9 +883,9 @@ static void uninit(vf_instance_t *vf) {
  * This routine will do some basic initialization of local structures etc.,
  * and then parse the command line arguments specific for the ZRMJPEG filter.
  */
-static int open(vf_instance_t *vf, char* args){
+static int vf_open(vf_instance_t *vf, char *args){
 	struct vf_priv_s *priv;
-	VERBOSE("open() called: args=\"%s\"\n", args);
+	VERBOSE("vf_open() called: args=\"%s\"\n", args);
 
 	vf->config = config;
 	vf->put_image = put_image;
@@ -923,14 +909,7 @@ static int open(vf_instance_t *vf, char* args){
 	priv->hdec = 1;
 	priv->vdec = 1;
 
-	/* if libavcodec is already initialized, we must not initialize it
-	 * again, but if it is not initialized then we mustinitialize it now. */
-	if (!avcodec_inited) {
-		/* we need to initialize libavcodec */
-		avcodec_init();
-		avcodec_register_all();
-		avcodec_inited=1;
-	}
+	init_avcodec();
 
 	if (args) {
 		char *arg, *tmp, *ptr, junk;
@@ -1061,12 +1040,11 @@ static int open(vf_instance_t *vf, char* args){
 	return 1;
 }
 
-vf_info_t vf_info_zrmjpeg = {
+const vf_info_t vf_info_zrmjpeg = {
     "realtime zoran MJPEG encoding",
     "zrmjpeg",
     "Rik Snel",
     "",
-    open,
+    vf_open,
     NULL
 };
-

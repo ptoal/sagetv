@@ -1,62 +1,56 @@
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-#ifndef __MPLAYER_MAIN
-#define __MPLAYER_MAIN
+#ifndef MPLAYER_MPLAYER_H
+#define MPLAYER_MPLAYER_H
 
-extern char* current_module;
-
-extern char * dvd_device;
-extern char * cdrom_device;
-
-extern char ** audio_fm_list;
-extern char ** video_fm_list;
-extern char ** video_driver_list;
-extern char ** audio_driver_list;
-extern char * video_driver;
-extern char * audio_driver;
-extern float  audio_delay;
+extern char  *filename;
+extern char  *current_module;
+extern char **audio_fm_list;
+extern char **video_fm_list;
+extern char **video_driver_list;
+extern char **audio_driver_list;
 
 extern int osd_level;
 extern unsigned int osd_visible;
-
-extern char * font_name;
-extern float  font_factor;
-extern float movie_aspect;
-extern float force_fps;
-
-//extern char **sub_name;
-extern float  sub_delay;
-extern float  sub_fps;
-extern int    sub_auto;
-extern int    sub_pos;
-extern int    sub_unicode;
-extern char * sub_cp;
-extern int    suboverlap_enabled;
-
-extern char * filename;
-
-extern int stream_cache_size;
-extern int force_ni;
-extern int index_mode;
 extern int autosync;
 
 extern int active_file;
 extern long circular_file_size;
 
-
-// libmpcodecs:
-extern int fullscreen;
-extern int flip;
-
 extern int frame_dropping;
+extern int slave_mode;
+extern int player_idle_mode;
+extern int use_menu;
+extern float heartbeat_interval;
 
+extern float  audio_delay;
+extern double start_pts;
+extern int progbar_align;
+
+/* for the GUI */
 extern int auto_quality;
+extern int disable_gui_conf;
 
-extern int audio_id;
-extern int video_id;
-extern int dvdsub_id;
-extern int vobsub_id;
+extern int capture_dump;
+extern int stream_dump_type;
+extern char *stream_dump_name;
 
-extern void exit_player(const char* how);
-extern void update_set_of_subtitles(void);
+void update_set_of_subtitles(void);
 
-#endif
+#endif /* MPLAYER_MPLAYER_H */

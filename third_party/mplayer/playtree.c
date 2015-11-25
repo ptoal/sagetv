@@ -1,3 +1,20 @@
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 /// \file
 /// \ingroup Playtree
@@ -5,6 +22,7 @@
 #include "config.h"
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <errno.h>
@@ -21,21 +39,23 @@ play_tree_is_valid(play_tree_t* pt);
 play_tree_t*
 play_tree_new(void) {
   play_tree_t* r = calloc(1,sizeof(play_tree_t));
-  if(r == NULL)
-    mp_msg(MSGT_PLAYTREE,MSGL_ERR,"Can't allocate %d bytes of memory\n",sizeof(play_tree_t));
+  if(r == NULL) {
+    mp_msg(MSGT_PLAYTREE,MSGL_ERR,"Can't allocate %d bytes of memory\n",(int)sizeof(play_tree_t));
+    return NULL;
+  }
   r->entry_type = PLAY_TREE_ENTRY_NODE;
   return r;
 }
 
 void
-play_tree_free(play_tree_t* pt, int childs) {
+play_tree_free(play_tree_t* pt, int children) {
   play_tree_t* iter;
 
 #ifdef MP_DEBUG
   assert(pt != NULL);
 #endif
 
-  if(childs) {    
+  if(children) {
     for(iter = pt->child; iter != NULL; ) {
       play_tree_t* nxt=iter->next;
       play_tree_free(iter,1);
@@ -49,7 +69,14 @@ play_tree_free(play_tree_t* pt, int childs) {
   for(iter = pt->child ; iter != NULL ; iter = iter->next)
     iter->parent = NULL;
 
-  //if(pt->params) free(pt->params);
+  if (pt->params) {
+    int i;
+    for(i = 0 ; pt->params[i].name != NULL ; i++) {
+      free(pt->params[i].name);
+      free(pt->params[i].value);
+    }
+    free(pt->params);
+  }
   if(pt->files) {
     int i;
     for(i = 0 ; pt->files[i] != NULL ; i++)
@@ -61,7 +88,7 @@ play_tree_free(play_tree_t* pt, int childs) {
 }
 
 void
-play_tree_free_list(play_tree_t* pt, int childs) {
+play_tree_free_list(play_tree_t* pt, int children) {
   play_tree_t* iter;
 
 #ifdef MP_DEBUG
@@ -73,10 +100,10 @@ play_tree_free_list(play_tree_t* pt, int childs) {
 
   while(iter) {
     play_tree_t* nxt = iter->next;
-    play_tree_free(iter,childs);
+    play_tree_free(iter, children);
     iter = nxt;
   }
-    
+
 
 }
 
@@ -128,7 +155,7 @@ play_tree_prepend_entry(play_tree_t* pt, play_tree_t* entry) {
 
 void
 play_tree_insert_entry(play_tree_t* pt, play_tree_t* entry) {
-  
+
 #ifdef MP_DEBUG
   assert(pt != NULL);
   assert(entry != NULL);
@@ -142,14 +169,14 @@ play_tree_insert_entry(play_tree_t* pt, play_tree_t* entry) {
 #endif
     entry->next = pt->next;
     entry->next->prev = entry;
-  } else 
+  } else
     entry->next = NULL;
   pt->next = entry;
 
 }
-    
+
 void
-play_tree_remove(play_tree_t* pt, int free_it,int with_childs) {
+play_tree_remove(play_tree_t* pt, int free_it, int with_children) {
 
 #ifdef MP_DEBUG
   assert(pt != NULL);
@@ -164,12 +191,12 @@ play_tree_remove(play_tree_t* pt, int free_it,int with_childs) {
     pt->prev->next = pt->next;
     pt->next->prev = pt->prev;
   } // End of list
-  else if(pt->prev) { 
+  else if(pt->prev) {
 #ifdef MP_DEBUG
     assert(pt->prev->next == pt);
 #endif
     pt->prev->next = NULL;
-  } // Begining of list
+  } // Beginning of list
   else if(pt->next) {
 #ifdef MP_DEBUG
     assert(pt->next->prev == pt);
@@ -180,7 +207,7 @@ play_tree_remove(play_tree_t* pt, int free_it,int with_childs) {
       assert(pt->parent->child == pt);
 #endif
       pt->parent->child = pt->next;
-    } 
+    }
   } // The only one
   else if(pt->parent) {
 #ifdef MP_DEBUG
@@ -191,7 +218,7 @@ play_tree_remove(play_tree_t* pt, int free_it,int with_childs) {
 
   pt->prev = pt->next = pt->parent = NULL;
   if(free_it)
-    play_tree_free(pt,with_childs);
+    play_tree_free(pt,with_children);
 
 }
 
@@ -199,16 +226,23 @@ void
 play_tree_set_child(play_tree_t* pt, play_tree_t* child) {
   play_tree_t* iter;
 
+  /* Roughly validate input data. Both, pt and child are going to be
+   * dereferenced, hence assure they're not NULL.
+   */
+  if (!pt || !child) {
+    mp_msg(MSGT_PLAYTREE, MSGL_ERR, "Internal error, attempt to add an empty child or use empty playlist\n");
+    return;
+  }
+
 #ifdef MP_DEBUG
-  assert(pt != NULL);
   assert(pt->entry_type == PLAY_TREE_ENTRY_NODE);
 #endif
 
-  //DEBUG_FF: Where are the childs freed ?
+  //DEBUG_FF: Where are the children freed?
   // Attention in using this function!
   for(iter = pt->child ; iter != NULL ; iter = iter->next)
     iter->parent = NULL;
-  
+
   // Go back to first one
   for(iter = child ; iter->prev != NULL ; iter = iter->prev)
     /* NOTHING */;
@@ -242,13 +276,12 @@ play_tree_set_parent(play_tree_t* pt, play_tree_t* parent) {
   } else
     parent->child = pt;
 
-}  
-  
+}
+
 
 void
-play_tree_add_file(play_tree_t* pt,char* file) {
+play_tree_add_file(play_tree_t* pt,const char* file) {
   int n = 0;
-  char* e;
 
 #ifdef MP_DEBUG
   assert(pt != NULL);
@@ -256,7 +289,7 @@ play_tree_add_file(play_tree_t* pt,char* file) {
   assert(file != NULL);
 #endif
 
-  if(pt->entry_type != PLAY_TREE_ENTRY_NODE && 
+  if(pt->entry_type != PLAY_TREE_ENTRY_NODE &&
      pt->entry_type != PLAY_TREE_ENTRY_FILE)
     return;
 
@@ -264,13 +297,13 @@ play_tree_add_file(play_tree_t* pt,char* file) {
     for(n = 0 ; pt->files[n] != NULL ; n++)
       /* NOTHING */;
   }
-  pt->files = (char**)realloc(pt->files,(n+2)*sizeof(char*));
+  pt->files = realloc(pt->files, (n + 2) * sizeof(char*));
   if(pt->files ==NULL) {
-    mp_msg(MSGT_PLAYTREE,MSGL_ERR,"Can't allocate %d bytes of memory\n",(n+2)*sizeof(char*));
+    mp_msg(MSGT_PLAYTREE,MSGL_ERR,"Can't allocate %d bytes of memory\n",(n+2)*(int)sizeof(char*));
     return;
   }
 
-  e = pt->files[n] = strdup(file);
+  pt->files[n] = strdup(file);
   pt->files[n+1] = NULL;
 
   pt->entry_type = PLAY_TREE_ENTRY_FILE;
@@ -278,7 +311,7 @@ play_tree_add_file(play_tree_t* pt,char* file) {
 }
 
 int
-play_tree_remove_file(play_tree_t* pt,char* file) {
+play_tree_remove_file(play_tree_t* pt,const char* file) {
   int n,f = -1;
 
 #ifdef MP_DEBUG
@@ -303,9 +336,9 @@ play_tree_remove_file(play_tree_t* pt,char* file) {
 
   if(n > 1) {
     memmove(&pt->files[f],&pt->files[f+1],(n-f)*sizeof(char*));
-    pt->files = (char**)realloc(pt->files,n*sizeof(char*));
+    pt->files = realloc(pt->files, n * sizeof(char*));
     if(pt->files == NULL) {
-      mp_msg(MSGT_PLAYTREE,MSGL_ERR,"Can't allocate %d bytes of memory\n",(n+2)*sizeof(char*));
+      mp_msg(MSGT_PLAYTREE,MSGL_ERR,"Can't allocate %d bytes of memory\n",(n+2)*(int)sizeof(char*));
       return -1;
     }
   } else {
@@ -317,30 +350,20 @@ play_tree_remove_file(play_tree_t* pt,char* file) {
 }
 
 void
-play_tree_set_param(play_tree_t* pt, char* name, char* val) {
-  int n = 0,ni = -1;
+play_tree_set_param(play_tree_t* pt, const char* name, const char* val) {
+  int n = 0;
 
 #ifdef MP_DEBUG
   assert(pt != NULL);
   assert(name != NULL);
 #endif
 
-  if(pt->params) {
-    for( ; pt->params[n].name != NULL ; n++) {
-      if(strcasecmp(pt->params[n].name,name) == 0)
-	ni = n;
-    }
-  }
+  if(pt->params)
+    for ( ; pt->params[n].name != NULL ; n++ ) { }
 
-  if(ni > 0) {
-    if(pt->params[n].value != NULL) free(pt->params[n].value);
-    pt->params[n].value = val != NULL ? strdup(val) : NULL;
-    return;
-  }
-
-  pt->params = (play_tree_param_t*)realloc(pt->params,(n+2)*sizeof(play_tree_param_t));
+  pt->params = realloc(pt->params, (n + 2) * sizeof(play_tree_param_t));
   if(pt->params == NULL) {
-      mp_msg(MSGT_PLAYTREE,MSGL_ERR,"Can't realloc params (%d bytes of memory)\n",(n+2)*sizeof(play_tree_param_t));
+      mp_msg(MSGT_PLAYTREE,MSGL_ERR,"Can't realloc params (%d bytes of memory)\n",(n+2)*(int)sizeof(play_tree_param_t));
       return;
   }
   pt->params[n].name = strdup(name);
@@ -351,7 +374,7 @@ play_tree_set_param(play_tree_t* pt, char* name, char* val) {
 }
 
 int
-play_tree_unset_param(play_tree_t* pt, char* name) {
+play_tree_unset_param(play_tree_t* pt, const char* name) {
   int n,ni = -1;
 
 #ifdef MP_DEBUG
@@ -368,14 +391,14 @@ play_tree_unset_param(play_tree_t* pt, char* name) {
   if(ni < 0)
     return 0;
 
-  if(pt->params[ni].name) free(pt->params[ni].name);
-  if(pt->params[ni].value) free(pt->params[ni].value);
+  free(pt->params[ni].name);
+  free(pt->params[ni].value);
 
   if(n > 1) {
     memmove(&pt->params[ni],&pt->params[ni+1],(n-ni)*sizeof(play_tree_param_t));
-    pt->params = (play_tree_param_t*)realloc(pt->params,n*sizeof(play_tree_param_t));
+    pt->params = realloc(pt->params, n * sizeof(play_tree_param_t));
     if(pt->params == NULL) {
-      mp_msg(MSGT_PLAYTREE,MSGL_ERR,"Can't allocate %d bytes of memory\n",n*sizeof(play_tree_param_t));
+      mp_msg(MSGT_PLAYTREE,MSGL_ERR,"Can't allocate %d bytes of memory\n",n*(int)sizeof(play_tree_param_t));
       return -1;
     }
   } else {
@@ -405,21 +428,7 @@ play_tree_set_params_from(play_tree_t* dest,play_tree_t* src) {
 
 }
 
-// all childs if deep < 0
-void
-play_tree_set_flag(play_tree_t* pt, int flags , int deep) {
-  play_tree_t*  i;
-
-  pt->flags |= flags;
-
-  if(deep && pt->child) {
-    if(deep > 0) deep--;
-    for(i = pt->child ; i ; i = i->next)
-      play_tree_set_flag(i,flags,deep);
-  }
-}
-
-void
+static void
 play_tree_unset_flag(play_tree_t* pt, int flags , int deep) {
   play_tree_t*  i;
 
@@ -435,7 +444,7 @@ play_tree_unset_flag(play_tree_t* pt, int flags , int deep) {
 
 //////////////////////////////////// ITERATOR //////////////////////////////////////
 
-static void 
+static void
 play_tree_iter_push_params(play_tree_iter_t* iter) {
   int n;
   play_tree_t* pt;
@@ -454,18 +463,17 @@ play_tree_iter_push_params(play_tree_iter_t* iter) {
   if(pt->params == NULL)
     return;
 
-  
+
   for(n = 0; pt->params[n].name != NULL ; n++) {
     int e;
     if((e = m_config_set_option(iter->config,pt->params[n].name,pt->params[n].value)) < 0) {
       mp_msg(MSGT_PLAYTREE,MSGL_ERR,"Error %d while setting option '%s' with value '%s'\n",e,
-	     pt->params[n].name,pt->params[n].value);      
+	     pt->params[n].name,pt->params[n].value);
     }
   }
 
   if(!pt->child)
     iter->entry_pushed = 1;
-  return;
 }
 
 play_tree_iter_t*
@@ -476,19 +484,19 @@ play_tree_iter_new(play_tree_t* pt,m_config_t* config) {
   assert(pt != NULL);
   assert(config != NULL);
 #endif
-  
+
   if( ! play_tree_is_valid(pt))
     return NULL;
 
   iter = calloc(1,sizeof(play_tree_iter_t));
   if(! iter) {
-      mp_msg(MSGT_PLAYTREE,MSGL_ERR,"Can't allocate new iterator (%d bytes of memory)\n",sizeof(play_tree_iter_t));
+      mp_msg(MSGT_PLAYTREE,MSGL_ERR,"Can't allocate new iterator (%d bytes of memory)\n",(int)sizeof(play_tree_iter_t));
       return NULL;
   }
   iter->root = pt;
   iter->tree = NULL;
   iter->config = config;
- 
+
   if(pt->parent)
     iter->loop = pt->parent->loop;
 
@@ -498,9 +506,7 @@ play_tree_iter_new(play_tree_t* pt,m_config_t* config) {
 void
 play_tree_iter_free(play_tree_iter_t* iter) {
 
-#ifdef MP_DEBUG
-  assert(iter != NULL);
-#endif
+  if (!iter) return;
 
   if(iter->status_stack) {
 #ifdef MP_DEBUG
@@ -527,7 +533,7 @@ play_tree_rnd_step(play_tree_t* pt) {
     if(!(i->flags & PLAY_TREE_RND_PLAYED)) count++;
 
   if(!count) return NULL;
-  
+
   r = (int)((float)(count) * rand() / (RAND_MAX + 1.0));
 
   for(i = head ; i  ; i=i->next) {
@@ -546,7 +552,7 @@ play_tree_iter_step(play_tree_iter_t* iter, int d,int with_nodes) {
 
   if ( !iter ) return PLAY_TREE_ITER_ENTRY;
   if ( !iter->root ) return PLAY_TREE_ITER_ENTRY;
-  
+
 #ifdef MP_DEBUG
   assert(iter != NULL);
   assert(iter->root != NULL);
@@ -585,7 +591,7 @@ play_tree_iter_step(play_tree_iter_t* iter, int d,int with_nodes) {
     d = i ? i : -1;
   } else
     pt = iter->tree;
-  
+
   if(pt == NULL) { // No next
     // Must we loop?
     if (iter->mode == PLAY_TREE_ITER_RND) {
@@ -596,7 +602,7 @@ play_tree_iter_step(play_tree_iter_t* iter, int d,int with_nodes) {
       // try again
       return play_tree_iter_step(iter, 0, with_nodes);
     } else
-    if(iter->tree->parent && iter->tree->parent->loop != 0 && ((d > 0 && iter->loop != 0) || ( d < 0 && (iter->loop < 0 || iter->loop < iter->tree->parent->loop) ) ) ) { 
+    if(iter->tree->parent && iter->tree->parent->loop != 0 && ((d > 0 && iter->loop != 0) || ( d < 0 && (iter->loop < 0 || iter->loop < iter->tree->parent->loop) ) ) ) {
       if(d > 0) { // Go back to the first one
 	for(pt = iter->tree ; pt->prev != NULL; pt = pt->prev)
 	  /* NOTHNG */;
@@ -614,16 +620,16 @@ play_tree_iter_step(play_tree_iter_t* iter, int d,int with_nodes) {
 
   }
 
-  // Is there any valid childs ?
+  // Is there any valid child?
   if(pt->child && play_tree_is_valid(pt->child)) {
     iter->tree = pt;
-    if(with_nodes) { // Stop on the node      
+    if(with_nodes) { // Stop on the node
       return PLAY_TREE_ITER_NODE;
     } else      // Or follow it
       return play_tree_iter_down_step(iter,d,with_nodes);
   }
 
-  // Is it a valid enty ?
+  // Is it a valid entry?
   if(! play_tree_is_valid(pt)) {
     if(d == 0) { // Can this happen ? FF: Yes!
       mp_msg(MSGT_PLAYTREE,MSGL_ERR,"What to do now ???? Infinite loop if we continue\n");
@@ -637,7 +643,7 @@ play_tree_iter_step(play_tree_iter_t* iter, int d,int with_nodes) {
 #endif
 
   iter->tree = pt;
-    
+
   for(d = 0 ; iter->tree->files[d] != NULL ; d++)
     /* NOTHING */;
   iter->num_files = d;
@@ -684,7 +690,7 @@ play_tree_iter_up_step(play_tree_iter_t* iter, int d,int with_nodes) {
   assert(iter->tree != NULL);
   //printf("PT : Go UP\n");
 #endif
-  
+
   iter->file = -1;
   if(iter->tree->parent == iter->root->parent)
     return PLAY_TREE_ITER_END;
@@ -698,13 +704,13 @@ play_tree_iter_up_step(play_tree_iter_t* iter, int d,int with_nodes) {
   iter->stack_size--;
   iter->loop = iter->status_stack[iter->stack_size];
   if(iter->stack_size > 0)
-    iter->status_stack = (int*)realloc(iter->status_stack,iter->stack_size*sizeof(int));
+    iter->status_stack = realloc(iter->status_stack, iter->stack_size * sizeof(int));
   else {
     free(iter->status_stack);
     iter->status_stack = NULL;
   }
   if(iter->stack_size > 0 && iter->status_stack == NULL) {
-    mp_msg(MSGT_PLAYTREE,MSGL_ERR,"Can't allocate %d bytes of memory\n",iter->stack_size*sizeof(char*));
+    mp_msg(MSGT_PLAYTREE,MSGL_ERR,"Can't allocate %d bytes of memory\n",iter->stack_size*(int)sizeof(char*));
     return PLAY_TREE_ITER_ERROR;
   }
   iter->tree = iter->tree->parent;
@@ -718,7 +724,7 @@ play_tree_iter_up_step(play_tree_iter_t* iter, int d,int with_nodes) {
 
   return play_tree_iter_step(iter,d,with_nodes);
 }
-  
+
 int
 play_tree_iter_down_step(play_tree_iter_t* iter, int d,int with_nodes) {
 
@@ -736,9 +742,9 @@ play_tree_iter_down_step(play_tree_iter_t* iter, int d,int with_nodes) {
     play_tree_iter_push_params(iter);
 
   iter->stack_size++;
-  iter->status_stack = (int*)realloc(iter->status_stack,iter->stack_size*sizeof(int));
+  iter->status_stack = realloc(iter->status_stack, iter->stack_size * sizeof(int));
   if(iter->status_stack == NULL) {
-    mp_msg(MSGT_PLAYTREE,MSGL_ERR,"Can't allocate %d bytes of memory\n",iter->stack_size*sizeof(int));
+    mp_msg(MSGT_PLAYTREE,MSGL_ERR,"Can't allocate %d bytes of memory\n",iter->stack_size*(int)sizeof(int));
     return PLAY_TREE_ITER_ERROR;
   }
   iter->status_stack[iter->stack_size-1] = iter->loop;
@@ -816,7 +822,7 @@ play_tree_cleanup(play_tree_t* pt) {
     iter = iter->next;
     play_tree_cleanup(tmp);
   }
-    
+
   return pt;
 
 }
@@ -831,7 +837,7 @@ play_tree_iter_new_copy(play_tree_iter_t* old) {
 
   iter = malloc(sizeof(play_tree_iter_t));
   if(iter == NULL) {
-    mp_msg(MSGT_PLAYTREE,MSGL_ERR,"Can't allocate %d bytes of memory\n",sizeof(play_tree_iter_t));
+    mp_msg(MSGT_PLAYTREE,MSGL_ERR,"Can't allocate %d bytes of memory\n",(int)sizeof(play_tree_iter_t));
     return NULL;
   }
 ;
@@ -839,7 +845,7 @@ play_tree_iter_new_copy(play_tree_iter_t* old) {
   if(old->status_stack) {
     iter->status_stack = malloc(old->stack_size * sizeof(int));
     if(iter->status_stack == NULL) {
-      mp_msg(MSGT_PLAYTREE,MSGL_ERR,"Can't allocate %d bytes of memory\n",old->stack_size * sizeof(int));
+      mp_msg(MSGT_PLAYTREE,MSGL_ERR,"Can't allocate %d bytes of memory\n",old->stack_size * (int)sizeof(int));
       free(iter);
       return NULL;
     }
@@ -858,12 +864,12 @@ play_tree_iter_t* pt_iter_create(play_tree_t** ppt, m_config_t* config)
 #ifdef MP_DEBUG
   assert(*ppt!=NULL);
 #endif
-  
+
   *ppt=play_tree_cleanup(*ppt);
-  
+
   if(*ppt) {
     r = play_tree_iter_new(*ppt,config);
-    if (r && play_tree_iter_step(r,0,0) != PLAY_TREE_ITER_ENTRY) 
+    if (r && play_tree_iter_step(r,0,0) != PLAY_TREE_ITER_ENTRY)
     {
       play_tree_iter_free(r);
       r = NULL;
@@ -889,9 +895,9 @@ char* pt_iter_get_file(play_tree_iter_t* iter, int d)
 
   if (iter==NULL)
     return NULL;
-  
+
   r = play_tree_iter_get_file(iter,d);
-  
+
   while (!r && d!=0)
   {
     if (play_tree_iter_step(iter,d,0) != PLAY_TREE_ITER_ENTRY)
@@ -926,13 +932,13 @@ void pt_iter_replace_entry(play_tree_iter_t* iter, play_tree_t* entry)
 }
 
 //Add a new file as a new entry
-void pt_add_file(play_tree_t** ppt, char* filename)
+void pt_add_file(play_tree_t** ppt, const char* filename)
 {
   play_tree_t *pt = *ppt, *entry = play_tree_new();
 #ifdef MP_DEBUG
   assert(entry!=NULL);
 #endif
- 
+
   play_tree_add_file(entry, filename);
   if (pt)
     play_tree_append_entry(pt, entry);
@@ -942,20 +948,6 @@ void pt_add_file(play_tree_t** ppt, char* filename)
     *ppt=pt;
   }
   play_tree_set_params_from(entry,pt);
-}
-
-void pt_add_gui_file(play_tree_t** ppt, char* path, char* file)
-{
-  char* wholename = malloc(strlen(path)+strlen(file)+2);
-
-  if (wholename)
-  {
-    strcpy(wholename, path);
-    strcat(wholename, "/");
-    strcat(wholename, file);
-    pt_add_file(ppt, wholename);
-    free(wholename); // As pt_add_file strdups it anyway!
-  }
 }
 
 void pt_iter_goto_head(play_tree_iter_t* iter)

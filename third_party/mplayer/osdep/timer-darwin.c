@@ -16,6 +16,7 @@
  */
 
 #include <unistd.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <time.h>
 #include <math.h>
@@ -27,20 +28,20 @@
 #include "timer.h"
 
 /* global variables */
-static double relative_time, startup_time;
+static double relative_time;
 static double timebase_ratio;
 
-const char *timer_name = "Darwin accurate";
+const char timer_name[] = "Darwin accurate";
 
 
 
 /* the core sleep function, uses floats and is used in MPlayer G2 */
-float sleep_accurate(float time_frame)
+static float sleep_accurate(float time_frame)
 {
 	uint64_t deadline = time_frame / timebase_ratio + mach_absolute_time();
-	
+
 	mach_wait_until(deadline);
-	
+
 	return (mach_absolute_time() - deadline) * timebase_ratio;
 }
 
@@ -52,51 +53,49 @@ int usec_sleep(int usec_delay)
 
 
 /* current time in microseconds */
-unsigned int GetTimer()
+unsigned int GetTimer(void)
 {
-  return (unsigned int)((mach_absolute_time() * timebase_ratio - startup_time)
-			* 1e6);
+  return (unsigned int)(uint64_t)(mach_absolute_time() * timebase_ratio * 1e6);
 }
 
 /* current time in milliseconds */
-unsigned int GetTimerMS()
+unsigned int GetTimerMS(void)
 {
-  return (unsigned int)(GetTimer() / 1000);
+  return (unsigned int)(uint64_t)(mach_absolute_time() * timebase_ratio * 1e3);
 }
 
 /* time spent between now and last call in seconds */
-float GetRelativeTime()
+float GetRelativeTime(void)
 {
   double last_time = relative_time;
-  
+
   if (!relative_time)
     InitTimer();
-  
+
   relative_time = mach_absolute_time() * timebase_ratio;
 
   return (float)(relative_time-last_time);
 }
 
 /* initialize timer, must be called at least once at start */
-void InitTimer()
+void InitTimer(void)
 {
   struct mach_timebase_info timebase;
 
   mach_timebase_info(&timebase);
-  timebase_ratio = (double)timebase.numer / (double)timebase.denom 
+  timebase_ratio = (double)timebase.numer / (double)timebase.denom
     * (double)1e-9;
-    
-  relative_time = startup_time = 
-    (double)(mach_absolute_time() * timebase_ratio);
+
+  relative_time = (double)(mach_absolute_time() * timebase_ratio);
 }
 
 #if 0
 #include <stdio.h>
 
-int main() {
+int main(void) {
   int i,j, r, c = 200;
   long long t = 0;
-  
+
   InitTimer();
 
   for (i = 0; i < c; i++) {

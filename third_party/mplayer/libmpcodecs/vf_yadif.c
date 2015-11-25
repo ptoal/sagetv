@@ -1,47 +1,40 @@
 /*
-    Copyright (C) 2006 Michael Niedermayer <michaelni@gmx.at>
+ * Copyright (C) 2006 Michael Niedermayer <michaelni@gmx.at>
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
-*/
-
-#include "config.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
 #include <math.h>
 
+#include "config.h"
 #include "cpudetect.h"
 
 #include "mp_msg.h"
-
-#ifdef HAVE_MALLOC_H
-#include <malloc.h>
-#endif
-
 #include "img_format.h"
 #include "mp_image.h"
 #include "vf.h"
+#include "libmpdemux/demuxer.h"
 #include "libvo/fastmemcpy.h"
-
-#define MIN(a,b) ((a) > (b) ? (b) : (a))
-#define MAX(a,b) ((a) < (b) ? (b) : (a))
-#define ABS(a) ((a) > 0 ? (a) : (-(a)))
-
-#define MIN3(a,b,c) MIN(MIN(a,b),c)
-#define MAX3(a,b,c) MAX(MAX(a,b),c)
+#include "libavutil/common.h"
+#include "libavutil/x86/asm.h"
 
 //===========================================================================//
 
@@ -67,12 +60,23 @@ static void store_ref(struct vf_priv_s *p, uint8_t *src[3], int src_stride[3], i
 
     for(i=0; i<3; i++){
         int is_chroma= !!i;
+        int pn_width  = width >>is_chroma;
+        int pn_height = height>>is_chroma;
 
-        memcpy_pic(p->ref[2][i], src[i], width>>is_chroma, height>>is_chroma, p->stride[i], src_stride[i]);
+
+        memcpy_pic(p->ref[2][i], src[i], pn_width, pn_height, p->stride[i], src_stride[i]);
+
+        fast_memcpy(p->ref[2][i] +  pn_height   * p->stride[i],
+                          src[i] + (pn_height-1)*src_stride[i], pn_width);
+        fast_memcpy(p->ref[2][i] + (pn_height+1)* p->stride[i],
+                          src[i] + (pn_height-1)*src_stride[i], pn_width);
+
+        fast_memcpy(p->ref[2][i] -   p->stride[i], src[i], pn_width);
+        fast_memcpy(p->ref[2][i] - 2*p->stride[i], src[i], pn_width);
     }
 }
 
-#if defined(HAVE_MMX) && defined(NAMED_ASM_ARGS)
+#if HAVE_MMX_INLINE
 
 #define LOAD4(mem,dst) \
             "movd      "mem", "#dst" \n\t"\
@@ -140,7 +144,7 @@ static void filter_line_mmx2(struct vf_priv_s *p, uint8_t *dst, uint8_t *prev, u
 
 #define FILTER\
     for(x=0; x<w; x+=4){\
-        asm volatile(\
+        __asm__ volatile(\
             "pxor      %%mm7, %%mm7 \n\t"\
             LOAD4("(%[cur],%[mrefs])", %%mm0) /* c = cur[x-refs] */\
             LOAD4("(%[cur],%[prefs])", %%mm1) /* e = cur[x+refs] */\
@@ -205,7 +209,7 @@ static void filter_line_mmx2(struct vf_priv_s *p, uint8_t *dst, uint8_t *prev, u
 \
             /* if(p->mode<2) ... */\
             "movq    %[tmp3], %%mm6 \n\t" /* diff */\
-            "cmp       $2, %[mode] \n\t"\
+            "cmpl      $2, %[mode] \n\t"\
             "jge       1f \n\t"\
             LOAD4("(%["prev2"],%[mrefs],2)", %%mm2) /* prev2[x-2*refs] */\
             LOAD4("(%["next2"],%[mrefs],2)", %%mm4) /* next2[x-2*refs] */\
@@ -251,13 +255,13 @@ static void filter_line_mmx2(struct vf_priv_s *p, uint8_t *dst, uint8_t *prev, u
             :[prev] "r"(prev),\
              [cur]  "r"(cur),\
              [next] "r"(next),\
-             [prefs]"r"((long)refs),\
-             [mrefs]"r"((long)-refs),\
+             [prefs]"r"((x86_reg)refs),\
+             [mrefs]"r"((x86_reg)-refs),\
              [pw1]  "m"(pw_1),\
              [pb1]  "m"(pb_1),\
              [mode] "g"(mode)\
         );\
-        asm volatile("movd %%mm1, %0" :"=m"(*dst));\
+        __asm__ volatile("movd %%mm1, %0" :"=m"(*dst));\
         dst += 4;\
         prev+= 4;\
         cur += 4;\
@@ -285,7 +289,7 @@ static void filter_line_mmx2(struct vf_priv_s *p, uint8_t *dst, uint8_t *prev, u
 #undef CHECK2
 #undef FILTER
 
-#endif /* defined(HAVE_MMX) && defined(NAMED_ASM_ARGS) */
+#endif /* HAVE_MMX_INLINE */
 
 static void filter_line_c(struct vf_priv_s *p, uint8_t *dst, uint8_t *prev, uint8_t *cur, uint8_t *next, int w, int refs, int parity){
     int x;
@@ -295,18 +299,18 @@ static void filter_line_c(struct vf_priv_s *p, uint8_t *dst, uint8_t *prev, uint
         int c= cur[-refs];
         int d= (prev2[0] + next2[0])>>1;
         int e= cur[+refs];
-        int temporal_diff0= ABS(prev2[0] - next2[0]);
-        int temporal_diff1=( ABS(prev[-refs] - c) + ABS(prev[+refs] - e) )>>1;
-        int temporal_diff2=( ABS(next[-refs] - c) + ABS(next[+refs] - e) )>>1;
-        int diff= MAX3(temporal_diff0>>1, temporal_diff1, temporal_diff2);
+        int temporal_diff0= FFABS(prev2[0] - next2[0]);
+        int temporal_diff1=( FFABS(prev[-refs] - c) + FFABS(prev[+refs] - e) )>>1;
+        int temporal_diff2=( FFABS(next[-refs] - c) + FFABS(next[+refs] - e) )>>1;
+        int diff= FFMAX3(temporal_diff0>>1, temporal_diff1, temporal_diff2);
         int spatial_pred= (c+e)>>1;
-        int spatial_score= ABS(cur[-refs-1] - cur[+refs-1]) + ABS(c-e)
-                         + ABS(cur[-refs+1] - cur[+refs+1]) - 1;
+        int spatial_score= FFABS(cur[-refs-1] - cur[+refs-1]) + FFABS(c-e)
+                         + FFABS(cur[-refs+1] - cur[+refs+1]) - 1;
 
 #define CHECK(j)\
-    {   int score= ABS(cur[-refs-1+j] - cur[+refs-1-j])\
-                 + ABS(cur[-refs  +j] - cur[+refs  -j])\
-                 + ABS(cur[-refs+1+j] - cur[+refs+1-j]);\
+    {   int score= FFABS(cur[-refs-1+j] - cur[+refs-1-j])\
+                 + FFABS(cur[-refs  +j] - cur[+refs  -j])\
+                 + FFABS(cur[-refs+1+j] - cur[+refs+1-j]);\
         if(score < spatial_score){\
             spatial_score= score;\
             spatial_pred= (cur[-refs  +j] + cur[+refs  -j])>>1;\
@@ -320,14 +324,14 @@ static void filter_line_c(struct vf_priv_s *p, uint8_t *dst, uint8_t *prev, uint
 #if 0
             int a= cur[-3*refs];
             int g= cur[+3*refs];
-            int max= MAX3(d-e, d-c, MIN3(MAX(b-c,f-e),MAX(b-c,b-a),MAX(f-g,f-e)) );
-            int min= MIN3(d-e, d-c, MAX3(MIN(b-c,f-e),MIN(b-c,b-a),MIN(f-g,f-e)) );
+            int max= FFMAX3(d-e, d-c, FFMIN3(FFMAX(b-c,f-e),FFMAX(b-c,b-a),FFMAX(f-g,f-e)) );
+            int min= FFMIN3(d-e, d-c, FFMAX3(FFMIN(b-c,f-e),FFMIN(b-c,b-a),FFMIN(f-g,f-e)) );
 #else
-            int max= MAX3(d-e, d-c, MIN(b-c, f-e));
-            int min= MIN3(d-e, d-c, MAX(b-c, f-e));
+            int max= FFMAX3(d-e, d-c, FFMIN(b-c, f-e));
+            int min= FFMIN3(d-e, d-c, FFMAX(b-c, f-e));
 #endif
 
-            diff= MAX3(diff, min, -max);
+            diff= FFMAX3(diff, min, -max);
         }
 
         if(spatial_pred > d + diff)
@@ -347,7 +351,7 @@ static void filter_line_c(struct vf_priv_s *p, uint8_t *dst, uint8_t *prev, uint
 }
 
 static void filter(struct vf_priv_s *p, uint8_t *dst[3], int dst_stride[3], int width, int height, int parity, int tff){
-    int x, y, i;
+    int y, i;
 
     for(i=0; i<3; i++){
         int is_chroma= !!i;
@@ -363,16 +367,16 @@ static void filter(struct vf_priv_s *p, uint8_t *dst[3], int dst_stride[3], int 
                 uint8_t *dst2= &dst[i][y*dst_stride[i]];
                 filter_line(p, dst2, prev, cur, next, w, refs, parity ^ tff);
             }else{
-                memcpy(&dst[i][y*dst_stride[i]], &p->ref[1][i][y*refs], w);
+                fast_memcpy(&dst[i][y*dst_stride[i]], &p->ref[1][i][y*refs], w);
             }
         }
     }
-#if defined(HAVE_MMX) && defined(NAMED_ASM_ARGS)
-    if(gCpuCaps.hasMMX2) asm volatile("emms \n\t" : : : "memory");
+#if HAVE_MMX_INLINE
+    if(gCpuCaps.hasMMX2) __asm__ volatile("emms \n\t" : : : "memory");
 #endif
 }
 
-static int config(struct vf_instance_s* vf,
+static int config(struct vf_instance *vf,
         int width, int height, int d_width, int d_height,
 	unsigned int flags, unsigned int outfmt){
         int i, j;
@@ -380,20 +384,19 @@ static int config(struct vf_instance_s* vf,
         for(i=0; i<3; i++){
             int is_chroma= !!i;
             int w= ((width   + 31) & (~31))>>is_chroma;
-            int h= ((height+6+ 31) & (~31))>>is_chroma;
+            int h=(((height  +  1) & ( ~1))>>is_chroma) + 6;
 
             vf->priv->stride[i]= w;
             for(j=0; j<3; j++)
-                vf->priv->ref[j][i]= malloc(w*h*sizeof(uint8_t))+3*w;
+                vf->priv->ref[j][i]= (uint8_t *)malloc(w*h*sizeof(uint8_t))+3*w;
         }
 
 	return vf_next_config(vf,width,height,d_width,d_height,flags,outfmt);
 }
 
-static int continue_buffered_image(struct vf_instance_s *vf);
-extern int correct_pts;
+static int continue_buffered_image(struct vf_instance *vf);
 
-static int put_image(struct vf_instance_s* vf, mp_image_t *mpi, double pts){
+static int put_image(struct vf_instance *vf, mp_image_t *mpi, double pts){
     int tff;
 
     if(vf->priv->parity < 0) {
@@ -420,7 +423,7 @@ static int put_image(struct vf_instance_s* vf, mp_image_t *mpi, double pts){
         return continue_buffered_image(vf);
 }
 
-static int continue_buffered_image(struct vf_instance_s *vf)
+static int continue_buffered_image(struct vf_instance *vf)
 {
     mp_image_t *mpi = vf->priv->buffered_mpi;
     int tff = vf->priv->buffered_tff;
@@ -444,13 +447,13 @@ static int continue_buffered_image(struct vf_instance_s *vf)
         if (correct_pts)
             break;
         if(i<(vf->priv->mode&1))
-            vf_next_control(vf, VFCTRL_FLIP_PAGE, NULL);
+            vf_extra_flip(vf);
     }
     vf->priv->buffered_i = 1;
     return ret;
 }
 
-static void uninit(struct vf_instance_s* vf){
+static void uninit(struct vf_instance *vf){
     int i;
     if(!vf->priv) return;
 
@@ -464,7 +467,7 @@ static void uninit(struct vf_instance_s* vf){
 }
 
 //===========================================================================//
-static int query_format(struct vf_instance_s* vf, unsigned int fmt){
+static int query_format(struct vf_instance *vf, unsigned int fmt){
     switch(fmt){
 	case IMGFMT_YV12:
 	case IMGFMT_I420:
@@ -476,7 +479,7 @@ static int query_format(struct vf_instance_s* vf, unsigned int fmt){
     return 0;
 }
 
-static int control(struct vf_instance_s* vf, int request, void* data){
+static int control(struct vf_instance *vf, int request, void* data){
     switch (request){
       case VFCTRL_GET_DEINTERLACE:
         *(int*)data = vf->priv->do_deinterlace;
@@ -488,7 +491,7 @@ static int control(struct vf_instance_s* vf, int request, void* data){
     return vf_next_control (vf, request, data);
 }
 
-static int open(vf_instance_t *vf, char* args){
+static int vf_open(vf_instance_t *vf, char *args){
 
     vf->config=config;
     vf->put_image=put_image;
@@ -505,18 +508,18 @@ static int open(vf_instance_t *vf, char* args){
     if (args) sscanf(args, "%d:%d", &vf->priv->mode, &vf->priv->parity);
 
     filter_line = filter_line_c;
-#if defined(HAVE_MMX) && defined(NAMED_ASM_ARGS)
+#if HAVE_MMX_INLINE
     if(gCpuCaps.hasMMX2) filter_line = filter_line_mmx2;
 #endif
 
     return 1;
 }
 
-vf_info_t vf_info_yadif = {
+const vf_info_t vf_info_yadif = {
     "Yet Another DeInterlacing Filter",
     "yadif",
     "Michael Niedermayer",
     "",
-    open,
+    vf_open,
     NULL
 };

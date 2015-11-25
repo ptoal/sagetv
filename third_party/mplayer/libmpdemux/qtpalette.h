@@ -1,18 +1,36 @@
-//  Default Palettes for Quicktime Files
-//  Automatically generated from a utility derived from XAnim:
-//    http://xanim.va.pubnix.com/home.html
+/*
+ * default palettes for QuickTime files
+ * Automatically generated from a utility derived from XAnim:
+ * http://xanim.va.pubnix.com/home.html
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-#ifndef QTPALETTE_H
-#define QTPALETTE_H
+#ifndef MPLAYER_QTPALETTE_H
+#define MPLAYER_QTPALETTE_H
 
-static unsigned char qt_default_palette_4[4 * 4] = {
+static const unsigned char qt_default_palette_4[4 * 4] = {
   0x5E, 0x65, 0x93, 0x00,
   0xFF, 0xFF, 0xFF, 0x00,
   0xAB, 0xD0, 0xDF, 0x00,
-  0x00, 0x00, 0x00, 0x00 
+  0x00, 0x00, 0x00, 0x00
 };
 
-static unsigned char qt_default_palette_16[16 * 4] = {
+static const unsigned char qt_default_palette_16[16 * 4] = {
   0xFF, 0xFB, 0xFF, 0x00,
   0xBB, 0xD9, 0xEF, 0x00,
   0xB1, 0xC9, 0xE8, 0x00,
@@ -28,10 +46,10 @@ static unsigned char qt_default_palette_16[16 * 4] = {
   0xF9, 0xFB, 0xFF, 0x00,
   0xC5, 0xCA, 0xE8, 0x00,
   0x77, 0x7C, 0x8A, 0x00,
-  0x00, 0x00, 0x00, 0x00 
+  0x00, 0x00, 0x00, 0x00
 };
 
-static unsigned char qt_default_palette_256[256 * 4] = {
+static const unsigned char qt_default_palette_256[256 * 4] = {
   /*   0, 0x00 */  0xFF, 0xFF, 0xFF, 0x00,
   /*   1, 0x01 */  0xCC, 0xFF, 0xFF, 0x00,
   /*   2, 0x02 */  0x99, 0xFF, 0xFF, 0x00,
@@ -290,7 +308,7 @@ static unsigned char qt_default_palette_256[256 * 4] = {
   /* 255, 0xFF */  0x00, 0x00, 0x00, 0x00
 };
 
-static unsigned char qt_default_grayscale_palette_16[16 * 4] = {
+static const unsigned char qt_default_grayscale_palette_16[16 * 4] = {
   0xFF, 0xFF, 0xFF, 0xFF,
   0xEE, 0xEE, 0xEE, 0xEE,
   0xDD, 0xDD, 0xDD, 0xDD,
@@ -309,7 +327,7 @@ static unsigned char qt_default_grayscale_palette_16[16 * 4] = {
   0x00, 0x00, 0x00, 0x00
 };
 
-static unsigned char qt_default_grayscale_palette_256[256 * 4] = {
+static const unsigned char qt_default_grayscale_palette_256[256 * 4] = {
   /*   0, 0x00 */  0xFF, 0xFF, 0xFF, 0xFF,
   /*   1, 0x01 */  0xFE, 0xFE, 0xFE, 0xFE,
   /*   2, 0x02 */  0xFD, 0xFD, 0xFD, 0xFD,
@@ -568,4 +586,4 @@ static unsigned char qt_default_grayscale_palette_256[256 * 4] = {
   /* 255, 0xFF */  0x00, 0x00, 0x00, 0x00
 };
 
-#endif
+#endif /* MPLAYER_QTPALETTE_H */

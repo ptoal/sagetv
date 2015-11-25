@@ -1,3 +1,20 @@
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "config.h"
 #include "mp_msg.h"
@@ -22,7 +39,7 @@
 #include "m_option.h"
 #include "menu.h"
 
-#include "libvo/font_load.h"
+#include "sub/font_load.h"
 #include "osdep/keycodes.h"
 #include "input/input.h"
 #include "osdep/timer.h"
@@ -50,7 +67,7 @@ struct menu_priv_s {
   history_t* history;
   history_t* cur_history;
   int history_size;
-  
+
   char* mp_prompt;
   char* child_prompt;
   int buf_lines; // Buffer size (in line)
@@ -93,7 +110,7 @@ static struct menu_priv_s cfg_dflt = {
 
 #define ST_OFF(m) M_ST_OFF(struct menu_priv_s,m)
 
-static m_option_t cfg_fields[] = {
+static const m_option_t cfg_fields[] = {
   { "prompt", ST_OFF(mp_prompt), CONF_TYPE_STRING, M_OPT_MIN, 1, 0, NULL },
   { "child-prompt", ST_OFF(child_prompt), CONF_TYPE_STRING, M_OPT_MIN, 1, 0, NULL },
   { "buffer-lines", ST_OFF(buf_lines), CONF_TYPE_INT, M_OPT_MIN, 5, 0, NULL },
@@ -125,7 +142,7 @@ static void add_line(struct menu_priv_s* priv, char* l) {
     return;
   }
 
-  if(priv->num_lines >= priv->buf_lines && priv->lines[priv->last_line])
+  if(priv->num_lines >= priv->buf_lines)
     free(priv->lines[priv->last_line]);
   else
     priv->num_lines++;
@@ -144,11 +161,11 @@ static void add_string(struct menu_priv_s* priv, char* l) {
     priv->add_line = 0;
     return;
   }
-  
+
   if(eol) {
     eol[0] = '\0';
     add_string(priv,l);
-    if(eol[1]) { 
+    if(eol[1]) {
       add_line(priv,eol+1);
       priv->add_line = 0;
     } else
@@ -198,7 +215,7 @@ static void draw(menu_t* menu, mp_image_t* mpi) {
 
   if(mpriv->bg >= 0)
     menu_draw_box(mpi,mpriv->bg,mpriv->bg_alpha,0,0,mpi->w,h);
-  
+
   if(!mpriv->child || !mpriv->raw_child){
     char input[strlen(mpriv->cur_history->buffer) + strlen(mpriv->prompt) + 1];
     sprintf(input,"%s%s",mpriv->prompt,mpriv->cur_history->buffer);
@@ -221,20 +238,6 @@ static void draw(menu_t* menu, mp_image_t* mpi) {
   return;
 }
 
-static void read_cmd(menu_t* menu,int cmd) {
-  switch(cmd) {
-  case MENU_CMD_UP:
-    break;
-  case MENU_CMD_DOWN:
-  case MENU_CMD_OK:
-    break;
-  case MENU_CMD_CANCEL:
-    menu->show = 0;
-    menu->cl = 1;
-    break;
-  }
-}
-
 static void check_child(menu_t* menu) {
 #ifndef __MINGW32__
   fd_set rfd;
@@ -255,12 +258,12 @@ static void check_child(menu_t* menu) {
   if(r == 0) {
     r = waitpid(mpriv->child,&child_status,WNOHANG);
     if(r < 0){
-      if(errno==ECHILD){  ///exiting childs get handled in mplayer.c
-        for(i = 0 ; i < 3 ; i++) 
+      if(errno==ECHILD){  ///exiting children get handled in mplayer.c
+        for(i = 0 ; i < 3 ; i++)
           close(mpriv->child_fd[i]);
         mpriv->child = 0;
         mpriv->prompt = mpriv->mp_prompt;
-        //add_line(mpriv,"Child process exited");    
+        //add_line(mpriv,"Child process exited");
       }
       else mp_msg(MSGT_GLOBAL,MSGL_ERR,MSGTR_LIBMENU_WaitPidError,strerror(errno));
     }
@@ -268,14 +271,14 @@ static void check_child(menu_t* menu) {
     mp_msg(MSGT_GLOBAL,MSGL_ERR,MSGTR_LIBMENU_SelectError);
     return;
   }
-  
+
   w = 0;
   for(i = 1 ; i < 3 ; i++) {
     if(FD_ISSET(mpriv->child_fd[i],&rfd)){
       if(w) mpriv->add_line = 1;
       r = read(mpriv->child_fd[i],buffer,255);
       if(r < 0)
-	mp_msg(MSGT_GLOBAL,MSGL_ERR,MSGTR_LIBMENU_ReadErrorOnChilds, i == 1 ? "stdout":"stderr");
+	mp_msg(MSGT_GLOBAL,MSGL_ERR,MSGTR_LIBMENU_ReadErrorOnChildFD, i == 1 ? "stdout":"stderr");
       else if(r>0) {
 	buffer[r] = '\0';
 	add_string(mpriv,buffer);
@@ -335,7 +338,7 @@ static int run_shell_cmd(menu_t* menu, char* cmd) {
 static void enter_cmd(menu_t* menu) {
   history_t* h;
   char input[strlen(mpriv->cur_history->buffer) + strlen(mpriv->prompt) + 1];
-  
+
   sprintf(input,"%s%s",mpriv->prompt,mpriv->cur_history->buffer);
   add_line(mpriv,input);
 
@@ -357,21 +360,21 @@ static void enter_cmd(menu_t* menu) {
     mpriv->history = h;
   } else
     mpriv->history->buffer[0] = '\0';
-    
+
   mpriv->cur_history = mpriv->history;
   //mpriv->input = mpriv->cur_history->buffer;
 }
 
-static void read_key(menu_t* menu,int c) {
-  if(!mpriv->child || !mpriv->raw_child) switch(c) {
-  case KEY_ESC:
+static void read_cmd(menu_t* menu,int cmd) {
+  switch(cmd) {
+  case MENU_CMD_CANCEL:
     if(mpriv->hide_time)
       mpriv->hide_ts = GetTimerMS();
     else
       menu->show = 0;
     mpriv->show_ts = 0;
     return;
-  case KEY_ENTER: {
+  case MENU_CMD_OK: {
     mp_cmd_t* c;
     if(mpriv->child) {
       char *str = mpriv->cur_history->buffer;
@@ -418,31 +421,37 @@ static void read_key(menu_t* menu,int c) {
 	break;
       default: // Send the other commands to mplayer
 	mp_input_queue_cmd(c);
+	c = NULL;
       }
+      if (c) mp_cmd_free(c);
     }
     return;
   }
-  case KEY_DELETE:
-  case KEY_BS: {
-    unsigned int i = strlen(mpriv->cur_history->buffer);
-    if(i > 0)
-      mpriv->cur_history->buffer[i-1] = '\0';
-    return;
-  }
-  case KEY_UP:
+  case MENU_CMD_UP:
     if(mpriv->cur_history->prev)
       mpriv->cur_history = mpriv->cur_history->prev;
     break;
-  case KEY_DOWN:
+  case MENU_CMD_DOWN:
     if(mpriv->cur_history->next)
       mpriv->cur_history = mpriv->cur_history->next;
     break;
   }
+}
 
+static int read_key(menu_t* menu,int c) {
   if(mpriv->child && mpriv->raw_child) {
     write(mpriv->child_fd[0],&c,sizeof(int));
-    return;
+    return 1;
   }
+
+  if (c == KEY_DELETE || c == KEY_BS) {
+    unsigned int i = strlen(mpriv->cur_history->buffer);
+    if(i > 0)
+      mpriv->cur_history->buffer[i-1] = '\0';
+    return 1;
+  }
+  if (menu_dflt_read_key(menu, c))
+    return 1;
 
   if(isascii(c)) {
     int l = strlen(mpriv->cur_history->buffer);
@@ -452,8 +461,9 @@ static void read_key(menu_t* menu,int c) {
     }
     mpriv->cur_history->buffer[l] = (char)c;
     mpriv->cur_history->buffer[l+1] = '\0';
+    return 1;
   }
-
+  return 0;
 }
 
 
@@ -469,7 +479,7 @@ static int openMenu(menu_t* menu, char* args) {
   mpriv->cur_history = mpriv->history = calloc(1,sizeof(history_t));
   mpriv->cur_history->buffer = calloc(255,1);
   mpriv->cur_history->size = 255;
-  
+
   if(args)
     add_line(mpriv,args);
 

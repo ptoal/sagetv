@@ -1,7 +1,10 @@
-#ifndef AVIFILE_DS_AUDIODECODER_H
-#define AVIFILE_DS_AUDIODECODER_H
+#ifndef MPLAYER_DS_AUDIODECODER_H
+#define MPLAYER_DS_AUDIODECODER_H
 
-typedef struct _DS_AudioDecoder DS_AudioDecoder;
+#include "loader/com.h"
+#include "loader/wine/mmreg.h"
+
+typedef struct DS_AudioDecoder DS_AudioDecoder;
 
 //DS_AudioDecoder * DS_AudioDecoder_Create(const CodecInfo * info, const WAVEFORMATEX* wf);
 DS_AudioDecoder * DS_AudioDecoder_Open(char* dllname, GUID* guid, WAVEFORMATEX* wf);
@@ -14,4 +17,4 @@ int DS_AudioDecoder_Convert(DS_AudioDecoder *this, const void* in_data, unsigned
 
 int DS_AudioDecoder_GetSrcSize(DS_AudioDecoder *this, int dest_size);
 
-#endif // AVIFILE_DS_AUDIODECODER_H
+#endif /* MPLAYER_DS_AUDIODECODER_H */

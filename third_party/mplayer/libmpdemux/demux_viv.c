@@ -1,11 +1,30 @@
-#include "config.h"
-//  VIVO file parser by A'rpi
-//  VIVO text header parser and audio support by alex
+/*
+ * VIVO file parser
+ * copyright (c) 2001 A'rpi
+ * VIVO text header parser and audio support by alex
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h> /* strtok */
+#include <strings.h>
 
 #include "config.h"
 #include "mp_msg.h"
@@ -14,14 +33,7 @@
 #include "stream/stream.h"
 #include "demuxer.h"
 #include "stheader.h"
-
-#ifdef USE_LIBAVCODEC_SO
-#include <ffmpeg/avcodec.h>
-#elif defined(USE_LIBAVCODEC)
-#include "libavcodec/avcodec.h"
-#else
-#define FF_INPUT_BUFFER_PADDING_SIZE 8
-#endif
+#include "demux_viv.h"
 
 /* parameters ! */
 int vivo_param_version = -1;
@@ -106,7 +118,7 @@ static void vivo_parse_text_header(demuxer_t *demux, int header_len)
     stream_read(demux->stream, buf, header_len);
     i=0;
     while(i<header_len && buf[i]==0x0D && buf[i+1]==0x0A) i+=2; // skip empty lines
-    
+
     token = strtok(buf, (char *)&("\x0d\x0a"));
     while (token && (header_len>2))
     {
@@ -117,7 +129,7 @@ static void vivo_parse_text_header(demuxer_t *demux, int header_len)
 		token, (int64_t)stream_tell(demux->stream));
 	    break;
 	}
-	mp_dbg(MSGT_DEMUX, MSGL_DBG3, "token: '%s' (%d bytes/%d bytes left)\n",
+	mp_dbg(MSGT_DEMUX, MSGL_DBG3, "token: '%s' (%zu bytes/%d bytes left)\n",
 	    token, strlen(token), header_len);
 	mp_dbg(MSGT_DEMUX, MSGL_DBG3, "token => o: '%s', p: '%s'\n",
 	    opt, param);
@@ -134,7 +146,7 @@ static void vivo_parse_text_header(demuxer_t *demux, int header_len)
 	    }
 	}
 
-	/* video specific */	
+	/* video specific */
 	if (!strcmp(opt, "FPS"))
 	{
 	    mp_msg(MSGT_DEMUX, MSGL_DBG2, "FPS: %f\n", atof(param));
@@ -194,11 +206,11 @@ static void vivo_parse_text_header(demuxer_t *demux, int header_len)
 	    if (priv->audio_bytesperblock == 24)
 		priv->audio_codec = VIVO_AUDIO_G723;
 	}
-	
+
 	/* only for displaying some informations about movie*/
 	if (!strcmp(opt, "Title"))
 	{
-	    demux_info_add(demux, "name", param);
+	    demux_info_add(demux, "title", param);
 	    priv->title = strdup(param);
 	}
 	if (!strcmp(opt, "Author"))
@@ -220,13 +232,10 @@ static void vivo_parse_text_header(demuxer_t *demux, int header_len)
 	/* get next token */
 	token = strtok(NULL, (char *)&("\x0d\x0a"));
     }
-    
-    if (buf)
-	free(buf);
-    if (opt)
-	free(opt);
-    if (param)
-	free(param);
+
+    free(buf);
+    free(opt);
+    free(param);
 }
 
 static int vivo_check_file(demuxer_t* demuxer){
@@ -236,9 +245,9 @@ static int vivo_check_file(demuxer_t* demuxer){
     unsigned char buf[2048+256];
     vivo_priv_t* priv;
     int orig_pos = stream_tell(demuxer->stream);
-    
+
     mp_msg(MSGT_DEMUX,MSGL_V,"Checking for VIVO\n");
-    
+
     c=stream_read_char(demuxer->stream);
     if(c==-256) return 0;
     len=0;
@@ -283,7 +292,7 @@ static int vivo_check_file(demuxer_t* demuxer){
     stream_skip(demuxer->stream,len2);
 //    stream_read(demuxer->stream,buf+len,len2);
 #endif
-    
+
 //    c=stream_read_char(demuxer->stream);
 //    printf("first packet: %02X\n",c);
 
@@ -305,7 +314,7 @@ static int demux_vivo_fill_buffer(demuxer_t *demux, demux_stream_t *dsds){
   int seq;
   int prefix=0;
   demux->filepos=stream_tell(demux->stream);
-  
+
   c=stream_read_char(demux->stream);
   if (c == -256) /* EOF */
     return 0;
@@ -313,7 +322,7 @@ static int demux_vivo_fill_buffer(demuxer_t *demux, demux_stream_t *dsds){
   if (c == 0x82)
   {
       /* ok, this works, but pts calculating from header is required! */
-#warning "Calculate PTS from picture header!"
+      /* FIXME: "Calculate PTS from picture header!" */
       prefix = 1;
       c = stream_read_char(demux->stream);
       mp_msg(MSGT_DEMUX, MSGL_V, "packet 0x82(pos=%u) chunk=%x\n",
@@ -370,12 +379,12 @@ static int demux_vivo_fill_buffer(demuxer_t *demux, demux_stream_t *dsds){
   }
 
 //  printf("chunk=%x, len=%d\n", c, len);
-  
+
   if(!ds || ds->id<-1){
       if(len) stream_skip(demux->stream,len);
       return 1;
   }
-  
+
   seq=c&0x0F;
 
     if(ds->asf_packet){
@@ -387,10 +396,10 @@ static int demux_vivo_fill_buffer(demuxer_t *demux, demux_stream_t *dsds){
       } else {
         // append data to it!
         demux_packet_t* dp=ds->asf_packet;
-        if(dp->len + len + FF_INPUT_BUFFER_PADDING_SIZE < 0)
+        if(dp->len + len + MP_INPUT_BUFFER_PADDING_SIZE < 0)
 	    return 0;
-        dp->buffer=realloc(dp->buffer,dp->len+len+FF_INPUT_BUFFER_PADDING_SIZE);
-        memset(dp->buffer+dp->len+len, 0, FF_INPUT_BUFFER_PADDING_SIZE);
+        dp->buffer=realloc(dp->buffer,dp->len+len+MP_INPUT_BUFFER_PADDING_SIZE);
+        memset(dp->buffer+dp->len+len, 0, MP_INPUT_BUFFER_PADDING_SIZE);
         //memcpy(dp->buffer+dp->len,data,len);
 	stream_read(demux->stream,dp->buffer+dp->len,len);
         mp_dbg(MSGT_DEMUX,MSGL_DBG4,"data appended! %d+%d\n",dp->len,len);
@@ -457,9 +466,9 @@ static unsigned int x_get_bits(int n){
 static int h263_decode_picture_header(unsigned char *b_ptr)
 {
 //    int i;
-        
+
 //    for(i=0;i<16;i++) printf(" %02X",b_ptr[i]); printf("\n");
-    
+
     buffer=b_ptr;
     bufptr=bitcnt=buf=0;
 
@@ -557,15 +566,15 @@ static demuxer_t* demux_open_vivo(demuxer_t* demuxer){
   }
 
     audio_pos=0;
-  
+
   h263_decode_picture_header(demuxer->video->buffer);
-  
+
   if (vivo_param_version != -1)
     priv->version = '0' + vivo_param_version;
 
 {		sh_video_t* sh=new_sh_video(demuxer,0);
 
-		/* viv1, viv2 (for better codecs.conf) */    
+		/* viv1, viv2 (for better codecs.conf) */
 		sh->format = mmioFOURCC('v', 'i', 'v', priv->version);
 		if(!sh->fps)
 		{
@@ -586,7 +595,7 @@ static demuxer_t* demux_open_vivo(demuxer_t* demuxer){
 
 		if (vivo_param_height != -1)
 		    priv->disp_height = priv->height = vivo_param_height;
-		
+
 		if (vivo_param_vformat != -1)
 		{
 		    priv->disp_width = priv->width = h263_format[vivo_param_vformat][0];
@@ -603,8 +612,7 @@ static demuxer_t* demux_open_vivo(demuxer_t* demuxer){
 		    sh->disp_h = height;
 
 		// emulate BITMAPINFOHEADER:
-		sh->bih=malloc(sizeof(BITMAPINFOHEADER));
-		memset(sh->bih,0,sizeof(BITMAPINFOHEADER));
+		sh->bih=calloc(1, sizeof(*sh->bih));
 		sh->bih->biSize=40;
 		if (priv->width)
 		    sh->bih->biWidth = priv->width;
@@ -621,9 +629,8 @@ static demuxer_t* demux_open_vivo(demuxer_t* demuxer){
 
 		/* insert as stream */
 		demuxer->video->sh=sh;
-		sh->ds=demuxer->video;
 		demuxer->video->id=0;
-		
+
 		/* disable seeking */
 		demuxer->seekable = 0;
 
@@ -637,7 +644,7 @@ if (demuxer->audio->id >= -1){
   if(!ds_fill_buffer(demuxer->audio)){
     mp_msg(MSGT_DEMUX,MSGL_ERR,"VIVO: " MSGTR_MissingAudioStream);
   } else
-{		sh_audio_t* sh=new_sh_audio(demuxer,1);
+{		sh_audio_t* sh=new_sh_audio(demuxer,1, NULL);
 
 		/* Select audio codec */
 		if (priv->audio_codec == 0)
@@ -668,8 +675,7 @@ if (demuxer->audio->id >= -1){
 		}
 
 		// Emulate WAVEFORMATEX struct:
-		sh->wf=malloc(sizeof(WAVEFORMATEX));
-		memset(sh->wf,0,sizeof(WAVEFORMATEX));
+		sh->wf=calloc(1, sizeof(*sh->wf));
 		sh->wf->wFormatTag=sh->format;
 		sh->wf->nChannels=1; /* 1 channels for both Siren and G.723 */
 
@@ -718,11 +724,10 @@ if (demuxer->audio->id >= -1){
 		    sh->wf->nBlockAlign = priv->audio_bytesperblock;
 		if (vivo_param_bytesperblock != -1)
 		    sh->wf->nBlockAlign = vivo_param_bytesperblock;
-		
+
 /*sound_ok:*/
 		/* insert as stream */
 		demuxer->audio->sh=sh;
-		sh->ds=demuxer->audio;
 		demuxer->audio->id=1;
 nosound:
 		return demuxer;
@@ -734,23 +739,19 @@ nosound:
 static void demux_close_vivo(demuxer_t *demuxer)
 {
     vivo_priv_t* priv=demuxer->priv;
- 
+
     if (priv) {
-	if (priv->title)
-	    free(priv->title);
-        if (priv->author)
-	    free(priv->author);
-	if (priv->copyright)
-	    free(priv->copyright);
-	if (priv->producer)
-	   free(priv->producer);
+	free(priv->title);
+	free(priv->author);
+	free(priv->copyright);
+	free(priv->producer);
 	free(priv);
     }
     return;
 }
 
 
-demuxer_desc_t demuxer_desc_vivo = {
+const demuxer_desc_t demuxer_desc_vivo = {
   "Vivo demuxer",
   "vivo",
   "VIVO",

@@ -169,6 +169,7 @@ int sockReadLine(int sd, char* buffer, int bufLen)
 	int newlineIndex = 0;
 	int endFound = 0;
 	int offset = 0;
+	int i = 0;
 	while (!endFound)
 	{
 		currRecv = recv(sd, buffer + offset, bufLen, MSG_PEEK);
@@ -183,7 +184,6 @@ int sockReadLine(int sd, char* buffer, int bufLen)
 		}
 
 		// Scan the buffer for "\r\n" termination
-		int i = 0;
 		for (i = 0; i < (currRecv + offset); i++)
 		{
 			if (buffer[i] == '\r')
@@ -263,7 +263,7 @@ printf("FAILURE %d\n", __LINE__);fflush(stdout);
 printf("FAILURE %d\n", __LINE__);fflush(stdout);
 		return 0;
 	}
-    memcpy(&inetAddress->sin_addr.s_addr, hostptr->h_addr, hostptr->h_length );
+    memcpy(&inetAddress->sin_addr.s_addr, hostptr->h_addr_list[0], hostptr->h_length );
  
     if (connect(newfd, (struct sockaddr *) ((void *)&address), sizeof(address)) < 0)
 	{
@@ -388,7 +388,7 @@ printf("FAILURE %d\n", __LINE__);fflush(stdout);
 	}
 }
 
-static off_t size(struct stream_st *s, off_t *availSize)
+static off_t size(stream_t *s, off_t *availSize)
 {
     struct stream_priv_s* p = (struct stream_priv_s*)s->priv;
 	char data[512];
@@ -598,15 +598,15 @@ printf("FAILURE %d\n", __LINE__);fflush(stdout);
 	return bytesRead;
 }
 
-static int control(struct stream_st *s,int cmd,void* arg) {
+static int control(stream_t *s,int cmd,void* arg) {
 //  switch(cmd) {
 //  case STREAM_CTRL_RESET:
 //    return net_stream_reset(s);
 //  }
-  return STREAM_UNSUPORTED;
+  return STREAM_UNSUPPORTED;
 }
 
-static void close_s(struct stream_st *s) {
+static void close_s(stream_t *s) {
 	struct stream_priv_s* p = s->priv;
 	char* data = "QUIT\r\n";
 	int dataSize = strlen(data);
@@ -633,7 +633,7 @@ static int open_s(stream_t *stream,int mode, void* opts, int* file_format) {
   struct stream_priv_s* p = (struct stream_priv_s*)opts;
 //printf("open_s called for stream_Sagetv\n");fflush(stdout);
   if(mode != STREAM_READ)
-    return STREAM_UNSUPORTED;
+    return STREAM_UNSUPPORTED;
 
   if(!p->host) {
     mp_msg(MSGT_OPEN,MSGL_ERR, "We need an host name (ex: stv://server.net/cdda://5)\n");
@@ -653,7 +653,7 @@ static int open_s(stream_t *stream,int mode, void* opts, int* file_format) {
 	  m_struct_free(&stream_opts,opts);
 	  return STREAM_ERROR;
   }
-	stream->flags = STREAM_SEEK;
+	stream->flags = MP_STREAM_SEEK;
 
 #ifndef WIN32
 	pthread_mutexattr_t attr;
@@ -664,7 +664,8 @@ static int open_s(stream_t *stream,int mode, void* opts, int* file_format) {
 #ifdef CONFIG_DARWIN
 		pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
 #else
-		pthread_mutexattr_setkind_np(&attr, PTHREAD_MUTEX_RECURSIVE_NP);
+		//pthread_mutexattr_setkind_np(&attr, PTHREAD_MUTEX_RECURSIVE_NP);
+		pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
 #endif
 		if (pthread_mutex_init(p->mutex, &attr) != 0)
 		{
@@ -695,7 +696,7 @@ printf("MUTEX creation failed for pthread\n");
 
 }
 
-stream_info_t stream_info_sagetv = {
+const stream_info_t stream_info_sagetv = {
   "SageTV stream",
   "stvstream",
   "SageTV",

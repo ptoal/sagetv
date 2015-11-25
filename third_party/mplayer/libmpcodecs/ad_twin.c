@@ -1,18 +1,37 @@
-#include "config.h"
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include "config.h"
 
+#include "config.h"
+#include "mp_msg.h"
 #include "ad_internal.h"
 #include "vqf.h"
+#include "libmpdemux/aviprint.h"
 #include "loader/ldt_keeper.h"
 #include "loader/wine/windef.h"
 #include "libaf/af_format.h"
 
 #include "help_mp.h"
 
-static ad_info_t info = 
+static const ad_info_t info =
 {
     "TWinVQ decoder",
     "vqf",
@@ -89,7 +108,6 @@ static int load_dll( char *libname )
      TvqGetNumFixedBitsPerFrame;
 }
 
-extern void print_wave_header(WAVEFORMATEX *h, int verbose_level);
 static int init_vqf_audio_codec(sh_audio_t *sh_audio){
     WAVEFORMATEX *in_fmt=sh_audio->wf;
     vqf_priv_t*priv=sh_audio->context;
@@ -139,7 +157,7 @@ static int init_vqf_audio_codec(sh_audio_t *sh_audio){
     priv->framesize=TvqGetFrameSize();
     sh_audio->audio_in_minsize=priv->framesize*in_fmt->nChannels;
     sh_audio->a_in_buffer_size=4*sh_audio->audio_in_minsize;
-    sh_audio->a_in_buffer=malloc(sh_audio->a_in_buffer_size);
+    sh_audio->a_in_buffer=av_malloc(sh_audio->a_in_buffer_size);
     sh_audio->a_in_buffer_len=0;
 
 
@@ -185,7 +203,7 @@ void uninit(sh_audio_t *sh)
   FreeLibrary(vqf_dll);
 }
 
-int control(sh_audio_t *sh_audio,int cmd,void* arg, ...)
+static int control(sh_audio_t *sh_audio,int cmd,void* arg, ...)
 {
   switch(cmd) {
       case ADCTRL_QUERY_FORMAT:
@@ -205,7 +223,7 @@ static int bread(char   *data,    /* Output: Output data array */
     unsigned char mask, tmpdat;
     int  retval;
     vqf_priv_t *priv=sh->context;
-    
+
     /*--- Main operation ---*/
     retval = 0;
     mask = 0x1;
@@ -217,14 +235,14 @@ static int bread(char   *data,    /* Output: Output data array */
         }
         iptr = priv->ptr;           /* current file data buffer pointer */
         if ( iptr >= priv->nbuf )   /* If data file is empty then return */
-            return(retval);
+            return retval;
         ibufadr = iptr/BYTE_BIT;      /* current file data buffer address */
         ibufbit = iptr%BYTE_BIT;      /* current file data buffer bit */
         /*  tmpdat = stream->buf[ibufadr] >> (BYTE_BIT-ibufbit-1); */
         tmpdat = (unsigned char)priv->buf[ibufadr];
         tmpdat >>= (BYTE_BIT-ibufbit-1);
         /* current data bit */
-        
+
         idata = ibits*size;                   /* output data address */
         data[idata] = (char)(tmpdat & mask);  /* set output data */
         for (icl=1; icl<size; icl++)
@@ -236,7 +254,7 @@ static int bread(char   *data,    /* Output: Output data array */
         }
         ++retval;
     }
-    return(retval);
+    return retval;
 }
 
 #define BITS_INT    (sizeof(int)*8)
@@ -250,7 +268,7 @@ static int get_bstm(int *data,          /* Input: input data */
     unsigned    work;
     char    tmpbit[BITS_INT];
     int     retval;
-    
+
     if ( nbits > BITS_INT ){
         mp_msg(MSGT_DECAUDIO, MSGL_ERR, "get_bstm(): %d: %d Error.\n",
             nbits, BITS_INT);
@@ -267,7 +285,7 @@ static int get_bstm(int *data,          /* Input: input data */
         mask >>= 1;
     }
     *data = work;
-    return(retval);
+    return retval;
 }
 
 static int GetVqInfo( tvqConfInfoSubBlock *cfg,
@@ -347,7 +365,7 @@ static int GetPpcInfo( tvqConfInfo *cf, INDEX *index, sh_audio_t *sh)
     int idiv, i_sup;
     int bitcount = 0;
     vqf_priv_t*priv=sh->context;
-    
+
     for ( idiv=0; idiv<cf->N_DIV_P; idiv++ ){
         bitcount += get_bstm(&(index->pls[idiv]), priv->bits_0[BLK_PPC][idiv],sh);       /*CB0*/
         bitcount += get_bstm(&(index->pls[idiv+cf->N_DIV_P]), priv->bits_1[BLK_PPC][idiv],sh);/*CB1*/
@@ -356,7 +374,7 @@ static int GetPpcInfo( tvqConfInfo *cf, INDEX *index, sh_audio_t *sh)
         bitcount += get_bstm(&(index->pit[i_sup]), cf->BASF_BIT,sh);
         bitcount += get_bstm(&(index->pgain[i_sup]), cf->PGAIN_BIT,sh);
     }
-    
+
     return bitcount;
 }
 
@@ -373,7 +391,7 @@ static int GetEbcInfo( tvqConfInfo *cf, tvqConfInfoSubBlock *cfg, INDEX *index, 
             }
         }
     }
-    
+
     return bitcount;
 }
 
@@ -386,7 +404,7 @@ static int vqf_read_frame(sh_audio_t *sh,INDEX *index)
     int numFixedBitsPerFrame = TvqGetNumFixedBitsPerFrame();
     int btype;
     vqf_priv_t *priv=sh->context;
-    
+
     /*--- Initialization ---*/
     variableBits = 0;
     bitcount = 0;
@@ -404,10 +422,10 @@ static int vqf_read_frame(sh_audio_t *sh,INDEX *index)
     cfg = &priv->cf.cfg[btype]; // set the block dependent paremeters table
 
     bitcount += variableBits;
-    
+
     /* Interleaved vector quantization */
     bitcount += GetVqInfo( cfg, priv->bits_0[btype], priv->bits_1[btype], variableBits, index, sh );
-    
+
     /* Bark-scale envelope */
     bitcount += GetBseInfo( &priv->cf, cfg, index, sh );
     /* Gain */
@@ -422,7 +440,7 @@ static int vqf_read_frame(sh_audio_t *sh,INDEX *index)
     if ( cfg->ebc_enable ){
         bitcount += GetEbcInfo( &priv->cf, cfg, index, sh );
     }
-    
+
     return bitcount == numFixedBitsPerFrame ? bitcount/8 : 0;
 }
 
@@ -435,7 +453,7 @@ static void frtobuf_s16(float out[],       /* Input  --- input data frame */
     unsigned ismp, ich;
     float *ptr;
     float dtmp;
-    
+
     for ( ich=0; ich<numChannels; ich++ ){
         ptr = out+ich*frameSize;
         for ( ismp=0; ismp<frameSize; ismp++ ){
@@ -462,7 +480,7 @@ static void frtobuf_float(float out[],       /* Input  --- input data frame */
     unsigned ismp, ich;
     float *ptr;
     float dtmp;
-    
+
     for ( ich=0; ich<numChannels; ich++ ){
         ptr = out+ich*frameSize;
         for ( ismp=0; ismp<frameSize; ismp++ ){

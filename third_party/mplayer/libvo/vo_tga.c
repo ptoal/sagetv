@@ -1,43 +1,63 @@
-/* 
- * vo_tga.c: targa output
+/*
+ * TARGA video output
  *
- * this video output module write targa uncompressed file in 15, 24 and 32 bit bgr format.
+ * This video output module writes TARGA uncompressed files in 15, 24 and 32
+ * bit BGR format.
  *
  * to select the output format use the format filter:
  *  mplayer -vo tga -vf format=bgr15 ...
  *  mplayer -vo tga -vf format=bgr24 ...
  *  mplayer -vo tga -vf format=bgr32 ...
  *
- * The 16 bit file are loaded without problem from Gimp and ImageMagick but give an error
- * with entice (a visualizer from the enlightenment package that use the imlib2 package).
+ * The 16 bit files are loaded without problem from Gimp and ImageMagick but
+ * give an error with entice (a visualizer from the enlightenment package
+ * that uses the imlib2 package).
  *
- * In 32 bit mode the alpha channel is set to 255 (0xff). For big endian
- * machines, TGA_ALPHA32 changes from 0xff000000 to 0x000000ff, and TGA_SHIFT32 from 0 to 8.
+ * In 32-bit mode the alpha channel is set to 255 (0xff). For big-endian
+ * machines, TGA_ALPHA32 changes from 0xff000000 to 0x000000ff, and
+ * TGA_SHIFT32 from 0 to 8.
  *
- * I need to fill the alpha channel because entice consider that alpha channel (and displays
- * nothing, only the background!), but ImageMacick (the program display) or gimp doesn't
- * care.
+ * I need to fill the alpha channel because entice considers that alpha
+ * channel (and displays nothing, only the background!), but ImageMagick
+ * (the program display) or gimp doesn't care.
  *
- * maybe is possible (with a compilation switch) to avoid the fill of the alpha channel
- * and work outside mplayer (if needed)
+ * Maybe it is possible (with a compilation switch) to avoid the fill of
+ * the alpha channel and work outside MPlayer (if needed).
  *
  *    Daniele Forghieri ( guru@digitalfantasy.it )
  *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#include "config.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
 #include <math.h>
 
+#include "config.h"
 #include "mp_msg.h"
 #include "help_mp.h"
 #include "video_out.h"
+#define NO_DRAW_FRAME
+#define NO_DRAW_SLICE
 #include "video_out_internal.h"
 
-static vo_info_t info =
+static const vo_info_t info =
 {
 	"Targa output",
 	"tga",
@@ -46,11 +66,10 @@ static vo_info_t info =
 };
 
 
-LIBVO_EXTERN (tga)
+const LIBVO_EXTERN (tga)
 
 /* locals vars */
 static int      frame_num = 0;
-static void     *line_buff;
 
 static void tga_make_header(uint8_t *h, int dx, int dy, int bpp)
 {
@@ -110,39 +129,6 @@ static int write_tga( char *file, int bpp, int dx, int dy, uint8_t *buf, int str
             int    wb;
 
             wb = ((bpp + 7) / 8) * dx;
-            if (bpp == 32) {
-                /* Setup the alpha channel for every pixel */
-                while (dy-- > 0) {
-                    uint8_t    *d;
-                    uint8_t    *s;
-                    int         x;
-
-                    s = buf;
-                    d = line_buff;
-                    for(x = 0; x < dx; x++) {
-                    #ifdef WORDS_BIGENDIAN
-                        d[0] = s[3];
-                        d[1] = s[2];
-                        d[2] = s[1];
-                        d[3] = 0xff;
-                    #else
-                        d[0] = 0xff;
-                        d[1] = s[1];
-                        d[2] = s[2];
-                        d[3] = s[3];
-                    #endif
-                        d+=4;
-                        s+=4;
-                    }
-                    if (fwrite(line_buff, wb, 1, fo) != 1) {
-                        er = 4;
-                        break;
-                    }
-                    buf += stride;
-                }
-
-            }
-            else {
                 while (dy-- > 0) {
                     if (fwrite(buf, wb, 1, fo) != 1) {
                         er = 4;
@@ -150,7 +136,6 @@ static int write_tga( char *file, int bpp, int dx, int dy, uint8_t *buf, int str
                     }
                     buf += stride;
                 }
-            }
         }
         else {
             er = 2;
@@ -165,7 +150,7 @@ static int write_tga( char *file, int bpp, int dx, int dy, uint8_t *buf, int str
     if (er) {
         fprintf(stderr, "Error writing file [%s]\n", file);
     }
-    return(er);
+    return er;
 }
 
 static uint32_t draw_image(mp_image_t* mpi)
@@ -186,11 +171,6 @@ static uint32_t draw_image(mp_image_t* mpi)
 
 static int config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uint32_t flags, char *title, uint32_t format)
 {
-    /* buffer for alpha */
-    if(line_buff){ free(line_buff); line_buff=NULL; }
-    if (format == (IMGFMT_BGR | 32)) {
-        line_buff = malloc(width * 4);
-    }
     return 0;
 }
 
@@ -203,22 +183,12 @@ static void flip_page (void)
     return;
 }
 
-static int draw_slice(uint8_t *srcimg[], int stride[], int w,int h,int x,int y)
-{
-    return -1;
-}
-
-static int draw_frame(uint8_t * src[])
-{
-    return -1;
-}
-
 static int query_format(uint32_t format)
 {
     switch(format){
-        case IMGFMT_BGR|15:
-        case IMGFMT_BGR|24:
-        case IMGFMT_BGR|32:
+        case IMGFMT_BGR15LE:
+        case IMGFMT_BGR24:
+        case IMGFMT_BGRA:
             return VFCAP_CSP_SUPPORTED | VFCAP_CSP_SUPPORTED_BY_HW;
     }
     return 0;
@@ -226,7 +196,6 @@ static int query_format(uint32_t format)
 
 static void uninit(void)
 {
-    if(line_buff){ free(line_buff); line_buff=NULL; }
 }
 
 static void check_events(void)
@@ -242,7 +211,7 @@ static int preinit(const char *arg)
     return 0;
 }
 
-static int control(uint32_t request, void *data, ...)
+static int control(uint32_t request, void *data)
 {
   switch (request) {
       case VOCTRL_DRAW_IMAGE:

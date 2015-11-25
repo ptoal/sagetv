@@ -1,4 +1,3 @@
-#include "config.h"
 /*
  * Demultiplexer for MPEG2 Transport Streams.
  *
@@ -6,21 +5,22 @@
  * Kind feedback is appreciated; 'sucks' and alike is not.
  * Originally based on demux_pva.c written by Matteo Giani and FFmpeg (libavformat) sources
  *
- * This file is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public
- * License as published by the Free Software Foundation; either
- * version 2 of the License, or (at your option) any later version.
+ * This file is part of MPlayer.
  *
- * This file is distributed in the hope that it will be useful,
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * Lesser General Public License for more details.
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU Lesser General Public
- * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
-
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,16 +28,17 @@
 
 #include "config.h"
 #include "mp_msg.h"
+#include "mpcommon.h"
 #include "help_mp.h"
 
+#include "libmpcodecs/dec_audio.h"
 #include "stream/stream.h"
 #include "demuxer.h"
 #include "parse_es.h"
 #include "stheader.h"
-
-#include "unrarlib.h"
 #include "ms_hdr.h"
 #include "mpeg_hdr.h"
+#include "demux_ts.h"
 
 #define TS_PH_PACKET_SIZE 192
 #define TS_FEC_PACKET_SIZE 204
@@ -46,7 +47,6 @@
 
 #define MAX_HEADER_SIZE 6			/* enough for PES header + length */
 #define MAX_CHECK_SIZE	65535
-#define TS_MAX_PROBE_SIZE 2000000 /* dont forget to change this in cfg-common.h too */
 #define NUM_CONSECUTIVE_TS_PACKETS 32
 #define NUM_CONSECUTIVE_AUDIO_PACKETS 348
 #define MAX_A52_FRAME_SIZE 3840
@@ -57,11 +57,12 @@
 
 #define TYPE_AUDIO 1
 #define TYPE_VIDEO 2
+#define TYPE_SUB   3
 
 int ts_prog;
 int ts_keep_broken=0;
-off_t ts_probe = TS_MAX_PROBE_SIZE;
-extern char *dvdsub_lang, *audio_lang;	//for -alang
+off_t ts_probe = 0;
+int audio_substream_id = -1;
 
 typedef enum
 {
@@ -71,14 +72,22 @@ typedef enum
 	VIDEO_MPEG4 	= 0x10000004,
 	VIDEO_H264 	= 0x10000005,
 	VIDEO_AVC	= mmioFOURCC('a', 'v', 'c', '1'),
+	VIDEO_DIRAC	= mmioFOURCC('d', 'r', 'a', 'c'),
+	VIDEO_HEVC	= mmioFOURCC('H', 'E', 'V', 'C'),
 	VIDEO_VC1	= mmioFOURCC('W', 'V', 'C', '1'),
 	AUDIO_MP2   	= 0x50,
 	AUDIO_A52   	= 0x2000,
 	AUDIO_DTS	= 0x2001,
 	AUDIO_LPCM_BE  	= 0x10001,
 	AUDIO_AAC	= mmioFOURCC('M', 'P', '4', 'A'),
+	AUDIO_AAC_LATM	= mmioFOURCC('M', 'P', '4', 'L'),
+	AUDIO_TRUEHD	= mmioFOURCC('T', 'R', 'H', 'D'),
+	AUDIO_S302M     = mmioFOURCC('B', 'S', 'S', 'D'),
+	AUDIO_PCM_BR    = mmioFOURCC('B', 'P', 'C', 'M'),
 	SPU_DVD		= 0x3000000,
 	SPU_DVB		= 0x3000001,
+	SPU_TELETEXT	= 0x3000002,
+	SPU_PGS		= 0x3000003,
 	PES_PRIVATE1	= 0xBD00000,
 	SL_PES_STREAM	= 0xD000000,
 	SL_SECTION	= 0xD100000,
@@ -95,7 +104,7 @@ typedef struct {
 	unsigned char *start;
 	uint16_t payload_size;
 	es_stream_type_t type, subtype;
-	float pts, last_pts;
+	double pts, last_pts;
 	int pid;
 	char lang[4];
 	int last_cc;				// last cc code (-1 if first packet)
@@ -147,7 +156,7 @@ typedef struct {
 	uint8_t use_ts;
 	uint8_t idle;
 	uint8_t duration;
-	
+
 	uint32_t ts_resolution, ocr_resolution;
 	uint8_t ts_len, ocr_len, au_len, instant_bitrate_len, degr_len, au_seqnum_len, packet_seqnum_len;
 	uint32_t timescale;
@@ -217,8 +226,8 @@ typedef struct {
 typedef struct {
 	uint64_t size;
 	float duration;
-	float first_pts;
-	float last_pts;
+	double first_pts;
+	double last_pts;
 } TS_stream_info;
 
 typedef struct {
@@ -233,12 +242,9 @@ typedef struct {
 	int keep_broken;
 	int last_aid;
 	int last_vid;
+	int last_sid;
 	char packet[TS_FEC_PACKET_SIZE];
 	TS_stream_info vstr, astr;
-	float first_pts;
-	float last_pts;
-	float final_pts;
-	int has_valid_timestamps;
 } ts_priv_t;
 
 
@@ -248,10 +254,52 @@ typedef struct {
 } TS_pids_t;
 
 
-#define IS_AUDIO(x) (((x) == AUDIO_MP2) || ((x) == AUDIO_A52) || ((x) == AUDIO_LPCM_BE) || ((x) == AUDIO_AAC) || ((x) == AUDIO_DTS))
-#define IS_VIDEO(x) (((x) == VIDEO_MPEG1) || ((x) == VIDEO_MPEG2) || ((x) == VIDEO_MPEG4) || ((x) == VIDEO_H264) || ((x) == VIDEO_AVC)  || ((x) == VIDEO_VC1))
+static int IS_AUDIO(es_stream_type_t type)
+{
+	switch (type) {
+	case AUDIO_MP2:
+	case AUDIO_A52:
+	case AUDIO_LPCM_BE:
+	case AUDIO_PCM_BR:
+	case AUDIO_AAC:
+	case AUDIO_AAC_LATM:
+	case AUDIO_DTS:
+	case AUDIO_TRUEHD:
+	case AUDIO_S302M:
+		return 1;
+	}
+	return 0;
+}
 
-static int ts_parse(demuxer_t *demuxer, ES_stream_t *es, unsigned char *packet, int probe);
+static int IS_VIDEO(es_stream_type_t type)
+{
+	switch (type) {
+	case VIDEO_MPEG1:
+	case VIDEO_MPEG2:
+	case VIDEO_MPEG4:
+	case VIDEO_H264:
+	case VIDEO_AVC:
+	case VIDEO_DIRAC:
+	case VIDEO_HEVC:
+	case VIDEO_VC1:
+		return 1;
+	}
+	return 0;
+}
+
+static int IS_SUB(es_stream_type_t type)
+{
+	switch (type) {
+	case SPU_DVD:
+	case SPU_DVB:
+	case SPU_PGS:
+	case SPU_TELETEXT:
+		return 1;
+	}
+	return 0;
+}
+
+static int ts_parse(demuxer_t *demuxer, ES_stream_t *es, int probe);
 
 static uint8_t get_packet_size(const unsigned char *buf, int size)
 {
@@ -290,6 +338,7 @@ try_fec:
 }
 
 static int parse_avc_sps(uint8_t *buf, int len, int *w, int *h);
+static uint8_t *pid_lang_from_pmt(ts_priv_t *priv, int pid);
 
 static void ts_add_stream(demuxer_t * demuxer, ES_stream_t *es)
 {
@@ -301,24 +350,24 @@ static void ts_add_stream(demuxer_t * demuxer, ES_stream_t *es)
 
 	if((IS_AUDIO(es->type) || IS_AUDIO(es->subtype)) && priv->last_aid+1 < MAX_A_STREAMS)
 	{
-		sh_audio_t *sh = new_sh_audio_aid(demuxer, priv->last_aid, es->pid);
+		sh_audio_t *sh = new_sh_audio_aid(demuxer, priv->last_aid, es->pid, pid_lang_from_pmt(priv, es->pid));
 		if(sh)
 		{
+			sh->needs_parsing = 1;
 			sh->format = IS_AUDIO(es->type) ? es->type : es->subtype;
-			sh->ds = demuxer->audio;
 
 			priv->ts.streams[es->pid].id = priv->last_aid;
 			priv->ts.streams[es->pid].sh = sh;
 			priv->ts.streams[es->pid].type = TYPE_AUDIO;
 			mp_msg(MSGT_DEMUX, MSGL_V, "\r\nADDED AUDIO PID %d, type: %x stream n. %d\r\n", es->pid, sh->format, priv->last_aid);
 			priv->last_aid++;
-		}
 
-		if(es->extradata && es->extradata_len)
-		{
-			sh->wf = (WAVEFORMATEX *) malloc(sizeof (WAVEFORMATEX) + es->extradata_len);
-			sh->wf->cbSize = es->extradata_len;
-			memcpy(sh->wf + 1, es->extradata, es->extradata_len);
+			if(es->extradata && es->extradata_len)
+			{
+				sh->wf = malloc(sizeof(*sh->wf) + es->extradata_len);
+				sh->wf->cbSize = es->extradata_len;
+				memcpy(sh->wf + 1, es->extradata, es->extradata_len);
+			}
 		}
 	}
 
@@ -327,8 +376,7 @@ static void ts_add_stream(demuxer_t * demuxer, ES_stream_t *es)
 		sh_video_t *sh = new_sh_video_vid(demuxer, priv->last_vid, es->pid);
 		if(sh)
 		{
-			sh->format = IS_VIDEO(es->type) ? es->type : es->subtype;;
-			sh->ds = demuxer->video;
+			sh->format = IS_VIDEO(es->type) ? es->type : es->subtype;
 
 			priv->ts.streams[es->pid].id = priv->last_vid;
 			priv->ts.streams[es->pid].sh = sh;
@@ -340,8 +388,8 @@ static void ts_add_stream(demuxer_t * demuxer, ES_stream_t *es)
 			if(sh->format == VIDEO_AVC && es->extradata && es->extradata_len)
 			{
 				int w = 0, h = 0;
-				sh->bih = (BITMAPINFOHEADER *) calloc(1, sizeof(BITMAPINFOHEADER) + es->extradata_len);
-				sh->bih->biSize= sizeof(BITMAPINFOHEADER) + es->extradata_len;
+				sh->bih = calloc(1, sizeof(*sh->bih) + es->extradata_len);
+				sh->bih->biSize= sizeof(*sh->bih) + es->extradata_len;
 				sh->bih->biCompression = sh->format;
 				memcpy(sh->bih + 1, es->extradata, es->extradata_len);
 				mp_msg(MSGT_DEMUXER,MSGL_DBG2, "EXTRADATA(%d BYTES): \n", es->extradata_len);
@@ -354,6 +402,27 @@ static void ts_add_stream(demuxer_t * demuxer, ES_stream_t *es)
 					sh->bih->biHeight = h;
 				}
 			}
+		}
+	}
+
+	if(IS_SUB(es->type) && priv->last_sid+1 < MAX_S_STREAMS)
+	{
+		sh_sub_t *sh = new_sh_sub_sid(demuxer, priv->last_sid, es->pid, pid_lang_from_pmt(priv, es->pid));
+ 		if (sh) {
+			switch (es->type) {
+			case SPU_DVB:
+				sh->type = 'b'; break;
+			case SPU_DVD:
+				sh->type = 'v'; break;
+			case SPU_PGS:
+				sh->type = 'p'; break;
+			case SPU_TELETEXT:
+				sh->type = 'd'; break;
+        		}
+			priv->ts.streams[es->pid].id = priv->last_sid;
+			priv->ts.streams[es->pid].sh = sh;
+			priv->ts.streams[es->pid].type = TYPE_SUB;
+			priv->last_sid++;
 		}
 	}
 }
@@ -461,7 +530,7 @@ static int ts_check_file(demuxer_t * demuxer)
 }
 
 
-static inline int32_t progid_idx_in_pmt(ts_priv_t *priv, uint16_t progid)
+static int32_t progid_idx_in_pmt(ts_priv_t *priv, uint16_t progid)
 {
 	int x;
 
@@ -478,7 +547,7 @@ static inline int32_t progid_idx_in_pmt(ts_priv_t *priv, uint16_t progid)
 }
 
 
-static inline int32_t progid_for_pid(ts_priv_t *priv, int pid, int32_t req)		//finds the first program listing a pid
+static int32_t progid_for_pid(ts_priv_t *priv, int pid, int32_t req)		//finds the first program listing a pid
 {
 	int i, j;
 	pmt_t *pmt;
@@ -508,8 +577,22 @@ static inline int32_t progid_for_pid(ts_priv_t *priv, int pid, int32_t req)		//f
 	return -1;
 }
 
+static int32_t prog_pcr_pid(ts_priv_t *priv, int progid)
+{
+	int i;
 
-static inline int pid_match_lang(ts_priv_t *priv, uint16_t pid, char *lang)
+	if(priv->pmt == NULL)
+		return -1;
+	for(i=0; i < priv->pmt_cnt; i++)
+	{
+		if(priv->pmt[i].progid == progid)
+			return priv->pmt[i].PCR_PID;
+	}
+	return -1;
+}
+
+
+static int pid_match_lang(ts_priv_t *priv, uint16_t pid, char *lang)
 {
 	uint16_t i, j;
 	pmt_t *pmt;
@@ -544,62 +627,21 @@ static inline int pid_match_lang(ts_priv_t *priv, uint16_t pid, char *lang)
 typedef struct {
 	int32_t atype, vtype, stype;	//types
 	int32_t apid, vpid, spid;	//stream ids
-	char slang[4], alang[4];	//languages
-	int16_t prog;
+	char alang[4];	//languages
+	uint16_t prog;
 	off_t probe;
 } tsdemux_init_t;
-
-//stripped down version of a52_syncinfo() from liba52
-//copyright belongs to Michel Lespinasse <walken@zoy.org> and Aaron Holtzman <aholtzma@ess.engr.uvic.ca>
-int mp_a52_framesize(uint8_t * buf, int *srate)
-{
-	int rate[] = {	32,  40,  48,  56,  64,  80,  96, 112,
-			128, 160, 192, 224, 256, 320, 384, 448,
-			512, 576, 640
-	};
-	uint8_t halfrate[12] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3};
-	int frmsizecod, bitrate, half;
-	
-	if((buf[0] != 0x0b) || (buf[1] != 0x77))	/* syncword */
-		return 0;
-	
-	if(buf[5] >= 0x60)		/* bsid >= 12 */
-		return 0;
-
-	half = halfrate[buf[5] >> 3];
-	
-	frmsizecod = buf[4] & 63;
-	if(frmsizecod >= 38)
-		return 0;
-
-	bitrate = rate[frmsizecod >> 1];
-	
-	switch(buf[4] & 0xc0) 
-	{
-		case 0:	/* 48 KHz */
-			*srate = 48000 >> half;
-			return 4 * bitrate;
-		case 0x40:	/* 44.1 KHz */
-			*srate = 44100 >> half;
-			return 2 * (320 * bitrate / 147 + (frmsizecod & 1));
-		case 0x80: /* 32 KHz */
-			*srate = 32000 >> half;
-			return 6 * bitrate;
-	}
-	
-	return 0;
-}
 
 //second stage: returns the count of A52 syncwords found
 static int a52_check(char *buf, int len)
 {
-	int cnt, frame_length, ok, srate;
-	
+	int cnt, frame_length = 0, ok, srate;
+
 	cnt = ok = 0;
 	if(len < 8)
 		return 0;
-		
-	while(cnt < len - 7)	
+
+	while(cnt < len - 7)
 	{
 		if(buf[cnt] == 0x0B && buf[cnt+1] == 0x77)
 		{
@@ -616,19 +658,18 @@ static int a52_check(char *buf, int len)
 			cnt++;
 	}
 
-	mp_msg(MSGT_DEMUXER, MSGL_V, "A52_CHECK(%d input bytes), found %d frame syncwords of %d bytes length\n", len, ok, frame_length);	
+	mp_msg(MSGT_DEMUXER, MSGL_V, "A52_CHECK(%d input bytes), found %d frame syncwords of %d bytes length\n", len, ok, frame_length);
 	return ok;
 }
 
 
 static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 {
-	int video_found = 0, audio_found = 0, sub_found = 0, i, num_packets = 0, req_apid, req_vpid, req_spid;
+	int video_found = 0, audio_found = 0, i, num_packets = 0, req_apid, req_vpid, req_spid;
 	int is_audio, is_video, is_sub, has_tables;
 	int32_t p, chosen_pid = 0;
-	off_t pos=0, ret = 0, init_pos;
+	off_t pos=0, ret = 0, init_pos, end_pos;
 	ES_stream_t es;
-	unsigned char tmp[TS_FEC_PACKET_SIZE];
 	ts_priv_t *priv = (ts_priv_t*) demuxer->priv;
 	struct {
 		char *buf;
@@ -646,10 +687,14 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 	memset(pes_priv1, 0, sizeof(pes_priv1));
 	init_pos = stream_tell(demuxer->stream);
 	mp_msg(MSGT_DEMUXER, MSGL_V, "PROBING UP TO %"PRIu64", PROG: %d\n", (uint64_t) param->probe, param->prog);
-	while((pos <= init_pos + param->probe) && (! demuxer->stream->eof))
+	end_pos = init_pos + (param->probe ? param->probe : TS_MAX_PROBE_SIZE);
+	while(1)
 	{
 		pos = stream_tell(demuxer->stream);
-		if(ts_parse(demuxer, &es, tmp, 1))
+		if(pos > end_pos || demuxer->stream->eof)
+			break;
+
+		if(ts_parse(demuxer, &es, 1))
 		{
 			//Non PES-aligned A52 audio may escape detection if PMT is not present;
 			//in this case we try to find at least 3 A52 syncwords
@@ -658,7 +703,7 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 				pptr = &pes_priv1[es.pid];
 				if(pptr->pos < 64*1024)
 				{
-				tmpbuf = (char*) realloc(pptr->buf, pptr->pos + es.size);
+				tmpbuf = realloc(pptr->buf, pptr->pos + es.size);
 				if(tmpbuf != NULL)
 				{
 					pptr->buf = tmpbuf;
@@ -673,10 +718,10 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 				}
 				}
 			}
-			
+
 			is_audio = IS_AUDIO(es.type) || ((es.type==SL_PES_STREAM) && IS_AUDIO(es.subtype));
 			is_video = IS_VIDEO(es.type) || ((es.type==SL_PES_STREAM) && IS_VIDEO(es.subtype));
-			is_sub   = ((es.type == SPU_DVD) || (es.type == SPU_DVB));
+			is_sub   = IS_SUB(es.type);
 
 
 			if((! is_audio) && (! is_video) && (! is_sub))
@@ -686,23 +731,19 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 
 			if(is_video)
 			{
-//				mp_msg(MSGT_IDENTIFY, MSGL_V, "ID_VIDEO_ID=%d\n", es.pid);
     				chosen_pid = (req_vpid == es.pid);
 				if((! chosen_pid) && (req_vpid > 0))
 					continue;
 			}
 			else if(is_audio)
 			{
-//				mp_msg(MSGT_IDENTIFY, MSGL_V, "ID_AUDIO_ID=%d\n", es.pid);
-//				if (es.lang[0] > 0)
-//					mp_msg(MSGT_IDENTIFY, MSGL_V, "ID_AID_%d_LANG=%s\n", es.pid, es.lang);
 				if(req_apid > 0)
 				{
 					chosen_pid = (req_apid == es.pid);
 					if(! chosen_pid)
 						continue;
 				}
-				else if(param->alang[0] > 0)
+				else if(param->alang[0] > 0 && es.lang[0] > 0)
 				{
 					if(pid_match_lang(priv, es.pid, param->alang) == -1)
 						continue;
@@ -713,9 +754,6 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 			}
 			else if(is_sub)
 			{
-				mp_msg(MSGT_IDENTIFY, MSGL_V, "ID_SUBTITLE_ID=%d\n", es.pid);
-				if (es.lang[0] > 0)
-					mp_msg(MSGT_IDENTIFY, MSGL_V, "ID_SID_%d_LANG=%s\n", es.pid, es.lang);
 				chosen_pid = (req_spid == es.pid);
 				if((! chosen_pid) && (req_spid > 0))
 					continue;
@@ -731,11 +769,9 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 
 			p = progid_for_pid(priv, es.pid, param->prog);
 			if(p != -1)
-				has_tables++;
-
-			if((param->prog == 0) && (p != -1))
 			{
-				if(chosen_pid)
+				has_tables++;
+				if(!param->prog && chosen_pid)
 					param->prog = p;
 			}
 
@@ -782,7 +818,7 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 			}
 
 
-			if(((req_vpid == -2) || (num_packets >= NUM_CONSECUTIVE_AUDIO_PACKETS)) && audio_found)
+			if(((req_vpid == -2) || (num_packets >= NUM_CONSECUTIVE_AUDIO_PACKETS)) && audio_found && !param->probe)
 			{
 				//novideo or we have at least 348 audio packets (64 KB) without video (TS with audio only)
 				param->vtype = 0;
@@ -795,7 +831,6 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 				{
 					param->stype = es.type;
 					param->spid = es.pid;
-					sub_found = 1;
 				}
 			}
 
@@ -826,7 +861,7 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 			pes_priv1[i].pos = 0;
 		}
 	}
-						
+
 	if(video_found)
 	{
 		if(param->vtype == VIDEO_MPEG1)
@@ -841,6 +876,8 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 			mp_msg(MSGT_DEMUXER, MSGL_INFO, "VIDEO VC1(pid=%d) ", param->vpid);
 		else if(param->vtype == VIDEO_AVC)
 			mp_msg(MSGT_DEMUXER, MSGL_INFO, "VIDEO AVC(NAL-H264, pid=%d) ", param->vpid);
+		else if(param->vtype == VIDEO_HEVC)
+			mp_msg(MSGT_DEMUXER, MSGL_INFO, "VIDEO HEVC(pid=%d) ", param->vpid);
 	}
 	else
 	{
@@ -857,18 +894,26 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 		mp_msg(MSGT_DEMUXER, MSGL_INFO, "AUDIO DTS(pid=%d)", param->apid);
 	else if(param->atype == AUDIO_LPCM_BE)
 		mp_msg(MSGT_DEMUXER, MSGL_INFO, "AUDIO LPCM(pid=%d)", param->apid);
+	else if(param->atype == AUDIO_PCM_BR)
+		mp_msg(MSGT_DEMUXER, MSGL_INFO, "AUDIO PCMBR(pid=%d)", param->apid);
 	else if(param->atype == AUDIO_AAC)
 		mp_msg(MSGT_DEMUXER, MSGL_INFO, "AUDIO AAC(pid=%d)", param->apid);
+	else if(param->atype == AUDIO_AAC_LATM)
+		mp_msg(MSGT_DEMUXER, MSGL_INFO, "AUDIO AAC LATM(pid=%d)", param->apid);
+	else if(param->atype == AUDIO_TRUEHD)
+		mp_msg(MSGT_DEMUXER, MSGL_INFO, "AUDIO TRUEHD(pid=%d)", param->apid);
+	else if(param->atype == AUDIO_S302M)
+		mp_msg(MSGT_DEMUXER, MSGL_INFO, "AUDIO S302M(pid=%d)", param->apid);
 	else
 	{
 		audio_found = 0;
 		param->atype = UNKNOWN;
 		//WE DIDN'T MATCH ANY AUDIO STREAM, SO WE FORCE THE DEMUXER TO IGNORE AUDIO
-		mp_msg(MSGT_DEMUXER, MSGL_INFO, "NO AUDIO! ");
+		mp_msg(MSGT_DEMUXER, MSGL_INFO, "NO AUDIO! (try increasing -tsprobe)");
 	}
 
-	if(param->stype == SPU_DVD || param->stype == SPU_DVB)
-		mp_msg(MSGT_DEMUXER, MSGL_INFO, " SUB %s(pid=%d) ", (param->stype==SPU_DVD ? "DVD" : "DVB"), param->spid);
+	if(IS_SUB(param->stype))
+		mp_msg(MSGT_DEMUXER, MSGL_INFO, " SUB %s(pid=%d) ", (param->stype==SPU_DVD ? "DVD" : param->stype==SPU_DVB ? "DVB" : param->stype==SPU_PGS ? "PGS" : "Teletext"), param->spid);
 	else
 	{
 		param->stype = UNKNOWN;
@@ -877,6 +922,13 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 
 	if(video_found || audio_found)
 	{
+		if(!param->prog)
+		{
+			p = progid_for_pid(priv, video_found ? param->vpid : param->apid, 0);
+			if(p != -1)
+				param->prog = p;
+		}
+
 		if(demuxer->stream->eof && (ret == 0))
 			ret = init_pos;
 		mp_msg(MSGT_DEMUXER, MSGL_INFO, " PROGRAM N. %d\n", param->prog);
@@ -885,7 +937,7 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 		mp_msg(MSGT_DEMUXER, MSGL_INFO, "\n");
 
 
-	for(i=0; i<8192; i++)
+	for(i=0; i<NB_PID_MAX; i++)
 	{
 		if(priv->ts.pids[i] != NULL)
 		{
@@ -902,7 +954,7 @@ static off_t ts_detect_streams(demuxer_t *demuxer, tsdemux_init_t *param)
 static int parse_avc_sps(uint8_t *buf, int len, int *w, int *h)
 {
 	int sps, sps_len;
-	unsigned char *ptr; 
+	unsigned char *ptr;
 	mp_mpeg_header_t picture;
 	if(len < 6)
 		return 0;
@@ -930,7 +982,7 @@ static demuxer_t *demux_open_ts(demuxer_t * demuxer)
 	sh_audio_t *sh_audio;
 	off_t start_pos;
 	tsdemux_init_t params;
-	ts_priv_t * priv = (ts_priv_t*) demuxer->priv;
+	ts_priv_t * priv = demuxer->priv;
 
 	mp_msg(MSGT_DEMUX, MSGL_V, "DEMUX OPEN, AUDIO_ID: %d, VIDEO_ID: %d, SUBTITLE_ID: %d,\n",
 		demuxer->audio->id, demuxer->video->id, demuxer->sub->id);
@@ -952,7 +1004,7 @@ static demuxer_t *demux_open_ts(demuxer_t * demuxer)
 		return NULL;
 	}
 
-	for(i=0; i < 8192; i++)
+	for(i=0; i < NB_PID_MAX; i++)
 	{
 	    priv->ts.pids[i] = NULL;
 	    priv->ts.streams[i].id = -3;
@@ -983,14 +1035,6 @@ static demuxer_t *demux_open_ts(demuxer_t * demuxer)
 	params.prog = ts_prog;
 	params.probe = ts_probe;
 
-	if(dvdsub_lang != NULL)
-	{
-		strncpy(params.slang, dvdsub_lang, 3);
-		params.slang[3] = 0;
-	}
-	else
-		memset(params.slang, 0, 4);
-
 	if(audio_lang != NULL)
 	{
 		strncpy(params.alang, audio_lang, 3);
@@ -1009,20 +1053,18 @@ static demuxer_t *demux_open_ts(demuxer_t * demuxer)
 		ts_add_stream(demuxer, priv->ts.pids[params.vpid]);
 		sh_video = priv->ts.streams[params.vpid].sh;
 		demuxer->video->id = priv->ts.streams[params.vpid].id;
-		sh_video->ds = demuxer->video;
 		sh_video->format = params.vtype;
 		demuxer->video->sh = sh_video;
 	}
 
 	if(params.atype != UNKNOWN)
 	{
-		ES_stream_t *es = priv->ts.pids[params.apid]; 
-		
+		ES_stream_t *es = priv->ts.pids[params.apid];
+
 		if(!IS_AUDIO(es->type) && !IS_AUDIO(es->subtype) && IS_AUDIO(params.atype)) es->subtype = params.atype;
 		ts_add_stream(demuxer, priv->ts.pids[params.apid]);
 		sh_audio = priv->ts.streams[params.apid].sh;
 		demuxer->audio->id = priv->ts.streams[params.apid].id;
-		sh_audio->ds = demuxer->audio;
 		sh_audio->format = params.atype;
 		demuxer->audio->sh = sh_audio;
 	}
@@ -1031,8 +1073,11 @@ static demuxer_t *demux_open_ts(demuxer_t * demuxer)
 	mp_msg(MSGT_DEMUXER,MSGL_V, "Opened TS demuxer, audio: %x(pid %d), video: %x(pid %d)...POS=%"PRIu64", PROBE=%"PRIu64"\n", params.atype, demuxer->audio->id, params.vtype, demuxer->video->id, (uint64_t) start_pos, ts_probe);
 
 
-	start_pos = (start_pos <= priv->ts.packet_size ? 0 : start_pos - priv->ts.packet_size);
+	start_pos = start_pos <= priv->ts.packet_size ?
+                    demuxer->stream->start_pos :
+                    start_pos - priv->ts.packet_size;
 	demuxer->movi_start = start_pos;
+	demuxer->reference_clock = MP_NOPTS_VALUE;
 	stream_reset(demuxer->stream);
 	stream_seek(demuxer->stream, start_pos);	//IF IT'S FROM A PIPE IT WILL FAIL, BUT WHO CARES?
 
@@ -1055,55 +1100,8 @@ static demuxer_t *demux_open_ts(demuxer_t * demuxer)
 	priv->pat.section.buffer_len = 0;
 	for(i = 0; i < priv->pmt_cnt; i++)
 		priv->pmt[i].section.buffer_len = 0;
-	
-	demuxer->filepos = stream_tell(demuxer->stream);
-	
-	stream_t *s = demuxer->stream;
-	off_t pos = stream_tell(s);
-	off_t end_seq_start = demuxer->movi_end-500000; // 500000 is a wild guess (good guess, confirmed by Narflex)
-	float half_pts = 0.0;
-	priv->first_pts = priv->last_pts = priv->final_pts = 0;
-	priv->has_valid_timestamps = 1;
-	if (!ds_fill_buffer(demuxer->video)) 
-	{
-		demuxer->priv = 0;
-		free(priv);
-		return 0;
-	}
-	priv->first_pts = priv->last_pts;
-	printf("INITIAL_PTS=%f\n", priv->first_pts);
-	// Don't do the PTS guesswork here if we're an activeFile
-	if (demuxer->seekable && stream_tell(demuxer->stream) < end_seq_start && !s->activeFileFlag) 
-	{
-		stream_seek(s,(pos + end_seq_start / 2));
-		while ((!s->eof) && ds_fill_buffer(demuxer->video) && half_pts == 0.0) 
-		{
-			half_pts = priv->last_pts;
-		}
-		stream_seek(s,end_seq_start);
-		while ((!s->eof) && ds_fill_buffer(demuxer->video)) 
-		{
-			  if (priv->final_pts < priv->last_pts) priv->final_pts = priv->last_pts;
-		}
-		if (priv->final_pts > 0)
-		{
-			printf("DURATION=%f\n", priv->final_pts);
-			fflush(stdout);
-		}
-		// educated guess about validity of timestamps; this is wrong since the initial pts isn't taken into account
-		/*	  if (mpg_d->final_pts > 3 * half_pts || mpg_d->final_pts < 1.5 * half_pts) {
-		  mpg_d->has_valid_timestamps = 0;
-		}*/
-		ds_free_packs(demuxer->audio);
-		ds_free_packs(demuxer->video);
-		demuxer->stream->eof=0; // clear eof flag
-		demuxer->video->eof=0;
-		demuxer->audio->eof=0;
 
-		stream_seek(s,pos);
-		ds_fill_buffer(demuxer->video);
-	}
-	
+	demuxer->filepos = stream_tell(demuxer->stream);
 	return demuxer;
 }
 
@@ -1111,49 +1109,55 @@ static void demux_close_ts(demuxer_t * demuxer)
 {
 	uint16_t i;
 	ts_priv_t *priv = (ts_priv_t*) demuxer->priv;
-	
+
 	if(priv)
 	{
-		if(priv->pat.section.buffer)
-			free(priv->pat.section.buffer);
-		if(priv->pat.progs)
-			free(priv->pat.progs);
-	
+		free(priv->pat.section.buffer);
+		free(priv->pat.progs);
+
 		if(priv->pmt)
-		{	
+		{
 			for(i = 0; i < priv->pmt_cnt; i++)
 			{
-				if(priv->pmt[i].section.buffer)
-					free(priv->pmt[i].section.buffer);
-				if(priv->pmt[i].es)
-					free(priv->pmt[i].es);
+				free(priv->pmt[i].section.buffer);
+				free(priv->pmt[i].es);
 			}
 			free(priv->pmt);
+		}
+		for (i = 0; i < NB_PID_MAX; i++)
+		{
+			free(priv->ts.pids[i]);
+			priv->ts.pids[i] = NULL;
+		}
+		for (i = 0; i < 3; i++)
+		{
+			if (priv->fifo[i].pack)
+				free_demux_packet(priv->fifo[i].pack);
+			priv->fifo[i].pack = NULL;
 		}
 		free(priv);
 	}
 	demuxer->priv=NULL;
-	}
+}
 
 
-extern unsigned char mp_getbits(unsigned char*, unsigned int, unsigned char);
 #define getbits mp_getbits
 
 static int mp4_parse_sl_packet(pmt_t *pmt, uint8_t *buf, uint16_t packet_len, int pid, ES_stream_t *pes_es)
 {
 	int i, n, m, mp4_es_id = -1;
 	uint64_t v = 0;
-	uint32_t pl_size = 0; 
+	uint32_t pl_size = 0;
 	int deg_flag = 0;
 	mp4_es_descr_t *es = NULL;
 	mp4_sl_config_t *sl = NULL;
 	uint8_t au_start = 0, au_end = 0, rap_flag = 0, ocr_flag = 0, padding = 0,  padding_bits = 0, idle = 0;
-	
+
 	pes_es->is_synced = 0;
-	mp_msg(MSGT_DEMUXER,MSGL_V, "mp4_parse_sl_packet, pid: %d, pmt: %pm, packet_len: %d\n", pid, pmt, packet_len);	
+	mp_msg(MSGT_DEMUXER,MSGL_V, "mp4_parse_sl_packet, pid: %d, pmt: %pm, packet_len: %d\n", pid, pmt, packet_len);
 	if(! pmt || !packet_len)
 		return 0;
-	
+
 	for(i = 0; i < pmt->es_cnt; i++)
 	{
 		if(pmt->es[i].pid == pid)
@@ -1161,7 +1165,7 @@ static int mp4_parse_sl_packet(pmt_t *pmt, uint8_t *buf, uint16_t packet_len, in
 	}
 	if(mp4_es_id < 0)
 		return -1;
-	
+
 	for(i = 0; i < pmt->mp4es_cnt; i++)
 	{
 		if(pmt->mp4es[i].id == mp4_es_id)
@@ -1169,16 +1173,16 @@ static int mp4_parse_sl_packet(pmt_t *pmt, uint8_t *buf, uint16_t packet_len, in
 	}
 	if(! es)
 		return -1;
-	
+
 	pes_es->subtype = es->decoder.object_type;
-	
+
 	sl = &(es->sl);
 	if(!sl)
 		return -1;
-		
+
 	//now es is the complete es_descriptor of out mp4 ES stream
 	mp_msg(MSGT_DEMUXER,MSGL_DBG2, "ID: %d, FLAGS: 0x%x, subtype: %x\n", es->id, sl->flags, pes_es->subtype);
-	
+
 	n = 0;
 	if(sl->au_start)
 		pes_es->sl.au_start = au_start = getbits(buf, n++, 1);
@@ -1186,14 +1190,14 @@ static int mp4_parse_sl_packet(pmt_t *pmt, uint8_t *buf, uint16_t packet_len, in
 		pes_es->sl.au_start = (pes_es->sl.last_au_end ? 1 : 0);
 	if(sl->au_end)
 		pes_es->sl.au_end = au_end = getbits(buf, n++, 1);
-	
+
 	if(!sl->au_start && !sl->au_end)
 	{
 		pes_es->sl.au_start = pes_es->sl.au_end = au_start = au_end = 1;
 	}
 	pes_es->sl.last_au_end = pes_es->sl.au_end;
-	
-	
+
+
 	if(sl->ocr_len > 0)
 		ocr_flag = getbits(buf, n++, 1);
 	if(sl->idle)
@@ -1205,34 +1209,34 @@ static int mp4_parse_sl_packet(pmt_t *pmt, uint8_t *buf, uint16_t packet_len, in
 		padding_bits = getbits(buf, n, 3);
 		n += 3;
 	}
-	
+
 	if(idle || (padding && !padding_bits))
 	{
 		pes_es->payload_size = 0;
 		return -1;
 	}
-	
+
 	//(! idle && (!padding || padding_bits != 0)) is true
 	n += sl->packet_seqnum_len;
 	if(sl->degr_len)
 		deg_flag = getbits(buf, n++, 1);
 	if(deg_flag)
 		n += sl->degr_len;
-	
+
 	if(ocr_flag)
 	{
 		n += sl->ocr_len;
 		mp_msg(MSGT_DEMUXER,MSGL_DBG2, "OCR: %d bits\n", sl->ocr_len);
 	}
-	
+
 	if(packet_len * 8 <= n)
 		return -1;
-	
+
 	mp_msg(MSGT_DEMUXER,MSGL_DBG2, "\nAU_START: %d, AU_END: %d\n", au_start, au_end);
 	if(au_start)
 	{
 		int dts_flag = 0, cts_flag = 0, ib_flag = 0;
-		
+
 		if(sl->random_accesspoint)
 			rap_flag = getbits(buf, n++, 1);
 
@@ -1240,7 +1244,7 @@ static int mp4_parse_sl_packet(pmt_t *pmt, uint8_t *buf, uint16_t packet_len, in
 		//the decoder will eventually discard the payload if it can't decode it
 		//if(rap_flag || sl->random_accesspoint_only)
 			pes_es->is_synced = 1;
-		
+
 		n += sl->au_seqnum_len;
 		if(packet_len * 8 <= n+8)
 			return -1;
@@ -1248,7 +1252,7 @@ static int mp4_parse_sl_packet(pmt_t *pmt, uint8_t *buf, uint16_t packet_len, in
 		{
 			dts_flag = getbits(buf, n++, 1);
 			cts_flag = getbits(buf, n++, 1);
-}
+		}
 		if(sl->instant_bitrate_len)
 			ib_flag = getbits(buf, n++, 1);
 		if(packet_len * 8 <= n+8)
@@ -1263,7 +1267,7 @@ static int mp4_parse_sl_packet(pmt_t *pmt, uint8_t *buf, uint16_t packet_len, in
 		if(cts_flag && (sl->ts_len > 0))
 		{
 			int i = 0, m;
-			
+
 			while(i < sl->ts_len)
 			{
 				m = FFMIN(8, sl->ts_len - i);
@@ -1275,12 +1279,12 @@ static int mp4_parse_sl_packet(pmt_t *pmt, uint8_t *buf, uint16_t packet_len, in
 				if(packet_len * 8 <= n+8)
 					return -1;
 			}
-			
-			pes_es->pts = (float) v / (float) sl->ts_resolution;
+
+			pes_es->pts = (double) v / (double) sl->ts_resolution;
 			mp_msg(MSGT_DEMUXER,MSGL_DBG2, "CTS: %d bits, value: %"PRIu64"/%d = %.3f\n", sl->ts_len, v, sl->ts_resolution, pes_es->pts);
 		}
-		
-		
+
+
 		i = 0;
 		pl_size = 0;
 		while(i < sl->au_len)
@@ -1298,15 +1302,76 @@ static int mp4_parse_sl_packet(pmt_t *pmt, uint8_t *buf, uint16_t packet_len, in
 		if(ib_flag)
 			n += sl->instant_bitrate_len;
 	}
-	
+
 	m = (n+7)/8;
 	if(0 < pl_size && pl_size < pes_es->payload_size)
 		pes_es->payload_size = pl_size;
-	
-	mp_msg(MSGT_DEMUXER,MSGL_V, "mp4_parse_sl_packet, n=%d, m=%d, size from pes hdr: %u, sl hdr size: %u, RAP FLAGS: %d/%d\n", 
+
+	mp_msg(MSGT_DEMUXER,MSGL_V, "mp4_parse_sl_packet, n=%d, m=%d, size from pes hdr: %u, sl hdr size: %u, RAP FLAGS: %d/%d\n",
 		n, m, pes_es->payload_size, pl_size, (int) rap_flag, (int) sl->random_accesspoint_only);
-	
+
 	return m;
+}
+
+//this function parses the extension fields in the PES header and returns the substream_id, or -1 in case of errors
+static int parse_pes_extension_fields(unsigned char *p, int pkt_len)
+{
+	int skip;
+	unsigned char flags;
+
+	if(!(p[7] & 0x1))	//no extension_field
+		return -1;
+	skip = 9;
+	if(p[7] & 0x80)
+	{
+		skip += 5;
+		if(p[7] & 0x40)
+			skip += 5;
+	}
+	if(p[7] & 0x20)	//escr_flag
+		skip += 6;
+	if(p[7] & 0x10)	//es_rate_flag
+		skip += 3;
+	if(p[7] & 0x08)//dsm_trick_mode is unsupported, skip
+	{
+		skip = 0;//don't let's parse the extension fields
+	}
+	if(p[7] & 0x04)	//additional_copy_info
+		skip += 1;
+	if(p[7] & 0x02)	//pes_crc_flag
+		skip += 2;
+	if(skip >= pkt_len)	//too few bytes
+		return -1;
+	flags = p[skip];
+	skip++;
+	if(flags & 0x80)	//pes_private_data_flag
+		skip += 16;
+	if(skip >= pkt_len)
+		return -1;
+	if(flags & 0x40)	//pack_header_field_flag
+	{
+		unsigned char l = p[skip];
+		skip += l;
+	}
+	if(flags & 0x20)	//program_packet_sequence_counter
+		skip += 2;
+	if(flags & 0x10)	//p_std
+		skip += 2;
+	if(skip >= pkt_len)
+		return -1;
+	if(flags & 0x01)	//finally the long desired pes_extension2
+	{
+		unsigned char l = p[skip];	//ext2 flag+len
+		skip++;
+		if((l == 0x81) && (skip < pkt_len))
+		{
+			int ssid = p[skip];
+			mp_msg(MSGT_IDENTIFY, MSGL_V, "SUBSTREAM_ID=%d (0x%02X)\n", ssid, ssid);
+			return ssid;
+		}
+	}
+
+	return -1;
 }
 
 static int pes_parse2(unsigned char *buf, uint16_t packet_len, ES_stream_t *es, int32_t type_from_pmt, pmt_t *pmt, int pid)
@@ -1325,7 +1390,6 @@ static int pes_parse2(unsigned char *buf, uint16_t packet_len, ES_stream_t *es, 
 		mp_msg(MSGT_DEMUX, MSGL_DBG2, "pes_parse2, BUFFER LEN IS TOO SMALL OR TOO BIG: %d EXIT\n", packet_len);
 		return 0;
 	}
-
 
 	p = buf;
 	pkt_len = packet_len;
@@ -1359,10 +1423,10 @@ static int pes_parse2(unsigned char *buf, uint16_t packet_len, ES_stream_t *es, 
 		pts |=  p[12]         <<  7 ;
 		pts |= (p[13] & 0xFE) >>  1 ;
 
-		es->pts = pts / 90000.0f;
+		es->pts = pts / 90000.0;
 	}
 	else
-		es->pts = 0.0f;
+		es->pts = 0.0;
 
 
 	header_len = p[8];
@@ -1372,6 +1436,15 @@ static int pes_parse2(unsigned char *buf, uint16_t packet_len, ES_stream_t *es, 
 	{
 		mp_msg(MSGT_DEMUX, MSGL_DBG2, "demux_ts: illegal value for PES_header_data_length (0x%02x)\n", header_len);
 		return 0;
+	}
+
+	if(stream_id==0xfd)
+	{
+		int ssid = parse_pes_extension_fields(p, pkt_len);
+		if((audio_substream_id!=-1) && (ssid != audio_substream_id))
+			return 0;
+		if(ssid == 0x72 && type_from_pmt != AUDIO_DTS && type_from_pmt != SPU_PGS)
+			es->type  = type_from_pmt = AUDIO_TRUEHD;
 	}
 
 	p += header_len + 9;
@@ -1395,9 +1468,17 @@ static int pes_parse2(unsigned char *buf, uint16_t packet_len, ES_stream_t *es, 
 		*/
 
 
+		if(type_from_pmt == SPU_PGS)
+		{
+			es->start = p;
+			es->size  = packet_len;
+			es->type  = SPU_PGS;
+			es->payload_size -= packet_len;
+			return 1;
+		}
 		if(
 			(type_from_pmt == AUDIO_A52) ||		 /* A52 - raw */
-			(p[0] == 0x0B && p[1] == 0x77)		/* A52 - syncword */
+			(packet_len >= 2 && p[0] == 0x0B && p[1] == 0x77)		/* A52 - syncword */
 		)
 		{
 			mp_msg(MSGT_DEMUX, MSGL_DBG2, "A52 RAW OR SYNCWORD\n");
@@ -1410,16 +1491,17 @@ static int pes_parse2(unsigned char *buf, uint16_t packet_len, ES_stream_t *es, 
 		}
 		/* SPU SUBS */
 		else if(type_from_pmt == SPU_DVB ||
-		((p[0] == 0x20) && pes_is_aligned)) // && p[1] == 0x00))
+		(packet_len >= 2 && (p[0] == 0x20) && pes_is_aligned)) // && p[1] == 0x00))
 		{
-			es->start = p;
-			es->size  = packet_len;
+			// offset/length fiddling to make decoding with lavc possible
+			es->start = p + 2;
+			es->size  = packet_len - 2;
 			es->type  = SPU_DVB;
 			es->payload_size -= packet_len;
 
 			return 1;
 		}
-		else if (pes_is_aligned && ((p[0] & 0xE0) == 0x20))	//SPU_DVD
+		else if (pes_is_aligned && packet_len >= 1 && ((p[0] & 0xE0) == 0x20))	//SPU_DVD
 		{
 			//DVD SUBS
 			es->start   = p+1;
@@ -1429,7 +1511,7 @@ static int pes_parse2(unsigned char *buf, uint16_t packet_len, ES_stream_t *es, 
 
 			return 1;
 		}
-		else if (pes_is_aligned && (p[0] & 0xF8) == 0x80)
+		else if (pes_is_aligned && packet_len >= 4 && (p[0] & 0xF8) == 0x80)
 		{
 			mp_msg(MSGT_DEMUX, MSGL_DBG2, "A52 WITH HEADER\n");
 			es->start   = p+4;
@@ -1439,7 +1521,7 @@ static int pes_parse2(unsigned char *buf, uint16_t packet_len, ES_stream_t *es, 
 
 			return 1;
 		}
-		else if (pes_is_aligned && ((p[0]&0xf0) == 0xa0))
+		else if (pes_is_aligned && packet_len >= 1 && ((p[0]&0xf0) == 0xa0))
 		{
 			int pcm_offset;
 
@@ -1487,14 +1569,14 @@ static int pes_parse2(unsigned char *buf, uint16_t packet_len, ES_stream_t *es, 
 	else if ((stream_id == 0xfa))
 	{
 		int l;
-		
+
 		es->is_synced = 0;
 		if(type_from_pmt != UNKNOWN)	//MP4 A/V or SL
 		{
 			es->start   = p;
 			es->size    = packet_len;
 			es->type    = type_from_pmt;
-				
+
 			if(type_from_pmt == SL_PES_STREAM)
 			{
 				//if(pes_is_aligned)
@@ -1507,14 +1589,13 @@ static int pes_parse2(unsigned char *buf, uint16_t packet_len, ES_stream_t *es, 
 						l = 0;
 					}
 				//}
-			
+
 				es->start   += l;
 				es->size    -= l;
 			}
 
 			if(es->payload_size)
 				es->payload_size -= packet_len;
-
 			return 1;
 		}
 	}
@@ -1555,16 +1636,13 @@ static int pes_parse2(unsigned char *buf, uint16_t packet_len, ES_stream_t *es, 
 
 static int ts_sync(stream_t *stream)
 {
-	int c=0;
-
 	mp_msg(MSGT_DEMUX, MSGL_DBG3, "TS_SYNC \n");
 
-	while(((c=stream_read_char(stream)) != 0x47) && ! stream->eof);
+	while (!stream->eof)
+		if (stream_read_char(stream) == 0x47)
+			return 1;
 
-	if(c == 0x47)
-		return c;
-	else
-		return 0;
+	return 0;
 }
 
 
@@ -1585,7 +1663,7 @@ static void ts_dump_streams(ts_priv_t *priv)
 }
 
 
-static inline int32_t prog_idx_in_pat(ts_priv_t *priv, uint16_t progid)
+static int32_t prog_idx_in_pat(ts_priv_t *priv, uint16_t progid)
 {
 	int x;
 
@@ -1602,7 +1680,7 @@ static inline int32_t prog_idx_in_pat(ts_priv_t *priv, uint16_t progid)
 }
 
 
-static inline int32_t prog_id_in_pat(ts_priv_t *priv, uint16_t pid)
+static int32_t prog_id_in_pat(ts_priv_t *priv, uint16_t pid)
 {
 	int x;
 
@@ -1623,22 +1701,22 @@ static int collect_section(ts_section_t *section, int is_start, unsigned char *b
 	uint8_t *ptr;
 	uint16_t tlen;
 	int skip, tid;
-	
+
 	mp_msg(MSGT_DEMUX, MSGL_V, "COLLECT_SECTION, start: %d, size: %d, collected: %d\n", is_start, size, section->buffer_len);
 	if(! is_start && !section->buffer_len)
 		return 0;
-	
+
 	if(is_start)
 	{
 		if(! section->buffer)
 		{
-			section->buffer = (uint8_t*) malloc(4096+256);
+			section->buffer = malloc(4096 + 256);
 			if(section->buffer == NULL)
 				return 0;
 		}
 		section->buffer_len = 0;
 	}
-	
+
 	if(size + section->buffer_len > 4096+256)
 	{
 		mp_msg(MSGT_DEMUX, MSGL_V, "COLLECT_SECTION, excessive len: %d + %d\n", section->buffer_len, size);
@@ -1647,14 +1725,14 @@ static int collect_section(ts_section_t *section, int is_start, unsigned char *b
 
 	memcpy(&(section->buffer[section->buffer_len]), buff, size);
 	section->buffer_len += size;
-	
+
 	if(section->buffer_len < 3)
 		return 0;
-		
+
 	skip = section->buffer[0];
 	if(skip + 4 > section->buffer_len)
 		return 0;
-	
+
 	ptr = &(section->buffer[skip + 1]);
 	tid = ptr[0];
 	tlen = ((ptr[1] & 0x0f) << 8) | ptr[2];
@@ -1664,9 +1742,9 @@ static int collect_section(ts_section_t *section, int is_start, unsigned char *b
 		mp_msg(MSGT_DEMUX, MSGL_DBG2, "DATA IS NOT ENOUGH, NEXT TIME\n");
 		return 0;
 	}
-	
+
 	return skip+1;
-	}
+}
 
 static int parse_pat(ts_priv_t * priv, int is_start, unsigned char *buff, int size)
 {
@@ -1675,14 +1753,13 @@ static int parse_pat(ts_priv_t * priv, int is_start, unsigned char *buff, int si
 	unsigned char *base;
 	int entries, i;
 	uint16_t progid;
-	struct pat_progs_t *tmp;
 	ts_section_t *section;
 
 	section = &(priv->pat.section);
 	skip = collect_section(section, is_start, buff, size);
 	if(! skip)
 		return 0;
-	
+
 	ptr = &(section->buffer[skip]);
 	//PARSING
 	priv->pat.table_id = ptr[0];
@@ -1701,7 +1778,6 @@ static int parse_pat(ts_priv_t * priv, int is_start, unsigned char *buff, int si
 
 	entries = (int) (priv->pat.section_length - 9) / 4;	//entries per section
 
-
 	for(i=0; i < entries; i++)
 	{
 		int32_t idx;
@@ -1710,14 +1786,14 @@ static int parse_pat(ts_priv_t * priv, int is_start, unsigned char *buff, int si
 
 		if((idx = prog_idx_in_pat(priv, progid)) == -1)
 		{
-			int sz = sizeof(struct pat_progs_t) * (priv->pat.progs_cnt+1);
-			tmp = realloc_struct(priv->pat.progs, priv->pat.progs_cnt+1, sizeof(struct pat_progs_t));
-			if(tmp == NULL)
+			priv->pat.progs = realloc_struct(priv->pat.progs, priv->pat.progs_cnt+1, sizeof(struct pat_progs_t));
+			if(!priv->pat.progs)
 			{
+				int sz = sizeof(struct pat_progs_t) * (priv->pat.progs_cnt+1);
+				priv->pat.progs_cnt = 0;
 				mp_msg(MSGT_DEMUX, MSGL_ERR, "PARSE_PAT: COULDN'T REALLOC %d bytes, NEXT\n", sz);
 				break;
 			}
-			priv->pat.progs = tmp;
 			idx = priv->pat.progs_cnt;
 			priv->pat.progs_cnt++;
 		}
@@ -1725,13 +1801,15 @@ static int parse_pat(ts_priv_t * priv, int is_start, unsigned char *buff, int si
 		priv->pat.progs[idx].id = progid;
 		priv->pat.progs[idx].pmt_pid = ((base[2]  & 0x1F) << 8) | base[3];
 		mp_msg(MSGT_DEMUX, MSGL_V, "PROG: %d (%d-th of %d), PMT: %d\n", priv->pat.progs[idx].id, i+1, entries, priv->pat.progs[idx].pmt_pid);
+		mp_msg(MSGT_IDENTIFY, MSGL_V, "PROGRAM_ID=%d (0x%02X), PMT_PID: %d(0x%02X)\n",
+			progid, progid, priv->pat.progs[idx].pmt_pid, priv->pat.progs[idx].pmt_pid);
 	}
 
 	return 1;
 }
 
 
-static inline int32_t es_pid_in_pmt(pmt_t * pmt, uint16_t pid)
+static int32_t es_pid_in_pmt(pmt_t * pmt, uint16_t pid)
 {
 	uint16_t i;
 
@@ -1755,7 +1833,7 @@ static uint16_t get_mp4_desc_len(uint8_t *buf, int *len)
 {
 	//uint16_t i = 0, size = 0;
 	int i = 0, j, size = 0;
-	
+
 	mp_msg(MSGT_DEMUX, MSGL_DBG2, "PARSE_MP4_DESC_LEN(%d), bytes: ", *len);
 	j = FFMIN(*len, 4);
 	while(i < j)
@@ -1768,18 +1846,18 @@ static uint16_t get_mp4_desc_len(uint8_t *buf, int *len)
 		i++;
 	}
 	mp_msg(MSGT_DEMUX, MSGL_DBG2, ", SIZE=%d\n", size);
-	
+
 	*len = i+1;
 	return size;
 }
 
 
-static uint16_t parse_mp4_slconfig_descriptor(pmt_t *pmt, uint8_t *buf, int len, void *elem)
+static uint16_t parse_mp4_slconfig_descriptor(uint8_t *buf, int len, void *elem)
 {
 	int i = 0;
 	mp4_es_descr_t *es;
 	mp4_sl_config_t *sl;
-	
+
 	mp_msg(MSGT_DEMUX, MSGL_V, "PARSE_MP4_SLCONFIG_DESCRIPTOR(%d)\n", len);
 	es = (mp4_es_descr_t *) elem;
 	if(!es)
@@ -1791,7 +1869,7 @@ static uint16_t parse_mp4_slconfig_descriptor(pmt_t *pmt, uint8_t *buf, int len,
 
 	sl->ts_len = sl->ocr_len = sl->au_len = sl->instant_bitrate_len = sl->degr_len = sl->au_seqnum_len = sl->packet_seqnum_len = 0;
 	sl->ocr = sl->dts = sl->cts = 0;
-	
+
 	if(buf[0] == 0)
 	{
 		i++;
@@ -1814,7 +1892,7 @@ static uint16_t parse_mp4_slconfig_descriptor(pmt_t *pmt, uint8_t *buf, int len,
 		i++;
 		sl->packet_seqnum_len = ((buf[i] >> 2) & 0x1f);
 		i++;
-		
+
 	}
 	else if(buf[0] == 1)
 	{
@@ -1828,12 +1906,12 @@ static uint16_t parse_mp4_slconfig_descriptor(pmt_t *pmt, uint8_t *buf, int len,
 		sl->flags = 4;
 		i++;
 	}
-	else 
+	else
 	{
 		sl->flags = 0;
 		i++;
 	}
-	
+
 	sl->au_start = (sl->flags >> 7) & 0x1;
 	sl->au_end = (sl->flags >> 6) & 0x1;
 	sl->random_accesspoint = (sl->flags >> 5) & 0x1;
@@ -1842,7 +1920,7 @@ static uint16_t parse_mp4_slconfig_descriptor(pmt_t *pmt, uint8_t *buf, int len,
 	sl->use_ts = (sl->flags >> 2) & 0x1;
 	sl->idle = (sl->flags >> 1) & 0x1;
 	sl->duration = sl->flags & 0x1;
-	
+
 	if(sl->duration)
 	{
 		sl->timescale = (buf[i] << 24) | (buf[i+1] << 16) | (buf[i+2] << 8) | buf[i+3];
@@ -1850,14 +1928,14 @@ static uint16_t parse_mp4_slconfig_descriptor(pmt_t *pmt, uint8_t *buf, int len,
 		sl->au_duration = (buf[i] << 8) | buf[i+1];
 		i += 2;
 		sl->cts_duration = (buf[i] << 8) | buf[i+1];
-		i += 2; 
+		i += 2;
 	}
 	else	//no support for fixed durations atm
 		sl->timescale = sl->au_duration = sl->cts_duration = 0;
-	
-	mp_msg(MSGT_DEMUX, MSGL_V, "MP4SLCONFIG(len=0x%x), predef: %d, flags: %x, use_ts: %d, tslen: %d, timescale: %d, dts: %"PRIu64", cts: %"PRIu64"\n", 
+
+	mp_msg(MSGT_DEMUX, MSGL_V, "MP4SLCONFIG(len=0x%x), predef: %d, flags: %x, use_ts: %d, tslen: %d, timescale: %d, dts: %"PRIu64", cts: %"PRIu64"\n",
 		len, buf[0], sl->flags, sl->use_ts, sl->ts_len, sl->timescale, (uint64_t) sl->dts, (uint64_t) sl->cts);
-	
+
 	return len;
 }
 
@@ -1868,7 +1946,7 @@ static uint16_t parse_mp4_decoder_config_descriptor(pmt_t *pmt, uint8_t *buf, in
 	int i = 0, j;
 	mp4_es_descr_t *es;
 	mp4_decoder_config_t *dec;
-	
+
 	mp_msg(MSGT_DEMUX, MSGL_V, "PARSE_MP4_DECODER_CONFIG_DESCRIPTOR(%d)\n", len);
 	es = (mp4_es_descr_t *) elem;
 	if(!es)
@@ -1877,10 +1955,10 @@ static uint16_t parse_mp4_decoder_config_descriptor(pmt_t *pmt, uint8_t *buf, in
 		return len;
 	}
 	dec = (mp4_decoder_config_t*) &(es->decoder);
-	
+
 	dec->object_type = buf[i];
 	dec->stream_type =  (buf[i+1]>>2) & 0x3f;
-	
+
 	if(dec->object_type == 1 && dec->stream_type == 1)
 	{
 		 dec->object_type = MP4_OD;
@@ -1913,7 +1991,7 @@ static uint16_t parse_mp4_decoder_config_descriptor(pmt_t *pmt, uint8_t *buf, in
 	}
 	else
 		dec->object_type = dec->stream_type = UNKNOWN;
-	
+
 	if(dec->object_type != UNKNOWN)
 	{
 		//update the type of the current stream
@@ -1925,20 +2003,20 @@ static uint16_t parse_mp4_decoder_config_descriptor(pmt_t *pmt, uint8_t *buf, in
 			}
 		}
 	}
-	
+
 	if(len > 13)
 		parse_mp4_descriptors(pmt, &buf[13], len-13, dec);
-	
+
 	mp_msg(MSGT_DEMUX, MSGL_V, "MP4DECODER(0x%x), object_type: 0x%x, stream_type: 0x%x\n", len, dec->object_type, dec->stream_type);
-	
+
 	return len;
 }
 
-static uint16_t parse_mp4_decoder_specific_descriptor(pmt_t *pmt, uint8_t *buf, int len, void *elem)
+static uint16_t parse_mp4_decoder_specific_descriptor(uint8_t *buf, int len, void *elem)
 {
 	int i;
 	mp4_decoder_config_t *dec;
-	
+
 	mp_msg(MSGT_DEMUX, MSGL_V, "PARSE_MP4_DECODER_SPECIFIC_DESCRIPTOR(%d)\n", len);
 	dec = (mp4_decoder_config_t *) elem;
 	if(!dec)
@@ -1946,7 +2024,7 @@ static uint16_t parse_mp4_decoder_specific_descriptor(pmt_t *pmt, uint8_t *buf, 
 		mp_msg(MSGT_DEMUX, MSGL_V, "argh! NULL elem passed, skip\n");
 		return len;
 	}
-	
+
 	mp_msg(MSGT_DEMUX, MSGL_DBG2, "MP4 SPECIFIC INFO BYTES: \n");
 	for(i=0; i<len; i++)
 		mp_msg(MSGT_DEMUX, MSGL_DBG2, "%02x ", buf[i]);
@@ -1959,16 +2037,16 @@ static uint16_t parse_mp4_decoder_specific_descriptor(pmt_t *pmt, uint8_t *buf, 
 	}
 	memcpy(dec->buf, buf, len);
 	dec->buf_size = len;
-	
+
 	return len;
 }
 
-static uint16_t parse_mp4_es_descriptor(pmt_t *pmt, uint8_t *buf, int len, void *elem)
+static uint16_t parse_mp4_es_descriptor(pmt_t *pmt, uint8_t *buf, int len)
 {
 	int i = 0, j = 0, k, found;
 	uint8_t flag;
-	mp4_es_descr_t es, *target_es = NULL, *tmp;
-	
+	mp4_es_descr_t es, *target_es = NULL;
+
 	mp_msg(MSGT_DEMUX, MSGL_V, "PARSE_MP4ES: len=%d\n", len);
 	memset(&es, 0, sizeof(mp4_es_descr_t));
 	while(i < len)
@@ -1984,7 +2062,7 @@ static uint16_t parse_mp4_es_descriptor(pmt_t *pmt, uint8_t *buf, int len, void 
 			i += buf[i]+1;
 		if(flag & 0x20)		//OCR, maybe we need it
 			i += 2;
-		
+
 		j = parse_mp4_descriptors(pmt, &buf[i], len-i, &es);
 		mp_msg(MSGT_DEMUX, MSGL_V, "PARSE_MP4ES, types after parse_mp4_descriptors: 0x%x, 0x%x\n", es.decoder.object_type, es.decoder.stream_type);
 		if(es.decoder.object_type != UNKNOWN && es.decoder.stream_type != UNKNOWN)
@@ -1999,16 +2077,16 @@ static uint16_t parse_mp4_es_descriptor(pmt_t *pmt, uint8_t *buf, int len, void 
 					found = 1;
 				}
 			}
-			
+
 			if(! found)
 			{
-				tmp = realloc_struct(pmt->mp4es, pmt->mp4es_cnt+1, sizeof(mp4_es_descr_t));
-				if(tmp == NULL)
+				pmt->mp4es = realloc_struct(pmt->mp4es, pmt->mp4es_cnt+1, sizeof(mp4_es_descr_t));
+				if(!pmt->mp4es)
 				{
+					pmt->mp4es_cnt = 0;
 					fprintf(stderr, "CAN'T REALLOC MP4_ES_DESCR\n");
 					continue;
 				}
-				pmt->mp4es = tmp;
 				target_es = &(pmt->mp4es[pmt->mp4es_cnt]);
 				pmt->mp4es_cnt++;
 			}
@@ -2018,14 +2096,14 @@ static uint16_t parse_mp4_es_descriptor(pmt_t *pmt, uint8_t *buf, int len, void 
 
 		i += j;
 	}
-	
+
 	return len;
 }
 
 static void parse_mp4_object_descriptor(pmt_t *pmt, uint8_t *buf, int len, void *elem)
 {
 	int i, j = 0, id;
-	
+
 	i=0;
 	id = (buf[0] << 2) | ((buf[1] & 0xc0) >> 6);
 	mp_msg(MSGT_DEMUX, MSGL_V, "PARSE_MP4_OBJECT_DESCRIPTOR: len=%d, OD_ID=%d\n", len, id);
@@ -2037,7 +2115,7 @@ static void parse_mp4_object_descriptor(pmt_t *pmt, uint8_t *buf, int len, void 
 	else
 	{
 		i = 2;
-		
+
 		while(i < len)
 		{
 			j = parse_mp4_descriptors(pmt, &(buf[i]), len-i, elem);
@@ -2052,7 +2130,7 @@ static void parse_mp4_iod(pmt_t *pmt, uint8_t *buf, int len, void *elem)
 {
 	int i, j = 0;
 	mp4_od_t *iod = &(pmt->iod);
-	
+
 	iod->id = (buf[0] << 2) | ((buf[1] & 0xc0) >> 6);
 	mp_msg(MSGT_DEMUX, MSGL_V, "PARSE_MP4_IOD: len=%d, IOD_ID=%d\n", len, iod->id);
 	i = 2;
@@ -2076,11 +2154,11 @@ static void parse_mp4_iod(pmt_t *pmt, uint8_t *buf, int len, void *elem)
 static int parse_mp4_descriptors(pmt_t *pmt, uint8_t *buf, int len, void *elem)
 {
 	int tag, descr_len, i = 0, j = 0;
-	
+
 	mp_msg(MSGT_DEMUX, MSGL_V, "PARSE_MP4_DESCRIPTORS, len=%d\n", len);
 	if(! len)
 		return len;
-	
+
 	while(i < len)
 	{
 		tag = buf[i];
@@ -2093,7 +2171,7 @@ static int parse_mp4_descriptors(pmt_t *pmt, uint8_t *buf, int len, void *elem)
 			return len;
 		}
 		i += j+1;
-		
+
 		switch(tag)
 		{
 			case 0x1:
@@ -2103,34 +2181,33 @@ static int parse_mp4_descriptors(pmt_t *pmt, uint8_t *buf, int len, void *elem)
 				parse_mp4_iod(pmt, &(buf[i]), descr_len, elem);
 				break;
 			case 0x3:
-				parse_mp4_es_descriptor(pmt, &(buf[i]), descr_len, elem);
+				parse_mp4_es_descriptor(pmt, &(buf[i]), descr_len);
 				break;
 			case 0x4:
 				parse_mp4_decoder_config_descriptor(pmt, &buf[i], descr_len, elem);
 				break;
 			case 0x05:
-				parse_mp4_decoder_specific_descriptor(pmt, &buf[i], descr_len, elem);
+				parse_mp4_decoder_specific_descriptor(&buf[i], descr_len, elem);
 				break;
 			case 0x6:
-				parse_mp4_slconfig_descriptor(pmt, &buf[i], descr_len, elem);
+				parse_mp4_slconfig_descriptor(&buf[i], descr_len, elem);
 				break;
 			default:
 				mp_msg(MSGT_DEMUX, MSGL_V, "Unsupported mp4 descriptor 0x%x\n", tag);
 		}
 		i += descr_len;
 	}
-	
+
 	return len;
 }
 
 static ES_stream_t *new_pid(ts_priv_t *priv, int pid)
 {
 	ES_stream_t *tss;
-	
-	tss = malloc(sizeof(ES_stream_t));
+
+	tss = calloc(sizeof(*tss), 1);
 	if(! tss)
 		return NULL;
-	memset(tss, 0, sizeof(ES_stream_t));
 	tss->pid = pid;
 	tss->last_cc = -1;
 	tss->type = UNKNOWN;
@@ -2139,7 +2216,7 @@ static ES_stream_t *new_pid(ts_priv_t *priv, int pid)
 	tss->extradata = NULL;
 	tss->extradata_alloc = tss->extradata_len = 0;
 	priv->ts.pids[pid] = tss;
-	
+
 	return tss;
 }
 
@@ -2168,7 +2245,7 @@ static int parse_program_descriptors(pmt_t *pmt, uint8_t *buf, uint16_t len)
 
 		len -= 2 + buf[i+1];
 	}
-	
+
 	return olen;
 }
 
@@ -2196,6 +2273,22 @@ static int parse_descriptors(struct pmt_es_t *es, uint8_t *ptr)
 				es->type = AUDIO_A52;
 				mp_msg(MSGT_DEMUX, MSGL_DBG2, "DVB A52 Descriptor\n");
 			}
+		}
+		else if(ptr[j] == 0x7b)	//DVB DTS Descriptor
+		{
+			if(es->type == 0x6)
+			{
+				es->type = AUDIO_DTS;
+				mp_msg(MSGT_DEMUX, MSGL_DBG2, "DVB DTS Descriptor\n");
+			}
+		}
+		else if(ptr[j] == 0x56) // Teletext
+		{
+			if(descr_len >= 5) {
+				memcpy(es->lang, ptr+j+2, 3);
+				es->lang[3] = 0;
+			}
+			es->type = SPU_TELETEXT;
 		}
 		else if(ptr[j] == 0x59)	//Subtitling Descriptor
 		{
@@ -2253,21 +2346,38 @@ static int parse_descriptors(struct pmt_es_t *es, uint8_t *ptr)
 				{
 					es->type = AUDIO_A52;
 				}
+				else if(d[0] == 'D' && d[1] == 'T' && d[2] == 'S' && d[3] == '1')
+				{
+					es->type = AUDIO_DTS;
+				}
 				else if(d[0] == 'D' && d[1] == 'T' && d[2] == 'S' && d[3] == '2')
 				{
 					es->type = AUDIO_DTS;
 				}
 				else if(d[0] == 'V' && d[1] == 'C' && d[2] == '-' && d[3] == '1')
 				{
-					es->type = AUDIO_DTS;
+					es->type = VIDEO_VC1;
+				}
+				else if(d[0] == 'd' && d[1] == 'r' && d[2] == 'a' && d[3] == 'c')
+				{
+					es->type = VIDEO_DIRAC;
+				}
+				else if(d[0] == 'B' && d[1] == 'S' && d[2] == 'S' && d[3] == 'D')
+				{
+					es->type = AUDIO_S302M;
+				}
+				else if(d[0] == 'H' && d[1] == 'E' && d[2] == 'V' && d[3] == 'C')
+				{
+					es->type = VIDEO_HEVC;
 				}
 				else
 					es->type = UNKNOWN;
 				mp_msg(MSGT_DEMUX, MSGL_DBG2, "FORMAT %s\n", es->format_descriptor);
 			}
 		}
-		else if(ptr[j] == 0x1e)
+		else if(ptr[j] == 0x1e || ptr[j] == 0x1f)
 		{
+			// 0x1f is FMC, but currently it is easiest to handle them the same way
 			es->mp4_es_id = (ptr[j+2] << 8) | ptr[j+3];
 			mp_msg(MSGT_DEMUX, MSGL_V, "SL Descriptor: ES_ID: %d(%x), pid: %d\n", es->mp4_es_id, es->mp4_es_id, es->pid);
 		}
@@ -2281,14 +2391,14 @@ static int parse_descriptors(struct pmt_es_t *es, uint8_t *ptr)
 	return 1;
 }
 
-static int parse_sl_section(pmt_t *pmt, ts_section_t *section, uint16_t progid, uint16_t pid, int is_start, unsigned char *buff, int size)
+static int parse_sl_section(pmt_t *pmt, ts_section_t *section, int is_start, unsigned char *buff, int size)
 {
 	int tid, len, skip;
 	uint8_t *ptr;
 	skip = collect_section(section, is_start, buff, size);
 	if(! skip)
 		return 0;
-		
+
 	ptr = &(section->buffer[skip]);
 	tid = ptr[0];
 	len = ((ptr[1] & 0x0f) << 8) | ptr[2];
@@ -2298,13 +2408,13 @@ static int parse_sl_section(pmt_t *pmt, ts_section_t *section, uint16_t progid, 
 		mp_msg(MSGT_DEMUX, MSGL_V, "SECTION TOO LARGE or wrong section type, EXIT\n");
 		return 0;
 	}
-	
+
 	if(! (ptr[5] & 1))
 		return 0;
-	
+
 	//8 is the current position, len - 9 is the amount of data available
 	parse_mp4_descriptors(pmt, &ptr[8], len - 9, NULL);
-	
+
 	return 1;
 }
 
@@ -2315,23 +2425,22 @@ static int parse_pmt(ts_priv_t * priv, uint16_t progid, uint16_t pid, int is_sta
 	int32_t idx, es_count, section_bytes;
 	uint8_t m=0;
 	int skip;
-	pmt_t *tmp;
-	struct pmt_es_t *tmp_es;
 	ts_section_t *section;
 	ES_stream_t *tss;
-	
+	int i;
+
 	idx = progid_idx_in_pmt(priv, progid);
 
 	if(idx == -1)
 	{
-		int sz = (priv->pmt_cnt + 1) * sizeof(pmt_t);
-		tmp = realloc_struct(priv->pmt, priv->pmt_cnt + 1, sizeof(pmt_t));
-		if(tmp == NULL)
+		priv->pmt = realloc_struct(priv->pmt, priv->pmt_cnt + 1, sizeof(pmt_t));
+		if(!priv->pmt)
 		{
+			int sz = (priv->pmt_cnt + 1) * sizeof(pmt_t);
+			priv->pmt_cnt = 0;
 			mp_msg(MSGT_DEMUX, MSGL_ERR, "PARSE_PMT: COULDN'T REALLOC %d bytes, NEXT\n", sz);
 			return 0;
 		}
-		priv->pmt = tmp;
 		idx = priv->pmt_cnt;
 		memset(&(priv->pmt[idx]), 0, sizeof(pmt_t));
 		priv->pmt_cnt++;
@@ -2344,7 +2453,7 @@ static int parse_pmt(ts_priv_t * priv, uint16_t progid, uint16_t pid, int is_sta
 	skip = collect_section(section, is_start, buff, size);
 	if(! skip)
 		return 0;
-		
+
 	base = &(section->buffer[skip]);
 
 	mp_msg(MSGT_DEMUX, MSGL_V, "FILL_PMT(prog=%d), PMT_len: %d, IS_START: %d, TS_PID: %d, SIZE=%d, M=%d, ES_CNT=%d, IDX=%d, PMT_PTR=%p\n",
@@ -2385,14 +2494,14 @@ static int parse_pmt(ts_priv_t * priv, uint16_t progid, uint16_t pid, int is_sta
 		idx = es_pid_in_pmt(pmt, es_pid);
 		if(idx == -1)
 		{
-			int sz = sizeof(struct pmt_es_t) * (pmt->es_cnt + 1);
-			tmp_es = realloc_struct(pmt->es, pmt->es_cnt + 1, sizeof(struct pmt_es_t));
-			if(tmp_es == NULL)
+			pmt->es = realloc_struct(pmt->es, pmt->es_cnt + 1, sizeof(struct pmt_es_t));
+			if(!pmt->es)
 			{
+				int sz = sizeof(struct pmt_es_t) * (pmt->es_cnt + 1);
+				pmt->es_cnt = 0;
 				mp_msg(MSGT_DEMUX, MSGL_ERR, "PARSE_PMT, COULDN'T ALLOCATE %d bytes for PMT_ES\n", sz);
 				continue;
 			}
-			pmt->es = tmp_es;
 			idx = pmt->es_cnt;
 			memset(&(pmt->es[idx]), 0, sizeof(struct pmt_es_t));
 			pmt->es_cnt++;
@@ -2414,7 +2523,7 @@ static int parse_pmt(ts_priv_t * priv, uint16_t progid, uint16_t pid, int is_sta
 			pmt->es[idx].type = UNKNOWN;
 		else
 			pmt->es[idx].type = es_type;
-		
+
 		parse_descriptors(&pmt->es[idx], &es_base[5]);
 
 		switch(es_type)
@@ -2437,8 +2546,14 @@ static int parse_pmt(ts_priv_t * priv, uint16_t progid, uint16_t pid, int is_sta
 				pmt->es[idx].type = VIDEO_MPEG4;
 				break;
 			case 0x0f:
-			case 0x11:
 				pmt->es[idx].type = AUDIO_AAC;
+				break;
+			case 0x11:
+				pmt->es[idx].type = AUDIO_AAC_LATM;
+				for (i = 0; i < pmt->mp4es_cnt; i++)
+					if (pmt->mp4es[i].id == pmt->es[idx].mp4_es_id &&
+					    pmt->mp4es[i].decoder.object_type == AUDIO_AAC)
+						pmt->es[idx].type = AUDIO_AAC;
 				break;
 			case 0x1b:
 				pmt->es[idx].type = VIDEO_H264;
@@ -2449,11 +2564,26 @@ static int parse_pmt(ts_priv_t * priv, uint16_t progid, uint16_t pid, int is_sta
 			case 0x13:
 				pmt->es[idx].type = SL_SECTION;
 				break;
+			case 0x24:
+				pmt->es[idx].type = VIDEO_HEVC;
+				break;
+			case 0x80:
+				pmt->es[idx].type = AUDIO_PCM_BR;
+				break;
 			case 0x81:
 				pmt->es[idx].type = AUDIO_A52;
 				break;
 			case 0x8A:
+			case 0x82:
+			case 0x85:
+			case 0x86:
 				pmt->es[idx].type = AUDIO_DTS;
+				break;
+			case 0x90:
+				pmt->es[idx].type = SPU_PGS;
+				break;
+			case 0xD1:
+				pmt->es[idx].type = VIDEO_DIRAC;
 				break;
 			case 0xEA:
 				pmt->es[idx].type = VIDEO_VC1;
@@ -2462,7 +2592,7 @@ static int parse_pmt(ts_priv_t * priv, uint16_t progid, uint16_t pid, int is_sta
 				mp_msg(MSGT_DEMUX, MSGL_DBG2, "UNKNOWN ES TYPE=0x%x\n", es_type);
 				pmt->es[idx].type = UNKNOWN;
 		}
-		
+
 		tss = priv->ts.pids[es_pid];			//an ES stream
 		if(tss == NULL)
 		{
@@ -2511,19 +2641,19 @@ static pmt_t* pmt_of_pid(ts_priv_t *priv, int pid, mp4_decoder_config_t **mp4_de
 								}
 							}
 						}
-						
+
 						return &(priv->pmt[i]);
 					}
 				}
 			}
 		}
 	}
-	
+
 	return NULL;
 }
 
 
-static inline int32_t pid_type_from_pmt(ts_priv_t *priv, int pid)
+static int32_t pid_type_from_pmt(ts_priv_t *priv, int pid)
 {
 	int32_t pmt_idx, pid_idx, i, j;
 
@@ -2550,7 +2680,7 @@ static inline int32_t pid_type_from_pmt(ts_priv_t *priv, int pid)
 }
 
 
-static inline uint8_t *pid_lang_from_pmt(ts_priv_t *priv, int pid)
+static uint8_t *pid_lang_from_pmt(ts_priv_t *priv, int pid)
 {
 	int32_t pmt_idx, pid_idx, i, j;
 
@@ -2581,10 +2711,19 @@ static int fill_packet(demuxer_t *demuxer, demux_stream_t *ds, demux_packet_t **
 {
 	int ret = 0;
 
-	if((*dp != NULL) && (*dp_offset > 0))
+	if(*dp && *dp_offset <= 0)
 	{
+		free_demux_packet(*dp);
+		*dp = NULL;
+	}
+	if(*dp)
+	{
+		double stream_pts = MP_NOPTS_VALUE;
 		ret = *dp_offset;
 		resize_demux_packet(*dp, ret);	//shrinked to the right size
+		if (ds == demuxer->video &&
+		    stream_control(demuxer->stream, STREAM_CTRL_GET_CURRENT_TIME, (void *)&stream_pts) != STREAM_UNSUPPORTED)
+			(*dp)->stream_pts = stream_pts;
 		ds_add_packet(ds, *dp);
 		mp_msg(MSGT_DEMUX, MSGL_DBG2, "ADDED %d  bytes to %s fifo, PTS=%.3f\n", ret, (ds == demuxer->audio ? "audio" : (ds == demuxer->video ? "video" : "sub")), (*dp)->pts);
 		if(si)
@@ -2611,14 +2750,6 @@ static int fill_packet(demuxer_t *demuxer, demux_stream_t *ds, demux_packet_t **
 					priv->vbitrate = (uint32_t) ((float) si->size / dur);
 			}
 		}
-			if (ds)
-			{
-				if (demuxer->priv && (*dp)->pts)
-				{
-					((ts_priv_t*)demuxer->priv)->last_pts = (*dp)->pts;
-//printf("PTS=%f\n", (float) (*dp)->pts);
-				}
-			}
 	}
 
 	*dp = NULL;
@@ -2630,12 +2761,12 @@ static int fill_packet(demuxer_t *demuxer, demux_stream_t *ds, demux_packet_t **
 static int fill_extradata(mp4_decoder_config_t * mp4_dec, ES_stream_t *tss)
 {
 	uint8_t *tmp;
-	
+
 	mp_msg(MSGT_DEMUX, MSGL_DBG2, "MP4_dec: %p, pid: %d\n", mp4_dec, tss->pid);
-		
+
 	if(mp4_dec->buf_size > tss->extradata_alloc)
 	{
-		tmp = (uint8_t *) realloc(tss->extradata, mp4_dec->buf_size);
+		tmp = realloc(tss->extradata, mp4_dec->buf_size);
 		if(!tmp)
 			return 0;
 		tss->extradata = tmp;
@@ -2644,19 +2775,19 @@ static int fill_extradata(mp4_decoder_config_t * mp4_dec, ES_stream_t *tss)
 	memcpy(tss->extradata, mp4_dec->buf, mp4_dec->buf_size);
 	tss->extradata_len = mp4_dec->buf_size;
 	mp_msg(MSGT_DEMUX, MSGL_V, "EXTRADATA: %p, alloc=%d, len=%d\n", tss->extradata, tss->extradata_alloc, tss->extradata_len);
-	
+
 	return tss->extradata_len;
 }
 
 // 0 = EOF or no stream found
 // else = [-] number of bytes written to the packet
-static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet, int probe)
+static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, int probe)
 {
 	ES_stream_t *tss;
-	uint8_t done = 0;
 	int buf_size, is_start, pid, base;
 	int len, cc, cc_ok, afc, retv = 0, is_video, is_audio, is_sub;
 	ts_priv_t * priv = (ts_priv_t*) demuxer->priv;
+	unsigned char *packet = priv->packet;
 	stream_t *stream = demuxer->stream;
 	char *p;
 	demux_stream_t *ds = NULL;
@@ -2669,15 +2800,17 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 	TS_stream_info *si;
 
 
-	while(! done)
+	memset(es, 0, sizeof(*es));
+	while(1)
 	{
 		bad = ts_error = 0;
-		ds = (demux_stream_t*) NULL;
-		dp = (demux_packet_t **) NULL;
+		ds = NULL;
+		dp = NULL;
 		dp_offset = buffer_size = NULL;
 		rap_flag = 0;
 		mp4_dec = NULL;
 		es->is_synced = 0;
+		es->lang[0] = 0;
 		si = NULL;
 
 		junk = priv->ts.packet_size - TS_PACKET_SIZE;
@@ -2724,7 +2857,7 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 		cc = (packet[3] & 0xf);
 		cc_ok = (tss->last_cc < 0) || ((((tss->last_cc + 1) & 0x0f) == cc));
 		tss->last_cc = cc;
-		    
+
 		bad = ts_error; // || (! cc_ok);
 		if(bad)
 		{
@@ -2733,7 +2866,7 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 				stream_skip(stream, buf_size-1+junk);
 				continue;
 			}
-			
+
 			is_start = 0;	//queued to the packet data
 		}
 
@@ -2746,14 +2879,14 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 			continue;
 		}
 
-    
+
 		afc = (packet[3] >> 4) & 3;
 		if(! (afc % 2))	//no payload in this TS packet
 		{
 			stream_skip(stream, buf_size-1+junk);
 			continue;
 		}
-		
+
 		if(afc > 1)
 		{
 			int c;
@@ -2764,15 +2897,42 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 				stream_skip(stream, buf_size-1+junk);
 				continue;
 			}
-			
+
 			//c==0 is allowed!
 			if(c > 0)
 			{
-				rap_flag = (stream_read_char(stream) & 0x40) >> 6;
+				uint8_t pcrbuf[188];
+				int flags = stream_read_char(stream);
+				int has_pcr;
+				rap_flag = (flags & 0x40) >> 6;
+				has_pcr = flags & 0x10;
+
 				buf_size--;
-	
 				c--;
-				stream_skip(stream, c);
+				stream_read(stream, pcrbuf, c);
+
+				if(has_pcr)
+				{
+					int pcr_pid = prog_pcr_pid(priv, priv->prog);
+					if(pcr_pid == pid)
+					{
+						uint64_t pcr, pcr_ext;
+
+						pcr  = (int64_t)(pcrbuf[0]) << 25;
+						pcr |=  pcrbuf[1]         << 17 ;
+						pcr |= (pcrbuf[2]) << 9;
+						pcr |=  pcrbuf[3]  <<  1 ;
+						pcr |= (pcrbuf[4] & 0x80) >>  7;
+
+						pcr_ext = (pcrbuf[4] & 0x01) << 8;
+						pcr_ext |= pcrbuf[5];
+
+						pcr = pcr * 300 + pcr_ext;
+
+						demuxer->reference_clock = (double)pcr/(double)27000000.0;
+					}
+				}
+
 				buf_size -= c;
 				if(buf_size == 0)
 					continue;
@@ -2791,8 +2951,8 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 				tss->subtype = mp4_dec->object_type;
 			}
 		}
-		
-		
+
+
 		//TABLE PARSING
 
 		base = priv->ts.packet_size - buf_size;
@@ -2801,19 +2961,14 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 
 		is_video = IS_VIDEO(tss->type) || (tss->type==SL_PES_STREAM && IS_VIDEO(tss->subtype));
 		is_audio = IS_AUDIO(tss->type) || (tss->type==SL_PES_STREAM && IS_AUDIO(tss->subtype)) || (tss->type == PES_PRIVATE1);
-		is_sub	= ((tss->type == SPU_DVD) || (tss->type == SPU_DVB));
+		is_sub	= IS_SUB(tss->type);
 		pid_type = pid_type_from_pmt(priv, pid);
 
 			// PES CONTENT STARTS HERE
 		if(! probe)
 		{
-			if((is_video || is_audio) && is_start && !priv->ts.streams[pid].sh)
+			if((is_video || is_audio || is_sub) && is_start)
 				ts_add_stream(demuxer, tss);
-
-			if((pid == demuxer->sub->id))	//or the lang is right
-			{
-				pid_type = SPU_DVD;
-			}
 
 			if(is_video && (demuxer->video->id == priv->ts.streams[pid].id))
 			{
@@ -2833,38 +2988,11 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 				buffer_size = &priv->fifo[0].buffer_size;
 				si = &priv->astr;
 			}
-			else if(is_sub
-				|| (pid_type == SPU_DVD) || (pid_type == SPU_DVB))
+			else if(is_sub)
 			{
-				//SUBS are infrequent, so the initial detection may fail
-				// and we may need to add them at play-time
-				if(demuxer->sub->id == -1)
-				{
-					uint16_t p;
-					p = progid_for_pid(priv, tss->pid, priv->prog);
+				sh_sub_t *sh_sub = demuxer->sub->sh;
 
-					if(p == priv->prog)
-					{
-						int asgn = 0;
-						uint8_t *lang;
-
-						if(dvdsub_lang)
-						{
-							if(lang = pid_lang_from_pmt(priv, pid))
-								asgn = (strncmp(lang, dvdsub_lang, 3) == 0);
-						}
-						else		//no language specified with -slang
-							asgn = 1;
-
-						if(asgn)
-						{
-							demuxer->sub->id = tss->pid;
-							mp_msg(MSGT_DEMUX, MSGL_INFO, "CHOSEN SUBs pid 0x%x (%d) FROM PROG %d\n", tss->pid, tss->pid, priv->prog);
-						}
-					}
-				}
-
-				if(demuxer->sub->id == tss->pid)
+				if(sh_sub && sh_sub->sid == tss->pid)
 				{
 					ds = demuxer->sub;
 
@@ -2944,7 +3072,7 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 				if(pmt->es[k].mp4_es_id == mp4_es_id)
 				{
 					section = &(tss->section);
-					parse_sl_section(pmt, section, progid, pid, is_start, &packet[base], buf_size);
+					parse_sl_section(pmt, section, is_start, &packet[base], buf_size);
 				}
 			}
 			continue;
@@ -2983,27 +3111,27 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 			tss->is_synced |= es->is_synced || rap_flag;
 			tss->payload_size = es->payload_size;
 
-			if(is_audio && (lang = pid_lang_from_pmt(priv, es->pid)))
+			if((is_sub || is_audio) && (lang = pid_lang_from_pmt(priv, es->pid)))
 			{
 				memcpy(es->lang, lang, 3);
 				es->lang[3] = 0;
 			}
 			else
 				es->lang[0] = 0;
-			
+
 			if(probe)
 			{
 				if(es->type == UNKNOWN)
 					return 0;
-				
+
 				tss->type = es->type;
 				tss->subtype = es->subtype;
-				
+
 				return 1;
 			}
 			else
 			{
-				if(es->pts == 0.0f)
+				if(es->pts == 0.0)
 					es->pts = tss->pts = tss->last_pts;
 				else
 					tss->pts = tss->last_pts = es->pts;
@@ -3013,11 +3141,18 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 
 				demuxer->filepos = stream_tell(demuxer->stream) - es->size;
 
+				if(es->size < 0 || es->size > buf_size) {
+					mp_msg(MSGT_DEMUX, MSGL_ERR, "Broken ES packet size\n");
+					es->size = 0;
+				}
 				memmove(p, es->start, es->size);
 				*dp_offset += es->size;
 				(*dp)->flags = 0;
 				(*dp)->pos = stream_tell(demuxer->stream);
 				(*dp)->pts = es->pts;
+				// subtitle packets must be returned immediately if possible
+				if (is_sub && !tss->payload_size)
+					retv = fill_packet(demuxer, ds, dp, dp_offset, si);
 
 				if(retv > 0)
 					return retv;
@@ -3059,7 +3194,8 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 			{
 				*dp_offset += sz;
 
-				if(*dp_offset >= MAX_PACK_BYTES)
+				// subtitle packets must be returned immediately if possible
+				if(*dp_offset >= MAX_PACK_BYTES || (is_sub && !tss->payload_size))
 				{
 					(*dp)->pts = tss->last_pts;
 					retv = fill_packet(demuxer, ds, dp, dp_offset, si);
@@ -3070,7 +3206,7 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 			}
 			else
 			{
-				memcpy(es->start, p, sz);
+				memmove(es->start, p, sz);
 
 				if(es->size)
 					return es->size;
@@ -3084,10 +3220,9 @@ static int ts_parse(demuxer_t *demuxer , ES_stream_t *es, unsigned char *packet,
 }
 
 
-extern void skip_audio_frame(sh_audio_t *sh_audio);
-
-static void reset_fifos(ts_priv_t* priv, int a, int v, int s)
+static void reset_fifos(demuxer_t *demuxer, int a, int v, int s)
 {
+	ts_priv_t* priv = demuxer->priv;
 	if(a)
 	{
 		if(priv->fifo[0].pack != NULL)
@@ -3117,51 +3252,28 @@ static void reset_fifos(ts_priv_t* priv, int a, int v, int s)
 		}
 		priv->fifo[2].offset = 0;
 	}
+	demuxer->reference_clock = MP_NOPTS_VALUE;
 }
 
-extern int videobuf_code_len;
-extern int sync_video_packet(demux_stream_t *);
-extern int skip_video_packet(demux_stream_t *);
 
-// flags = 1, absolute seek
-// flags = 3, percentage seek
-// flags = 0, relative seek
 static void demux_seek_ts(demuxer_t *demuxer, float rel_seek_secs, float audio_delay, int flags)
 {
 	demux_stream_t *d_audio=demuxer->audio;
 	demux_stream_t *d_video=demuxer->video;
-	demux_stream_t *d_sub=demuxer->sub;
 	sh_audio_t *sh_audio=d_audio->sh;
 	sh_video_t *sh_video=d_video->sh;
 	ts_priv_t * priv = (ts_priv_t*) demuxer->priv;
 	int i, video_stats;
-	int precision = 1;
-	float oldpts = 0;
-	off_t oldpos = demuxer->filepos;
-	float newpts = 0; 
-	off_t newpos = (flags & 1) ? demuxer->movi_start : oldpos;
-
-	if(priv)
-	  oldpts = priv->last_pts;
-	newpts = (flags & 1) ? 0.0 : oldpts;
-#ifdef WIN32
-printf("Seeking oldpts=%f oldpos=%I64d\n", oldpts, oldpos);fflush(stdout);
-#else
-printf("Seeking oldpts=%f oldpos=%lld\n", oldpts, oldpos);fflush(stdout);
-#endif
+	off_t newpos;
 
 	//================= seek in MPEG-TS ==========================
 
 	ts_dump_streams(demuxer->priv);
-	reset_fifos(priv, sh_audio != NULL, sh_video != NULL, demuxer->sub->id > 0);
+	reset_fifos(demuxer, sh_audio != NULL, sh_video != NULL, demuxer->sub->id > 0);
+
+	demux_flush(demuxer);
 
 
-	if(sh_audio != NULL)
-		ds_free_packs(d_audio);
-	if(sh_video != NULL)
-		ds_free_packs(d_video);
-	if(demuxer->sub->id > 0)
-		ds_free_packs(d_sub);
 
 	video_stats = (sh_video != NULL);
 	if(video_stats)
@@ -3173,129 +3285,29 @@ printf("Seeking oldpts=%f oldpos=%lld\n", oldpts, oldpos);fflush(stdout);
 			video_stats = sh_video->i_bps;
 	}
 
-	//calculate the pts to seek to
-	if(flags & 2) {
-	  if (priv && priv->final_pts > 0.0)
-			newpts += priv->final_pts * rel_seek_secs;
-		else
-			newpts += rel_seek_secs * (demuxer->movi_end - demuxer->movi_start) * oldpts / oldpos;
-	} else
-		newpts += rel_seek_secs;
-	if (newpts < 0) newpts = 0;
-
-	if(flags&2){
-		// float seek 0..1
+	newpos = (flags & SEEK_ABSOLUTE) ? demuxer->movi_start : demuxer->filepos;
+	if(flags & SEEK_FACTOR) // float seek 0..1
 		newpos+=(demuxer->movi_end-demuxer->movi_start)*rel_seek_secs;
-	}
 	else
 	{
 		// time seek (secs)
-/*		if(! video_stats) // unspecified or VBR
+		if(! video_stats) // unspecified or VBR
 			newpos += 2324*75*rel_seek_secs; // 174.3 kbyte/sec
 		else
-			newpos += video_stats*rel_seek_secs;*/
-		// Better seeking algorithm
-		if (priv)
-	{
-			if (oldpts > 1.0) // we don't want to use something really close to the front of the file
-			{
-				if (abs(newpts - oldpts) < 0.03)
-				{
-					newpos = oldpos;
-				}
-				else if (newpts > oldpts)
-				{
-					if (priv->final_pts > 0.0)
-					{
-						// Average between the recent time and the end time
-						off_t byteDiff = demuxer->movi_end - oldpos;
-						float timeDiff = priv->final_pts - oldpts;
-						newpos = (newpts - oldpts)*byteDiff/timeDiff;
-						newpos += oldpos;
-					}
-					else
-					{
-						// add the ratebound guess offset from the recent; but redo
-						// the ratebound so it uses a guess from the data in the file since
-						// the header is usually wrong
-						float guessRate = oldpos/(oldpts - priv->first_pts);
-						newpos = oldpos + (newpts - oldpts)*guessRate;
-					}
-				}
-				else // if (rtTime < recentTime)
-				{
-					// Average between the recent time and the start time (0)
-					newpos = (newpts - priv->first_pts)*oldpos/(oldpts - priv->first_pts);
-				}
-			}
-			else if (priv->final_pts > 0.0)
-			{
-				newpos = (newpts - priv->first_pts)* demuxer->movi_end / (priv->final_pts - priv->first_pts);
-			}
-			else
-				newpos = newpts * video_stats;
-		}
-		else if(!video_stats) // unspecified or VBR
-			newpos+=2324*75*(rel_seek_secs - priv->first_pts); // 174.3 kbyte/sec
-		else
-			newpos+=video_stats*(rel_seek_secs - priv->first_pts);
+			newpos += video_stats*rel_seek_secs;
 	}
 
 
-	// Be sure the newpos is not beyond the end of the file,
-	if (priv->final_pts > 0.0 && demuxer->movi_end > 0)
-	{
-		newpos = FFMIN(demuxer->movi_end, newpos);
-	}
-	else
-	{
-		// find the size of the file
-		if (demuxer->stream->size)
-		{
-			off_t fileSize = 0;
-			demuxer->stream->size(demuxer->stream, &fileSize);
-			if (fileSize - 200000 < newpos)
-			{
-				newpos = fileSize - 200000;
-				if (newpos < 0)
-					newpos = 0;
-				precision = 0;
-			}
-		}
-		else
-		{
-			printf("ERROR ERROR ERROR getting file stat information, streaming plugin doesn't support it!\r\n");
-		}
-	}
+	if(newpos < demuxer->movi_start)
+  		newpos = demuxer->movi_start;	//begininng of stream
 
-  
-	while (1) {
-#ifdef WIN32
-printf("Seeking newpts=%f newpos=%I64d\n", newpts, newpos);fflush(stdout);
-#else
-printf("Seeking newpts=%f newpos=%lld\n", newpts, newpos);fflush(stdout);
-#endif
-		if(newpos<demuxer->movi_start){
-			if(demuxer->stream->type!=STREAMTYPE_VCD) demuxer->movi_start=0; // for VCD
-			if(newpos<demuxer->movi_start) newpos=demuxer->movi_start;
-		}
-  
-  
-#ifdef _LARGEFILE_SOURCE
-		newpos&=~((long long)stream_buffer_size-1);  /* sector boundary */
-#else
-	newpos &= ~(stream_buffer_size - 1);  /* sector boundary */
-#endif
-		// This seeks the input stream to the newpos
 	stream_seek(demuxer->stream, newpos);
-	for(i = 0; i < 8192; i++)
+	for(i = 0; i < NB_PID_MAX; i++)
 		if(priv->ts.pids[i] != NULL)
 			priv->ts.pids[i]->is_synced = 0;
-		// re-sync video:
-		videobuf_code_len=0; // reset ES stream buffer
 
-		// This will read packets from the file stream and put them into the specified substream (A or V),
-		// it reads until it gets data for the specified type
+	videobuf_code_len = 0;
+
 	if(sh_video != NULL)
 		ds_fill_buffer(d_video);
 
@@ -3303,15 +3315,13 @@ printf("Seeking newpts=%f newpos=%lld\n", newpts, newpos);fflush(stdout);
 	{
 		ds_fill_buffer(d_audio);
 	}
-//	}
 
-//printf("Seeked to pts=%f pos=%lld\n", mpg_d->last_pts, newpos);fflush(stdout);
-		while(1)
+	while(sh_video != NULL)
 	{
 		if(sh_audio && !d_audio->eof && d_video->pts && d_audio->pts)
 		{
-			float a_pts=d_audio->pts;
-			a_pts+=(ds_tell_pts(d_audio)-sh_audio->a_in_buffer_len)/(float)sh_audio->i_bps;
+			double a_pts=d_audio->pts;
+			a_pts+=(ds_tell_pts(d_audio)-sh_audio->a_in_buffer_len)/(double)sh_audio->i_bps;
 			if(d_video->pts > a_pts)
 			{
 				skip_audio_frame(sh_audio);  // sync audio
@@ -3329,61 +3339,14 @@ printf("Seeking newpts=%f newpos=%lld\n", newpts, newpos);fflush(stdout);
 			break;
 		else if(sh_video->format == VIDEO_VC1 && (i==0x10E || i==0x10F))
 			break;
+		else if(sh_video->format == VIDEO_HEVC)
+			break;
 		else	//H264
 		{
-			if((i & ~0x60) == 0x105) break;
+			if((i & ~0x60) == 0x105 || (i & ~0x60) == 0x107) break;
 		}
 
 		if(!i || !skip_video_packet(d_video)) break; // EOF?
-			// This was the code from the PS demux, above is the code from the TS demux
-			/*int i;
-			if(sh_audio && !d_audio->eof && d_video->pts && d_audio->pts)
-			{
-				float a_pts=d_audio->pts;
-				a_pts+=(ds_tell_pts(d_audio)-sh_audio->a_in_buffer_len)/(float)sh_audio->i_bps;
-				if(d_video->pts>a_pts)
-				{
-					skip_audio_frame(sh_audio);  // sync audio
-					continue;
-				}
-			}
-			i=sync_video_packet(d_video);
-			if(sh_video->format == 0x10000004) 
-			{	//mpeg4
-				if(i==0x1B6) 
-				{			//vop (frame) startcode
-				  int pos = videobuf_len;
-				  if(!read_video_packet(d_video)) break; // EOF
-				  if((videobuffer[pos+4] & 0x3F) == 0) break;	//I-frame
-				}
-			 }
-			else if(sh_video->format == 0x10000005)
-			{	//h264
-				if((i & ~0x60) == 0x101 || (i & ~0x60) == 0x102 || (i & ~0x60) == 0x105) break;
-			}
-			else
-			{	//default mpeg1/2
-				if(i==0x1B3 || i==0x1B8) break; // found it!
-			}
-			if(!i || !skip_video_packet(d_video)) break; // EOF?*/
-		}
-		if(!priv)
-		  break;
-		if (!precision || abs(newpts - priv->last_pts) < 1.1 || (priv->last_pts == oldpts)) break;
-		if ((newpos - oldpos) * (priv->last_pts - oldpts) < 0) { // invalid timestamps
-			priv->has_valid_timestamps = 0;
-			break;
-		}
-		precision--;
-		//prepare another seek because we are off by more than 0.5s
-		if(priv) {
-			newpos += (newpts - priv->last_pts) * (newpos - oldpos) / (priv->last_pts - oldpts);
-			ds_free_packs(d_audio);
-			ds_free_packs(d_video);
-			demuxer->stream->eof=0; // clear eof flag
-			d_video->eof=0;
-			d_audio->eof=0;
-		}
 	}
 }
 
@@ -3391,9 +3354,8 @@ printf("Seeking newpts=%f newpos=%lld\n", newpts, newpos);fflush(stdout);
 static int demux_ts_fill_buffer(demuxer_t * demuxer, demux_stream_t *ds)
 {
 	ES_stream_t es;
-	ts_priv_t *priv = (ts_priv_t *)demuxer->priv;
-	
-	return -ts_parse(demuxer, &es, priv->packet, 0);
+
+	return -ts_parse(demuxer, &es, 0);
 }
 
 
@@ -3433,7 +3395,7 @@ static int demux_ts_control(demuxer_t *demuxer, int cmd, void *arg)
 			int i, n;
 			int reftype, areset = 0, vreset = 0;
 			demux_stream_t *ds;
-			
+
 			if(cmd == DEMUXER_CTRL_SWITCH_VIDEO)
 			{
 				reftype = TYPE_VIDEO;
@@ -3449,7 +3411,7 @@ static int demux_ts_control(demuxer_t *demuxer, int cmd, void *arg)
 			n = *((int*)arg);
 			if(n == -2)
 			{
-				reset_fifos(priv, areset, vreset, 0);
+				reset_fifos(demuxer, areset, vreset, 0);
 				ds->id = -2;
 				ds->sh = NULL;
 				ds_free_packs(ds);
@@ -3478,20 +3440,15 @@ static int demux_ts_control(demuxer_t *demuxer, int cmd, void *arg)
 			}
 			else	//audio track <n>
 			{
-				for(i = 0; i < 8192; i++)
-				{
-					if(priv->ts.streams[i].id == n && priv->ts.streams[i].type == reftype)
-					{
+				if (n >= 8192 || priv->ts.streams[n].type != reftype) return DEMUXER_CTRL_NOTIMPL;
+				i = n;
 						sh = priv->ts.streams[i].sh;
-						break;
-					}
-				}
 			}
 
 			if(sh)
 			{
 				if(ds->id != priv->ts.streams[i].id)
-					reset_fifos(priv, areset, vreset, 0);
+					reset_fifos(demuxer, areset, vreset, 0);
 				ds->id = priv->ts.streams[i].id;
 				ds->sh = sh;
 				ds_free_packs(ds);
@@ -3556,12 +3513,12 @@ static int demux_ts_control(demuxer_t *demuxer, int cmd, void *arg)
 				if(!vid_done && priv->ts.streams[pmt->es[j].pid].type == TYPE_VIDEO)
 				{
 					vid_done = 1;
-					prog->vid = priv->ts.streams[pmt->es[j].pid].id;
+					prog->vid = pmt->es[j].pid;
 				}
 				else if(!aid_done && priv->ts.streams[pmt->es[j].pid].type == TYPE_AUDIO)
 				{
 					aid_done = 1;
-					prog->aid = priv->ts.streams[pmt->es[j].pid].id;
+					prog->aid = pmt->es[j].pid;
 				}
 			}
 
@@ -3575,7 +3532,7 @@ static int demux_ts_control(demuxer_t *demuxer, int cmd, void *arg)
 }
 
 
-demuxer_desc_t demuxer_desc_mpeg_ts = {
+const demuxer_desc_t demuxer_desc_mpeg_ts = {
   "MPEG-TS demuxer",
   "mpegts",
   "TS",

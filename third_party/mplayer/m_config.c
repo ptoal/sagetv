@@ -1,3 +1,20 @@
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 /// \file
 /// \ingroup Config
@@ -8,6 +25,7 @@
 #include <stdio.h>
 #include <errno.h>
 #include <string.h>
+#include <strings.h>
 #ifdef MP_DEBUG
 #include <assert.h>
 #endif
@@ -19,25 +37,121 @@
 
 #define MAX_PROFILE_DEPTH 20
 
-static int
-parse_profile(m_option_t* opt,char *name, char *param, void* dst, int src);
+
+static int parse_profile(const m_option_t *opt, const char *name,
+                         const char *param, void *dst, int src)
+{
+    m_config_t *config = opt->priv;
+    char **list = NULL;
+    int i, r;
+    if (param && !strcmp(param, "help")) {
+        m_profile_t *p;
+        if (!config->profiles) {
+            mp_msg(MSGT_CFGPARSER, MSGL_INFO, MSGTR_NoProfileDefined);
+            return M_OPT_EXIT-1;
+        }
+        mp_msg(MSGT_CFGPARSER, MSGL_INFO, MSGTR_AvailableProfiles);
+        for (p = config->profiles; p; p = p->next)
+            mp_msg(MSGT_CFGPARSER, MSGL_INFO, "\t%s\t%s\n", p->name,
+                   p->desc ? p->desc : "");
+        mp_msg(MSGT_CFGPARSER, MSGL_INFO, "\n");
+        return M_OPT_EXIT-1;
+    }
+
+    r = m_option_type_string_list.parse(opt, name, param, &list,src);
+    if (r < 0)
+        return r;
+    if (!list || !list[0])
+        return M_OPT_INVALID;
+    for (i = 0; list[i]; i++)
+        if (!m_config_get_profile(config,list[i])) {
+            mp_msg(MSGT_CFGPARSER, MSGL_WARN, MSGTR_UnknownProfile, list[i]);
+            r = M_OPT_INVALID;
+        }
+    if (dst)
+        m_option_copy(opt, dst, &list);
+    else
+        m_option_free(opt, &list);
+    return r;
+}
 
 static void
-set_profile(m_option_t *opt, void* dst, void* src);
+set_profile(const m_option_t *opt, void *dst, const void *src)
+{
+    m_config_t *config = opt->priv;
+    m_profile_t *p;
+    char **list = NULL;
+    int i;
+    if (!src || !*(char***)src)
+        return;
+    m_option_copy(opt,&list,src);
+    for (i = 0; list[i]; i++) {
+        p = m_config_get_profile(config, list[i]);
+        if (!p)
+            continue;
+        m_config_set_profile(config, p);
+    }
+    m_option_free(opt, &list);
+}
 
-static int
-show_profile(m_option_t *opt, char* name, char *param);
+static int show_profile(m_option_t *opt, char* name, char *param)
+{
+    m_config_t *config = opt->priv;
+    m_profile_t *p;
+    int i, j;
+    if (!param)
+        return M_OPT_MISSING_PARAM;
+    if (!(p = m_config_get_profile(config, param))) {
+        mp_msg(MSGT_CFGPARSER, MSGL_ERR, MSGTR_UnknownProfile, param);
+        return M_OPT_EXIT - 1;
+    }
+    if (!config->profile_depth)
+        mp_msg(MSGT_CFGPARSER, MSGL_INFO, MSGTR_Profile, param,
+               p->desc ? p->desc : "");
+    config->profile_depth++;
+    for (i = 0; i < p->num_opts; i++) {
+        char spc[config->profile_depth + 1];
+        for (j = 0; j < config->profile_depth; j++)
+            spc[j] = ' ';
+        spc[config->profile_depth] = '\0';
 
-static void
-m_config_add_option(m_config_t *config, m_option_t *arg, char* prefix);
+        mp_msg(MSGT_CFGPARSER, MSGL_INFO, "%s%s=%s\n", spc,
+               p->opts[2 * i], p->opts[2 * i + 1]);
 
-static int
-list_options(m_option_t *opt, char* name, char *param);
+        if (config->profile_depth < MAX_PROFILE_DEPTH &&
+            !strcmp(p->opts[2*i],"profile")) {
+            char *e, *list = p->opts[2 * i + 1];
+            while ((e = strchr(list, ','))) {
+                int l = e-list;
+                char tmp[l+1];
+                if (!l)
+                    continue;
+                memcpy(tmp, list, l);
+                tmp[l] = '\0';
+                show_profile(opt, name, tmp);
+                list = e+1;
+            }
+            if (list[0] != '\0')
+                show_profile(opt, name, list);
+        }
+    }
+    config->profile_depth--;
+    if (!config->profile_depth)
+        mp_msg(MSGT_CFGPARSER, MSGL_INFO, "\n");
+    return M_OPT_EXIT - 1;
+}
+
+static int list_options(m_option_t *opt, char* name, char *param)
+{
+    m_config_t *config = opt->priv;
+    m_config_print_option_list(config);
+    return M_OPT_EXIT;
+}
 
 m_config_t*
 m_config_new(void) {
   m_config_t* config;
-  static int inited = 0;
+  static int initialized = 0;
   static m_option_type_t profile_opt_type;
   static m_option_t ref_opts[] = {
     { "profile", NULL, &profile_opt_type, CONF_NOSAVE, 0, 0, NULL },
@@ -48,19 +162,24 @@ m_config_new(void) {
   int i;
 
   config = calloc(1,sizeof(m_config_t));
+  if (!config) return NULL;
   config->lvl = 1; // 0 Is the defaults
-  if(!inited) {
-    inited = 1;
+  if(!initialized) {
+    initialized = 1;
     profile_opt_type = m_option_type_string_list;
     profile_opt_type.parse = parse_profile;
     profile_opt_type.set = set_profile;
   }
   config->self_opts = malloc(sizeof(ref_opts));
+  if (!config->self_opts) {
+    free(config);
+    return NULL;
+  }
   memcpy(config->self_opts,ref_opts,sizeof(ref_opts));
   for(i = 0 ; config->self_opts[i].name ; i++)
     config->self_opts[i].priv = config;
   m_config_register_options(config,config->self_opts);
-  
+
   return config;
 }
 
@@ -74,7 +193,7 @@ m_config_free(m_config_t* config) {
 #ifdef MP_DEBUG
   assert(config != NULL);
 #endif
-  
+
   while(i) {
     if (i->flags & M_CFG_OPT_ALIAS)
       sl = NULL;
@@ -88,6 +207,8 @@ m_config_free(m_config_t* config) {
     }
     if(i->name != i->opt->name)
       free(i->name);
+    if(i->opt->p && (i->opt->type->flags & M_OPT_TYPE_DYNAMIC))
+      m_option_free(i->opt, i->opt->p);
     ct = i->next;
     free(i);
     i = ct;
@@ -95,16 +216,16 @@ m_config_free(m_config_t* config) {
   for(p = config->profiles ; p ; p = pn) {
     pn = p->next;
     free(p->name);
-    if(p->desc) free(p->desc);
+    free(p->desc);
     for(j = 0 ; j < p->num_opts ; j++) {
       free(p->opts[2*j]);
-      if(p->opts[2*j+1]) free(p->opts[2*j+1]);
+      free(p->opts[2*j + 1]);
     }
     free(p->opts);
     free(p);
   }
   free(config->self_opts);
-  free(config);  
+  free(config);
 }
 
 void
@@ -131,8 +252,8 @@ m_config_push(m_config_t* config) {
 
     // Update the current status
     m_option_save(co->opt,co->slots->data,co->opt->p);
-    
-    // Allocate a new slot    
+
+    // Allocate a new slot
     slot = calloc(1,sizeof(m_config_save_slot_t) + co->opt->type->size);
     slot->lvl = config->lvl;
     slot->prev = co->slots;
@@ -141,7 +262,7 @@ m_config_push(m_config_t* config) {
     // Reset our set flag
     co->flags &= ~M_CFG_OPT_SET;
   }
-  
+
   mp_msg(MSGT_CFGPARSER, MSGL_DBG2,"Config pushed level is now %d\n",config->lvl);
 }
 
@@ -165,7 +286,7 @@ m_config_pop(m_config_t* config) {
       continue;
     if(co->slots->lvl > config->lvl)
       mp_msg(MSGT_CFGPARSER, MSGL_WARN,MSGTR_SaveSlotTooOld,config->lvl,co->slots->lvl);
-    
+
     while(co->slots->lvl >= config->lvl) {
       m_option_free(co->opt,co->slots->data);
       slot = co->slots;
@@ -182,7 +303,7 @@ m_config_pop(m_config_t* config) {
 }
 
 static void
-m_config_add_option(m_config_t *config, m_option_t *arg, char* prefix) {
+m_config_add_option(m_config_t *config, const m_option_t *arg, const char* prefix) {
   m_config_option_t *co;
   m_config_save_slot_t* sl;
 
@@ -199,21 +320,21 @@ m_config_add_option(m_config_t *config, m_option_t *arg, char* prefix) {
   // Fill in the full name
   if(prefix && strlen(prefix) > 0) {
     int l = strlen(prefix) + 1 + strlen(arg->name) + 1;
-    co->name = (char*) malloc(l);
+    co->name = malloc(l);
     sprintf(co->name,"%s:%s",prefix,arg->name);
   } else
     co->name = arg->name;
 
-  // Option with childs -> add them
+  // Option with children -> add them
   if(arg->type->flags & M_OPT_TYPE_HAS_CHILD) {
-    m_option_t *ol = arg->p;
+    const m_option_t *ol = arg->p;
     int i;
     co->slots = NULL;
     for(i = 0 ; ol[i].name != NULL ; i++)
       m_config_add_option(config,&ol[i], co->name);
   } else {
     m_config_option_t *i;
-    // Check if there is alredy an option pointing to this address
+    // Check if there is already an option pointing to this address
     if(arg->p) {
       for(i = config->opts ; i ; i = i->next ) {
 	if(i->opt->p == arg->p) { // So we don't save the same vars more than 1 time
@@ -227,7 +348,7 @@ m_config_add_option(m_config_t *config, m_option_t *arg, char* prefix) {
     // Allocate a slot for the defaults
     sl = calloc(1,sizeof(m_config_save_slot_t) + arg->type->size);
     m_option_save(arg,sl->data,(void**)arg->p);
-    // Hack to avoid too much trouble with dynamicly allocated data :
+    // Hack to avoid too much trouble with dynamically allocated data :
     // We always use a dynamic version
     if((arg->type->flags & M_OPT_TYPE_DYNAMIC) && arg->p && (*(void**)arg->p)) {
       *(void**)arg->p = NULL;
@@ -246,7 +367,7 @@ m_config_add_option(m_config_t *config, m_option_t *arg, char* prefix) {
 }
 
 int
-m_config_register_options(m_config_t *config, m_option_t *args) {
+m_config_register_options(m_config_t *config, const m_option_t *args) {
   int i;
 
 #ifdef MP_DEBUG
@@ -261,13 +382,13 @@ m_config_register_options(m_config_t *config, m_option_t *args) {
   return 1;
 }
 
-static m_config_option_t* 
-m_config_get_co(m_config_t *config, char* arg) {
+static m_config_option_t*
+m_config_get_co(const m_config_t *config, char *arg) {
   m_config_option_t *co;
 
   for(co = config->opts ; co ; co = co->next ) {
     int l = strlen(co->name) - 1;
-    if((co->opt->type->flags & M_OPT_TYPE_ALLOW_WILDCARD) && 
+    if((co->opt->type->flags & M_OPT_TYPE_ALLOW_WILDCARD) &&
        (co->name[l] == '*')) {
       if(strncasecmp(co->name,arg,l) == 0)
 	return co;
@@ -278,7 +399,7 @@ m_config_get_co(m_config_t *config, char* arg) {
 }
 
 static int
-m_config_parse_option(m_config_t *config, char* arg, char* param,int set) {
+m_config_parse_option(const m_config_t *config, char *arg, char *param, int set) {
   m_config_option_t *co;
   int r = 0;
 
@@ -299,7 +420,7 @@ m_config_parse_option(m_config_t *config, char* arg, char* param,int set) {
   assert(co->opt->type->parse);
 #endif
 
-  // Check if this option isn't forbiden in the current mode
+  // Check if this option isn't forbidden in the current mode
   if((config->mode == M_CONFIG_FILE) && (co->opt->flags & M_OPT_NOCFG)) {
     mp_msg(MSGT_CFGPARSER, MSGL_ERR,MSGTR_InvalidCfgfileOption,arg);
     return M_OPT_INVALID;
@@ -308,8 +429,15 @@ m_config_parse_option(m_config_t *config, char* arg, char* param,int set) {
     mp_msg(MSGT_CFGPARSER, MSGL_ERR,MSGTR_InvalidCmdlineOption,arg);
     return M_OPT_INVALID;
   }
+  // During command line preparse set only pre-parse options
+  // Otherwise only set pre-parse option if they were not already set.
+  if(((config->mode == M_COMMAND_LINE_PRE_PARSE) &&
+      !(co->opt->flags & M_OPT_PRE_PARSE)) ||
+     ((config->mode != M_COMMAND_LINE_PRE_PARSE) &&
+      (co->opt->flags & M_OPT_PRE_PARSE) && (co->flags & M_CFG_OPT_SET)))
+    set = 0;
 
-  // Option with childs are a bit different to parse
+  // Option with children are a bit different to parse
   if(co->opt->type->flags & M_OPT_TYPE_HAS_CHILD) {
     char** lst = NULL;
     int i,sr;
@@ -339,7 +467,7 @@ m_config_parse_option(m_config_t *config, char* arg, char* param,int set) {
       free(lst[2*i]);
       free(lst[2*i+1]);
     }
-    if(lst) free(lst);      
+    free(lst);
   } else
     r = m_option_parse(co->opt,arg,param,set ? co->slots->data : NULL,config->mode);
 
@@ -362,7 +490,7 @@ m_config_set_option(m_config_t *config, char* arg, char* param) {
 }
 
 int
-m_config_check_option(m_config_t *config, char* arg, char* param) {
+m_config_check_option(const m_config_t *config, char *arg, char *param) {
   int r;
   mp_msg(MSGT_CFGPARSER, MSGL_DBG2,"Checking %s=%s\n",arg,param);
   r=m_config_parse_option(config,arg,param,0);
@@ -374,8 +502,8 @@ m_config_check_option(m_config_t *config, char* arg, char* param) {
 }
 
 
-m_option_t*
-m_config_get_option(m_config_t *config, char* arg) {
+const m_option_t*
+m_config_get_option(const m_config_t *config, char *arg) {
   m_config_option_t *co;
 
 #ifdef MP_DEBUG
@@ -391,22 +519,9 @@ m_config_get_option(m_config_t *config, char* arg) {
     return NULL;
 }
 
-void*
-m_config_get_option_ptr(m_config_t *config, char* arg) {
-  m_option_t* conf;
-
-#ifdef MP_DEBUG
-  assert(config != NULL);
-  assert(arg != NULL);
-#endif
-
-  conf = m_config_get_option(config,arg);
-  if(!conf) return NULL;
-  return conf->p;
-}
 
 void
-m_config_print_option_list(m_config_t *config) {
+m_config_print_option_list(const m_config_t *config) {
   char min[50],max[50];
   m_config_option_t* co;
   int count = 0;
@@ -415,7 +530,7 @@ m_config_print_option_list(m_config_t *config) {
 
   mp_msg(MSGT_CFGPARSER, MSGL_INFO, MSGTR_OptionListHeader);
   for(co = config->opts ; co ; co = co->next) {
-    m_option_t* opt = co->opt;
+    const m_option_t* opt = co->opt;
     if(opt->type->flags & M_OPT_TYPE_HAS_CHILD) continue;
     if(opt->flags & M_OPT_MIN)
       sprintf(min,"%-8.0f",opt->min);
@@ -439,7 +554,7 @@ m_config_print_option_list(m_config_t *config) {
 }
 
 m_profile_t*
-m_config_get_profile(m_config_t* config, char* name) {
+m_config_get_profile(const m_config_t *config, char *name) {
   m_profile_t* p;
   for(p = config->profiles ; p ; p = p->next)
     if(!strcmp(p->name,name)) return p;
@@ -459,7 +574,7 @@ m_config_add_profile(m_config_t* config, char* name) {
 
 void
 m_profile_set_desc(m_profile_t* p, char* desc) {
-  if(p->desc) free(p->desc);
+  free(p->desc);
   p->desc = desc ? strdup(desc) : NULL;
 }
 
@@ -477,7 +592,7 @@ m_config_set_profile_option(m_config_t* config, m_profile_t* p,
   return 1;
 }
 
-static void
+void
 m_config_set_profile(m_config_t* config, m_profile_t* p) {
   int i;
   if(config->profile_depth > MAX_PROFILE_DEPTH) {
@@ -488,107 +603,4 @@ m_config_set_profile(m_config_t* config, m_profile_t* p) {
   for(i = 0 ; i < p->num_opts ; i++)
     m_config_set_option(config,p->opts[2*i],p->opts[2*i+1]);
   config->profile_depth--;
-}
-
-static int
-parse_profile(m_option_t* opt,char *name, char *param, void* dst, int src) {
-  m_config_t* config = opt->priv;
-  char** list = NULL;
-  int i,r;
-  if(param && !strcmp(param,"help")) {
-    m_profile_t* p;
-    if(!config->profiles) {
-      mp_msg(MSGT_CFGPARSER, MSGL_INFO, MSGTR_NoProfileDefined);
-      return M_OPT_EXIT-1;
-    }
-    mp_msg(MSGT_CFGPARSER, MSGL_INFO, MSGTR_AvailableProfiles);
-    for(p = config->profiles ; p ; p = p->next)
-      mp_msg(MSGT_CFGPARSER, MSGL_INFO, "\t%s\t%s\n",p->name,
-	     p->desc ? p->desc : "");
-    mp_msg(MSGT_CFGPARSER, MSGL_INFO, "\n");
-    return M_OPT_EXIT-1;
-  }
-    
-  r = m_option_type_string_list.parse(opt,name,param,&list,src);
-  if(r < 0) return r;
-  if(!list || !list[0]) return M_OPT_INVALID;
-  for(i = 0 ; list[i] ; i++)
-    if(!m_config_get_profile(config,list[i])) {
-      mp_msg(MSGT_CFGPARSER, MSGL_WARN, MSGTR_UnknownProfile,
-             list[i]);
-      r = M_OPT_INVALID;
-    }
-  if(dst)
-    m_option_copy(opt,dst,&list);
-  else
-    m_option_free(opt,&list);
-  return r;
-}
-
-static void
-set_profile(m_option_t *opt, void* dst, void* src) {
-  m_config_t* config = opt->priv;
-  m_profile_t* p;
-  char** list = NULL;
-  int i;
-  if(!src || !*(char***)src) return;
-  m_option_copy(opt,&list,src);
-  for(i = 0 ; list[i] ; i++) {
-    p = m_config_get_profile(config,list[i]);
-    if(!p) continue;
-    m_config_set_profile(config,p);
-  }
-  m_option_free(opt,&list);
-}
-
-static int
-show_profile(m_option_t *opt, char* name, char *param) {
-  m_config_t* config = opt->priv;
-  m_profile_t* p;
-  int i,j;
-  if(!param) return M_OPT_MISSING_PARAM;
-  if(!(p = m_config_get_profile(config,param))) {
-    mp_msg(MSGT_CFGPARSER, MSGL_ERR, MSGTR_UnknownProfile, param);
-    return M_OPT_EXIT-1;
-  }
-  if(!config->profile_depth)
-    mp_msg(MSGT_CFGPARSER, MSGL_INFO, MSGTR_Profile, param,
-	   p->desc ? p->desc : "");
-  config->profile_depth++;
-  for(i = 0 ; i < p->num_opts ; i++) {
-    char spc[config->profile_depth+1];
-    for(j = 0 ; j < config->profile_depth ; j++)
-      spc[j] = ' ';
-    spc[config->profile_depth] = '\0';
-    
-    mp_msg(MSGT_CFGPARSER, MSGL_INFO, "%s%s=%s\n", spc,
-	   p->opts[2*i], p->opts[2*i+1]);
-    
-
-    if(config->profile_depth < MAX_PROFILE_DEPTH &&
-       !strcmp(p->opts[2*i],"profile")) {
-      char* e,*list = p->opts[2*i+1];
-      while((e = strchr(list,','))) {
-	int l = e-list;
-	char tmp[l+1];
-	if(!l) continue;
-	memcpy(tmp,list,l);
-	tmp[l] = '\0';
-	show_profile(opt,name,tmp);
-	list = e+1;
-      }
-      if(list[0] != '\0')
-	show_profile(opt,name,list);
-    }
-  }
-  config->profile_depth--;
-  if(!config->profile_depth) mp_msg(MSGT_CFGPARSER, MSGL_INFO, "\n");
-  return M_OPT_EXIT-1;
-}
-
-static int
-list_options(m_option_t *opt, char* name, char *param) {
-  m_config_t* config = opt->priv;
-  m_config_print_option_list(config);
-  return M_OPT_EXIT;
 }

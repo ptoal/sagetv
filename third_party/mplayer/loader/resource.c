@@ -6,7 +6,6 @@
  *
  * Modified for use with MPlayer, detailed changelog at
  * http://svn.mplayerhq.hu/mplayer/trunk/
- * $Id: resource.c,v 1.3 2007-04-10 19:33:29 Narflex Exp $
  *
  */
 #include "config.h"
@@ -36,13 +35,13 @@ WORD WINE_LanguageId=0x409;//english
 
 #define HRSRC_MAP_BLOCKSIZE 16
 
-typedef struct _HRSRC_ELEM
+typedef struct HRSRC_ELEM
 {
     HANDLE hRsrc;
     WORD     type;
 } HRSRC_ELEM;
 
-typedef struct _HRSRC_MAP
+typedef struct HRSRC_MAP
 {
     int nAlloc;
     int nUsed;
@@ -53,14 +52,14 @@ static HRSRC RES_FindResource2( HMODULE hModule, LPCSTR type,
 				LPCSTR name, WORD lang, int unicode)
 {
     HRSRC hRsrc = 0;
-    LPWSTR typeStr, nameStr;    
+    LPWSTR typeStr, nameStr;
     WINE_MODREF *wm = MODULE32_LookupHMODULE( hModule );
 
     if(!wm)
-	return 0;    
+	return 0;
     /* 32-bit PE module */
 
-    
+
     if ( HIWORD( type ) && (!unicode))
 	typeStr = HEAP_strdupAtoW( GetProcessHeap(), 0, type );
     else
@@ -69,12 +68,12 @@ static HRSRC RES_FindResource2( HMODULE hModule, LPCSTR type,
 	nameStr = HEAP_strdupAtoW( GetProcessHeap(), 0, name );
     else
 	nameStr = (LPWSTR)name;
-    
+
     hRsrc = PE_FindResourceExW( wm, nameStr, typeStr, lang );
-    
-    if ( HIWORD( type ) && (!unicode)) 
+
+    if ( HIWORD( type ) && (!unicode))
 	HeapFree( GetProcessHeap(), 0, typeStr );
-    if ( HIWORD( name ) && (!unicode)) 
+    if ( HIWORD( name ) && (!unicode))
 	HeapFree( GetProcessHeap(), 0, nameStr );
 
     return hRsrc;
@@ -108,13 +107,13 @@ static HRSRC RES_FindResource( HMODULE hModule, LPCSTR type,
 static DWORD RES_SizeofResource( HMODULE hModule, HRSRC hRsrc)
 {
     DWORD size = 0;
-    HRSRC hRsrc32;
+//    HRSRC hRsrc32;
 
 //    HMODULE16 hMod16   = MapHModuleLS( hModule );
 //    NE_MODULE *pModule = NE_GetPtr( hMod16 );
-//    WINE_MODREF *wm    = pModule && pModule->module32? 
+//    WINE_MODREF *wm    = pModule && pModule->module32?
 //                         MODULE32_LookupHMODULE( pModule->module32 ) : NULL;
-    WINE_MODREF *wm = MODULE32_LookupHMODULE( hModule );
+//    WINE_MODREF *wm = MODULE32_LookupHMODULE( hModule );
 
     if ( !hModule || !hRsrc ) return 0;
 
@@ -125,7 +124,7 @@ static DWORD RES_SizeofResource( HMODULE hModule, HRSRC hRsrc)
     {
 	printf("16-bit hRsrcs not supported\n");
 	return 0;
-    }	
+    }
     size = PE_SizeofResource( hModule, hRsrc );
     return size;
 }
@@ -137,7 +136,7 @@ static HFILE RES_AccessResource( HMODULE hModule, HRSRC hRsrc )
 {
     HFILE hFile = HFILE_ERROR;
 
-    WINE_MODREF *wm = MODULE32_LookupHMODULE( hModule );
+//    WINE_MODREF *wm = MODULE32_LookupHMODULE( hModule );
 
     if ( !hModule || !hRsrc ) return HFILE_ERROR;
 
@@ -154,7 +153,7 @@ static HFILE RES_AccessResource( HMODULE hModule, HRSRC hRsrc )
 static HGLOBAL RES_LoadResource( HMODULE hModule, HRSRC hRsrc)
 {
     HGLOBAL hMem = 0;
-    HRSRC hRsrc32;
+//    HRSRC hRsrc32;
     WINE_MODREF *wm = MODULE32_LookupHMODULE( hModule );
 
 
@@ -202,29 +201,29 @@ static WIN_BOOL RES_FreeResource( HGLOBAL handle )
  */
 HANDLE WINAPI FindResourceA( HMODULE hModule, LPCSTR name, LPCSTR type )
 {
-    return RES_FindResource( hModule, type, name, 
+    return RES_FindResource( hModule, type, name,
                              WINE_LanguageId, 0);
 }
 HANDLE WINAPI FindResourceW( HMODULE hModule, LPCWSTR name, LPCWSTR type )
 {
-    return RES_FindResource( hModule, (LPCSTR)type, (LPCSTR)name, 
+    return RES_FindResource( hModule, (LPCSTR)type, (LPCSTR)name,
                              WINE_LanguageId, 1);
 }
 
 /**********************************************************************
  *	    FindResourceExA  (KERNEL32.129)
  */
-HANDLE WINAPI FindResourceExA( HMODULE hModule, 
+HANDLE WINAPI FindResourceExA( HMODULE hModule,
                                LPCSTR type, LPCSTR name, WORD lang )
 {
-    return RES_FindResource( hModule, type, name, 
+    return RES_FindResource( hModule, type, name,
                              lang, 0 );
 }
 
-HANDLE WINAPI FindResourceExW( HMODULE hModule, 
+HANDLE WINAPI FindResourceExW( HMODULE hModule,
                                LPCWSTR type, LPCWSTR name, WORD lang )
 {
-    return RES_FindResource( hModule, (LPCSTR)type, (LPCSTR)name, 
+    return RES_FindResource( hModule, (LPCSTR)type, (LPCSTR)name,
                              lang, 1 );
 }
 
@@ -334,21 +333,21 @@ INT WINAPI LoadStringW( HINSTANCE instance, UINT resource_id,
     TRACE("instance = %04x, id = %04x, buffer = %08x, "
           "length = %d\n", instance, (int)resource_id, (int) buffer, buflen);
 
-    /* Use bits 4 - 19 (incremented by 1) as resourceid, mask out 
+    /* Use bits 4 - 19 (incremented by 1) as resourceid, mask out
      * 20 - 31. */
     hrsrc = FindResourceW( instance, (LPCWSTR)(((resource_id>>4)&0xffff)+1),
                              RT_STRINGW );
     if (!hrsrc) return 0;
     hmem = LoadResource( instance, hrsrc );
     if (!hmem) return 0;
-    
+
     p = (WCHAR*) LockResource(hmem);
     string_num = resource_id & 0x000f;
     for (i = 0; i < string_num; i++)
 	p += *p + 1;
-    
+
     TRACE("strlen = %d\n", (int)*p );
-    
+
     if (buffer == NULL) return *p;
     i = min(buflen - 1, *p);
     if (i > 0) {
@@ -369,10 +368,10 @@ INT WINAPI LoadStringW( HINSTANCE instance, UINT resource_id,
 }
 
 /* Messages...used by FormatMessage32* (KERNEL32.something)
- * 
+ *
  * They can be specified either directly or using a message ID and
  * loading them from the resource.
- * 
+ *
  * The resourcedata has following format:
  * start:
  * 0: DWORD nrofentries
@@ -410,7 +409,7 @@ INT WINAPI LoadMessageA( HMODULE instance, UINT id, WORD lang,
     if (!hrsrc) return 0;
     hmem = LoadResource( instance, hrsrc );
     if (!hmem) return 0;
-    
+
     mrd = (PMESSAGE_RESOURCE_DATA)LockResource(hmem);
     mre = NULL;
     mrb = &(mrd->Blocks[0]);

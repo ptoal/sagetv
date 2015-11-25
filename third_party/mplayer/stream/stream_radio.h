@@ -1,29 +1,65 @@
-#ifndef _H_STREAM_RADIO_
-#define _H_STREAM_RADIO_
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-#ifdef USE_RADIO
+#ifndef MPLAYER_STREAM_RADIO_H
+#define MPLAYER_STREAM_RADIO_H
+
+#include "config.h"
+#include "stream.h"
+
 #define RADIO_CHANNEL_LOWER 1
 #define RADIO_CHANNEL_HIGHER 2
 
-extern char *radio_param_device;
-extern char *radio_param_driver;
-#ifdef RADIO_BSDBT848_HDR
-extern float radio_param_freq_min;
-extern float radio_param_freq_max;
+typedef struct radio_param_s{
+    /** name of radio device file */
+    char*   device;
+#ifdef CONFIG_RADIO_BSDBT848
+    /** minimal allowed frequency */
+    float   freq_min;
+    /** maximal allowed frequency */
+    float   freq_max;
 #endif
-extern char **radio_param_channels;
-extern int radio_param_volume;
-extern char* radio_param_adevice;
-extern int radio_param_arate;
-extern int radio_param_achannels;
+    /** radio driver (v4l,v4l2) */
+    char*   driver;
+    /** channels list (see man page) */
+    char**  channels;
+    /** initial volume for radio device */
+    int     volume;
+    /** name of audio device file to grab data from */
+    char*   adevice;
+    /** audio framerate (please also set -rawaudio rate
+        parameter to the same value) */
+    int     arate;
+    /** number of audio channels */
+    int     achannels;
+    /** if channels parameter exist, here will be channel
+        number otherwise - frequency */
+    float   freq_channel;
+    char*   capture;
+} radio_param_t;
 
-int radio_set_freq(struct stream_st *stream, float freq);
-int radio_get_freq(struct stream_st *stream, float* freq);
-char* radio_get_channel_name(struct stream_st *stream);
-int radio_set_channel(struct stream_st *stream, char *channel);
-int radio_step_channel(struct stream_st *stream, int direction);
-int radio_step_freq(struct stream_st *stream, float step_interval);
+extern radio_param_t stream_radio_defaults;
 
-#endif
+int radio_set_freq(struct stream *stream, float freq);
+int radio_get_freq(struct stream *stream, float* freq);
+char* radio_get_channel_name(struct stream *stream);
+int radio_set_channel(struct stream *stream, char *channel);
+int radio_step_channel(struct stream *stream, int direction);
+int radio_step_freq(struct stream *stream, float step_interval);
 
-#endif
+#endif /* MPLAYER_STREAM_RADIO_H */

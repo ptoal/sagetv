@@ -1,36 +1,40 @@
 /*
-    Copyright (C) 2005 Michael Niedermayer <michaelni@gmx.at>
+ * Copyright (C) 2005 Michael Niedermayer <michaelni@gmx.at>
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
-*/
-
-#include "config.h"
-
- 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
 #include <math.h>
 
+#include "config.h"
+
 #include "mp_msg.h"
 #include "cpudetect.h"
 
-#ifdef HAVE_MALLOC_H
+#if HAVE_MALLOC_H
 #include <malloc.h>
 #endif
+
+#include "libavutil/mem.h"
 
 #include "img_format.h"
 #include "mp_image.h"
@@ -40,10 +44,8 @@
 #define XMIN(a,b) ((a) < (b) ? (a) : (b))
 #define XMAX(a,b) ((a) > (b) ? (a) : (b))
 
-typedef short DCTELEM;
-
 //===========================================================================//
-static const uint8_t  __attribute__((aligned(8))) dither[8][8]={
+DECLARE_ASM_CONST(8, uint8_t, dither)[8][8]={
 {  0,  48,  12,  60,   3,  51,  15,  63, },
 { 32,  16,  44,  28,  35,  19,  47,  31, },
 {  8,  56,   4,  52,  11,  59,   7,  55, },
@@ -62,7 +64,7 @@ struct vf_priv_s {
     uint8_t *src;
 };
 #if 0
-static inline void dct7_c(DCTELEM *dst, int s0, int s1, int s2, int s3, int step){
+static inline void dct7_c(int16_t *dst, int s0, int s1, int s2, int s3, int step){
     int s, d;
     int dst2[64];
 //#define S0 (1024/0.37796447300922719759)
@@ -109,7 +111,7 @@ static inline void dct7_c(DCTELEM *dst, int s0, int s1, int s2, int s3, int step
 }
 #endif
 
-static inline void dctA_c(DCTELEM *dst, uint8_t *src, int stride){
+static inline void dctA_c(int16_t *dst, uint8_t *src, int stride){
     int i;
 
     for(i=0; i<4; i++){
@@ -131,7 +133,7 @@ static inline void dctA_c(DCTELEM *dst, uint8_t *src, int stride){
     }
 }
 
-static void dctB_c(DCTELEM *dst, DCTELEM *src){
+static void dctB_c(int16_t *dst, int16_t *src){
     int i;
 
     for(i=0; i<4; i++){
@@ -153,9 +155,9 @@ static void dctB_c(DCTELEM *dst, DCTELEM *src){
     }
 }
 
-#ifdef HAVE_MMX
-static void dctB_mmx(DCTELEM *dst, DCTELEM *src){
-    asm volatile (
+#if HAVE_MMX_INLINE
+static void dctB_mmx(int16_t *dst, int16_t *src){
+    __asm__ volatile (
         "movq  (%0), %%mm0      \n\t"
         "movq  1*4*2(%0), %%mm1 \n\t"
         "paddw 6*4*2(%0), %%mm0 \n\t"
@@ -187,7 +189,7 @@ static void dctB_mmx(DCTELEM *dst, DCTELEM *src){
 }
 #endif
 
-static void (*dctB)(DCTELEM *dst, DCTELEM *src)= dctB_c;
+static void (*dctB)(int16_t *dst, int16_t *src)= dctB_c;
 
 #define N0 4
 #define N1 5
@@ -224,10 +226,10 @@ static void init_thres2(void){
     }
 }
 
-static int hardthresh_c(DCTELEM *src, int qp){
-    int i; 
+static int hardthresh_c(int16_t *src, int qp){
+    int i;
     int a;
-    
+
     a= src[0] * factor[0];
     for(i=1; i<16; i++){
         unsigned int threshold1= thres2[qp][i];
@@ -240,10 +242,10 @@ static int hardthresh_c(DCTELEM *src, int qp){
     return (a + (1<<11))>>12;
 }
 
-static int mediumthresh_c(DCTELEM *src, int qp){
-    int i; 
+static int mediumthresh_c(int16_t *src, int qp){
+    int i;
     int a;
-    
+
     a= src[0] * factor[0];
     for(i=1; i<16; i++){
         unsigned int threshold1= thres2[qp][i];
@@ -261,10 +263,10 @@ static int mediumthresh_c(DCTELEM *src, int qp){
     return (a + (1<<11))>>12;
 }
 
-static int softthresh_c(DCTELEM *src, int qp){
-    int i; 
+static int softthresh_c(int16_t *src, int qp){
+    int i;
     int a;
-    
+
     a= src[0] * factor[0];
     for(i=1; i<16; i++){
         unsigned int threshold1= thres2[qp][i];
@@ -278,27 +280,27 @@ static int softthresh_c(DCTELEM *src, int qp){
     return (a + (1<<11))>>12;
 }
 
-static int (*requantize)(DCTELEM *src, int qp)= hardthresh_c;
+static int (*requantize)(int16_t *src, int qp)= hardthresh_c;
 
 static void filter(struct vf_priv_s *p, uint8_t *dst, uint8_t *src, int dst_stride, int src_stride, int width, int height, uint8_t *qp_store, int qp_stride, int is_luma){
     int x, y;
     const int stride= is_luma ? p->temp_stride : ((width+16+15)&(~15));
     uint8_t  *p_src= p->src + 8*stride;
-    DCTELEM *block= p->src;
-    DCTELEM *temp= p->src + 32;
+    int16_t *block= (int16_t *)p->src;
+    int16_t *temp= (int16_t *)(p->src + 32);
 
     if (!src || !dst) return; // HACK avoid crash for Y8 colourspace
     for(y=0; y<height; y++){
         int index= 8 + 8*stride + y*stride;
-        memcpy(p_src + index, src + y*src_stride, width);
-        for(x=0; x<8; x++){ 
+        fast_memcpy(p_src + index, src + y*src_stride, width);
+        for(x=0; x<8; x++){
             p_src[index         - x - 1]= p_src[index +         x    ];
             p_src[index + width + x    ]= p_src[index + width - x - 1];
         }
     }
     for(y=0; y<8; y++){
-        memcpy(p_src + (       7-y)*stride, p_src + (       y+8)*stride, stride);
-        memcpy(p_src + (height+8+y)*stride, p_src + (height-y+7)*stride, stride);
+        fast_memcpy(p_src + (       7-y)*stride, p_src + (       y+8)*stride, stride);
+        fast_memcpy(p_src + (height+8+y)*stride, p_src + (height-y+7)*stride, stride);
     }
     //FIXME (try edge emu)
 
@@ -306,32 +308,32 @@ static void filter(struct vf_priv_s *p, uint8_t *dst, uint8_t *src, int dst_stri
         for(x=-8; x<0; x+=4){
             const int index= x + y*stride + (8-3)*(1+stride) + 8; //FIXME silly offset
             uint8_t *src  = p_src + index;
-            DCTELEM *tp= temp+4*x;
-            
+            int16_t *tp= temp+4*x;
+
             dctA_c(tp+4*8, src, stride);
-        }        
+        }
         for(x=0; x<width; ){
             const int qps= 3 + is_luma;
             int qp;
             int end= XMIN(x+8, width);
-            
+
             if(p->qp)
                 qp= p->qp;
             else{
                 qp= qp_store[ (XMIN(x, width-1)>>qps) + (XMIN(y, height-1)>>qps) * qp_stride];
-                if(p->mpeg2) qp>>=1;
+                qp=norm_qscale(qp, p->mpeg2);
             }
             for(; x<end; x++){
                 const int index= x + y*stride + (8-3)*(1+stride) + 8; //FIXME silly offset
                 uint8_t *src  = p_src + index;
-                DCTELEM *tp= temp+4*x;
+                int16_t *tp= temp+4*x;
                 int v;
-                
+
                 if((x&3)==0)
                     dctA_c(tp+4*8, src, stride);
-                
+
                 dctB(block, tp);
-                
+
                 v= requantize(block, qp);
                 v= (v + dither[y&7][x&7])>>6;
                 if((unsigned)v > 255)
@@ -342,18 +344,18 @@ static void filter(struct vf_priv_s *p, uint8_t *dst, uint8_t *src, int dst_stri
     }
 }
 
-static int config(struct vf_instance_s* vf,
+static int config(struct vf_instance *vf,
     int width, int height, int d_width, int d_height,
     unsigned int flags, unsigned int outfmt){
     int h= (height+16+15)&(~15);
 
     vf->priv->temp_stride= (width+16+15)&(~15);
-    vf->priv->src = memalign(8, vf->priv->temp_stride*(h+8)*sizeof(uint8_t));
-    
+    vf->priv->src = av_malloc(vf->priv->temp_stride*(h+8)*sizeof(uint8_t));
+
     return vf_next_config(vf,width,height,d_width,d_height,flags,outfmt);
 }
 
-static void get_image(struct vf_instance_s* vf, mp_image_t *mpi){
+static void get_image(struct vf_instance *vf, mp_image_t *mpi){
     if(mpi->flags&MP_IMGFLAG_PRESERVE) return; // don't change
     // ok, we can do pp in-place (or pp disabled):
     vf->dmpi=vf_get_image(vf->next,mpi->imgfmt,
@@ -370,7 +372,7 @@ static void get_image(struct vf_instance_s* vf, mp_image_t *mpi){
     mpi->flags|=MP_IMGFLAG_DIRECT;
 }
 
-static int put_image(struct vf_instance_s* vf, mp_image_t *mpi, double pts){
+static int put_image(struct vf_instance *vf, mp_image_t *mpi, double pts){
     mp_image_t *dmpi;
 
     if(mpi->flags&MP_IMGFLAG_DIRECT){
@@ -395,28 +397,28 @@ static int put_image(struct vf_instance_s* vf, mp_image_t *mpi, double pts){
         memcpy_pic(dmpi->planes[2], mpi->planes[2], mpi->w>>mpi->chroma_x_shift, mpi->h>>mpi->chroma_y_shift, dmpi->stride[2], mpi->stride[2]);
     }
 
-#ifdef HAVE_MMX
-    if(gCpuCaps.hasMMX) asm volatile ("emms\n\t");
+#if HAVE_MMX_INLINE
+    if(gCpuCaps.hasMMX) __asm__ volatile ("emms\n\t");
 #endif
-#ifdef HAVE_MMX2
-    if(gCpuCaps.hasMMX2) asm volatile ("sfence\n\t");
+#if HAVE_MMXEXT_INLINE
+    if(gCpuCaps.hasMMX2) __asm__ volatile ("sfence\n\t");
 #endif
 
     return vf_next_put_image(vf,dmpi, pts);
 }
 
-static void uninit(struct vf_instance_s* vf){
+static void uninit(struct vf_instance *vf){
     if(!vf->priv) return;
 
-    if(vf->priv->src) free(vf->priv->src);
+    av_free(vf->priv->src);
     vf->priv->src= NULL;
-    
+
     free(vf->priv);
     vf->priv=NULL;
 }
 
 //===========================================================================//
-static int query_format(struct vf_instance_s* vf, unsigned int fmt){
+static int query_format(struct vf_instance *vf, unsigned int fmt){
     switch(fmt){
     case IMGFMT_YVU9:
     case IMGFMT_IF09:
@@ -434,11 +436,11 @@ static int query_format(struct vf_instance_s* vf, unsigned int fmt){
     return 0;
 }
 
-static int control(struct vf_instance_s* vf, int request, void* data){
+static int control(struct vf_instance *vf, int request, void* data){
     return vf_next_control(vf,request,data);
 }
 
-static int open(vf_instance_t *vf, char* args){
+static int vf_open(vf_instance_t *vf, char *args){
     vf->config=config;
     vf->put_image=put_image;
     vf->get_image=get_image;
@@ -447,43 +449,43 @@ static int open(vf_instance_t *vf, char* args){
     vf->control= control;
     vf->priv=malloc(sizeof(struct vf_priv_s));
     memset(vf->priv, 0, sizeof(struct vf_priv_s));
-    
+
     if (args) sscanf(args, "%d:%d", &vf->priv->qp, &vf->priv->mode);
 
     if(vf->priv->qp < 0)
         vf->priv->qp = 0;
 
     init_thres2();
-        
+
     switch(vf->priv->mode){
-	case 0: requantize= hardthresh_c; break;
-	case 1: requantize= softthresh_c; break;
+        case 0: requantize= hardthresh_c; break;
+        case 1: requantize= softthresh_c; break;
         default:
-	case 2: requantize= mediumthresh_c; break;
+        case 2: requantize= mediumthresh_c; break;
     }
 
-#ifdef HAVE_MMX
+#if HAVE_MMX_INLINE
     if(gCpuCaps.hasMMX){
         dctB= dctB_mmx;
     }
 #endif
 #if 0
     if(gCpuCaps.hasMMX){
-	switch(vf->priv->mode){
-	    case 0: requantize= hardthresh_mmx; break;
-	    case 1: requantize= softthresh_mmx; break;
-	}
+        switch(vf->priv->mode){
+            case 0: requantize= hardthresh_mmx; break;
+            case 1: requantize= softthresh_mmx; break;
+        }
     }
 #endif
-    
+
     return 1;
 }
 
-vf_info_t vf_info_pp7 = {
+const vf_info_t vf_info_pp7 = {
     "postprocess 7",
     "pp7",
     "Michael Niedermayer",
     "",
-    open,
+    vf_open,
     NULL
 };

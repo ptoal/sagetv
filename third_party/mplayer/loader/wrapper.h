@@ -1,5 +1,5 @@
-#ifndef _WRAPPER_H
-#define _WRAPPER_H
+#ifndef MPLAYER_WRAPPER_H
+#define MPLAYER_WRAPPER_H
 
 #include <inttypes.h>
 
@@ -13,8 +13,7 @@ extern wrapper_func_t report_entry, report_ret;
 
 extern void (*wrapper_target)(void);
 
-extern int wrapper(void);
-extern int null_call(void);
+int wrapper(void);
+int null_call(void);
 
-#endif /* _WRAPPER_H */
-
+#endif /* MPLAYER_WRAPPER_H */

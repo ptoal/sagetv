@@ -1,36 +1,27 @@
 /*
-    Driver for VIA CLE266 Unichrome - Version 0.1.0
-
-    Copyright (C) 2004 by Timothy Lee
-
-    Based on Cyberblade/i driver by Alastair M. Robison.
-
-    Thanks to Gilles Frattini for bugfixes
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
-
-    Changes:
-    2004-03-10
-      Initial version
-    2004-10-09
-      Added Doxygen documentation (Benjamin Zores <ben@geexbox.org>)
-    2004-11-08
-      Added h/w revision detection (Timothy Lee <timothy.lee@siriushk.com>)
-
-    To Do:
-*/
+ * VIDIX driver for VIA CLE266/Unichrome chipsets.
+ *
+ * Copyright (C) 2004 Timothy Lee
+ * Thanks to Gilles Frattini for bugfixes
+ * Doxygen documentation by Benjamin Zores <ben@geexbox.org>
+ * h/w revision detection by Timothy Lee <timothy.lee@siriushk.com>
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <errno.h>
 #include <stdio.h>
@@ -39,20 +30,20 @@
 #include <inttypes.h>
 #include <unistd.h>
 
+#include "config.h"
 #include "vidix.h"
-#include "vidixlib.h"
 #include "fourcc.h"
-#include "../libdha/libdha.h"
-#include "../libdha/pci_ids.h"
-#include "../libdha/pci_names.h"
-#include "../config.h"
+#include "dha.h"
+#include "pci_ids.h"
+#include "pci_names.h"
+#include "mp_msg.h"
 
 #include "unichrome_regs.h"
 
 /**
  * @brief Information on PCI device.
  */
-pciinfo_t pci_info;
+static pciinfo_t pci_info;
 
 /**
  * @brief Unichrome driver colorkey settings.
@@ -60,10 +51,10 @@ pciinfo_t pci_info;
 static vidix_grkey_t uc_grkey;
 
 static int frames[VID_PLAY_MAXFRAMES];
-uint8_t *vio;
-uint8_t *uc_mem;
-uint8_t mclk_save[3];
-uint8_t hwrev;
+static uint8_t *vio;
+static uint8_t *uc_mem;
+static uint8_t mclk_save[3];
+static uint8_t hwrev;
 
 #define VIA_OUT(hwregs, reg, val)	*(volatile uint32_t *)((hwregs) + (reg)) = (val)
 #define VIA_IN(hwregs, reg)		*(volatile uint32_t *)((hwregs) + (reg))
@@ -84,7 +75,7 @@ uint8_t hwrev;
 #define FRAMEBUFFER_START	(VIDEOMEMORY_SIZE - FRAMEBUFFER_SIZE)
 
 #ifdef DEBUG_LOGFILE
-FILE *logfile = 0;
+static FILE *logfile = 0;
 #define LOGWRITE(x) {if(logfile) fprintf(logfile,x);}
 #else
 #define LOGWRITE(x)
@@ -239,7 +230,7 @@ uc_ovl_map_hzoom (uint32_t sw, uint32_t dw, uint32_t * zoom, uint32_t * mini,
       *mini |= V1_X_INTERPOLY;
     }
   else /* sw > dw - Zoom out */
-    {		
+    {
       /* Find a suitable divider (1 << d) = {2, 4, 8 or 16} */
       sw1 = sw;
       for (d = 1; d < 5; d++)
@@ -308,7 +299,7 @@ uc_ovl_map_qwfetch (uint32_t format, int sw)
       fetch = (ALIGN_TO (sw << 2, 16) >> 4) + 1;
       break;
     default:
-      printf ("[unichrome] Unexpected pixelformat!");
+      mp_msg(MSGT_VO, MSGL_STATUS, "[unichrome] Unexpected pixelformat!");
       break;
     }
 
@@ -348,7 +339,7 @@ uc_ovl_map_format (uint32_t format)
     case IMGFMT_BGR32:
       return V1_RGB32;
     default:
-      printf ("[unichrome] Unexpected pixelformat!");
+      mp_msg(MSGT_VO, MSGL_STATUS, "[unichrome] Unexpected pixelformat!");
       return V1_YUV422;
     }
 }
@@ -390,7 +381,7 @@ uc_ovl_map_v1_control (uint32_t format, int sw,
     {
       /* Minified video will be skewed without this workaround. */
       if (sw <= 80) /* Fetch count <= 5 */
-	{			
+	{
 	  *fifo = UC_MAP_V1_FIFO_CONTROL (16, 0, 0);
 	}
       else
@@ -474,7 +465,7 @@ unichrome_probe (int verbose, int force)
   err = pci_scan (lst, &num_pci);
   if (err)
     {
-      printf ("[unichrome] Error occurred during pci scan: %s\n", 
+      mp_msg(MSGT_VO, MSGL_STATUS, "[unichrome] Error occurred during pci scan: %s\n",
 	      strerror (err));
       return err;
     }
@@ -492,10 +483,10 @@ unichrome_probe (int verbose, int force)
 		continue;
 	      dname = pci_device_name (VENDOR_VIA2, lst[i].device);
 	      dname = dname ? dname : "Unknown chip";
-	      printf ("[unichrome] Found chip: %s\n", dname);
+	      mp_msg(MSGT_VO, MSGL_STATUS, "[unichrome] Found chip: %s\n", dname);
 	      if ((lst[i].command & PCI_COMMAND_IO) == 0)
 		{
-		  printf ("[unichrome] Device is disabled, ignoring\n");
+		  mp_msg(MSGT_VO, MSGL_STATUS, "[unichrome] Device is disabled, ignoring\n");
 		  continue;
 		}
 	      uc_cap.device_id = lst[i].device;
@@ -507,7 +498,7 @@ unichrome_probe (int verbose, int force)
     }
 
   if (err && verbose)
-    printf ("[unichrome] Can't find chip\n");
+    mp_msg(MSGT_VO, MSGL_STATUS, "[unichrome] Can't find chip\n");
   return err;
 }
 
@@ -640,15 +631,10 @@ unichrome_query_fourcc (vidix_fourcc_t * to)
 {
   if (is_supported_fourcc (to->fourcc))
     {
-      to->depth = VID_DEPTH_1BPP | VID_DEPTH_2BPP |
-	VID_DEPTH_4BPP | VID_DEPTH_8BPP |
-	VID_DEPTH_12BPP | VID_DEPTH_15BPP |
-	VID_DEPTH_16BPP | VID_DEPTH_24BPP | VID_DEPTH_32BPP;
+      to->depth = VID_DEPTH_ALL;
       to->flags = VID_CAP_EXPAND | VID_CAP_SHRINK | VID_CAP_COLORKEY;
       return 0;
     }
-  else
-    to->depth = to->flags = 0;
   return ENOSYS;
 }
 
@@ -663,7 +649,7 @@ static int
 unichrome_get_gkey (vidix_grkey_t * grkey)
 {
   memcpy (grkey, &uc_grkey, sizeof (vidix_grkey_t));
-  return (0);
+  return 0;
 }
 
 /**
@@ -699,7 +685,7 @@ unichrome_set_gkey (const vidix_grkey_t * grkey)
 
   /* Execute the changes */
   VIDEO_OUT (vio, V_COMPOSE_MODE, dwCompose | V1_COMMAND_FIRE);
-  return (0);
+  return 0;
 }
 
 /**
@@ -802,6 +788,7 @@ unichrome_config_playback (vidix_playback_t * info)
     {
     case IMGFMT_YV12:
       swap_uv = 1;
+      /* Fallthrough, same as the following otherwise */
     case IMGFMT_I420:
     case IMGFMT_UYVY:
     case IMGFMT_YVYU:
@@ -824,7 +811,7 @@ unichrome_config_playback (vidix_playback_t * info)
   if ((src_w > 4096) || (src_h > 4096) ||
       (src_w < 32) || (src_h < 1) || (pitch > 0x1fff))
     {
-      printf ("[unichrome] Layer size out of bounds\n");
+      mp_msg(MSGT_VO, MSGL_STATUS, "[unichrome] Layer size out of bounds\n");
     }
 
   /* Calculate offsets */

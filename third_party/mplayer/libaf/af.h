@@ -1,18 +1,37 @@
-#ifndef __af_h__
-#define __af_h__
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-#include "config.h"
+#ifndef MPLAYER_AF_H
+#define MPLAYER_AF_H
+
 #include <stdio.h>
 
-#include "af_mp.h"
-#include "control.h"
+#include "config.h"
+
 #include "af_format.h"
+#include "control.h"
+#include "cpudetect.h"
 
 struct af_instance_s;
 
 // Number of channels
 #ifndef AF_NCH
-#define AF_NCH 6
+#define AF_NCH 8
 #endif
 
 // Audio data chunk
@@ -26,24 +45,14 @@ typedef struct af_data_s
   int bps; 	// bytes per sample
 } af_data_t;
 
-// Fraction, used to calculate buffer lengths
-typedef struct frac_s
-{
-  int n; // Numerator
-  int d; // Denominator
-} frac_t;
-
-int af_gcd(register int a, register int b);
-void af_frac_cancel(frac_t *f);
-void af_frac_mul(frac_t *out, const frac_t *in);
 
 // Flags used for defining the behavior of an audio filter
 #define AF_FLAGS_REENTRANT 	0x00000000
 #define AF_FLAGS_NOT_REENTRANT 	0x00000001
 
 /* Audio filter information not specific for current instance, but for
-   a specific filter */ 
-typedef struct af_info_s 
+   a specific filter */
+typedef struct af_info_s
 {
   const char *info;
   const char *name;
@@ -56,16 +65,17 @@ typedef struct af_info_s
 // Linked list of audio filters
 typedef struct af_instance_s
 {
-  af_info_t* info;
+  const af_info_t* info;
   int (*control)(struct af_instance_s* af, int cmd, void* arg);
   void (*uninit)(struct af_instance_s* af);
   af_data_t* (*play)(struct af_instance_s* af, af_data_t* data);
   void* setup;	  // setup data for this specific instance and filter
   af_data_t* data; // configuration for outgoing data stream
   struct af_instance_s* next;
-  struct af_instance_s* prev;  
-  double delay; // Delay caused by the filter [ms]
-  frac_t mul; /* length multiplier: how much does this instance change
+  struct af_instance_s* prev;
+  double delay; /* Delay caused by the filter, in units of bytes read without
+		 * corresponding output */
+  double mul; /* length multiplier: how much does this instance change
 		 the length of the buffer. */
 }af_instance_t;
 
@@ -82,13 +92,9 @@ extern int* af_cpu_speed;
 #define AF_INIT_FLOAT		0x00000004
 #define AF_INIT_FORMAT_MASK	0x00000004
 
-// Default init type 
+// Default init type
 #ifndef AF_INIT_TYPE
-#if defined(HAVE_SSE) || defined(HAVE_3DNOW)
-#define AF_INIT_TYPE (af_cpu_speed?*af_cpu_speed:AF_INIT_FAST)
-#else
 #define AF_INIT_TYPE (af_cpu_speed?*af_cpu_speed:AF_INIT_SLOW)
-#endif
 #endif
 
 // Configuration switches
@@ -99,7 +105,7 @@ typedef struct af_cfg_s{
 }af_cfg_t;
 
 // Current audio stream
-typedef struct af_stream_s
+typedef struct af_stream
 {
   // The first and last filter in the list
   af_instance_t* first;
@@ -157,6 +163,13 @@ int af_init(af_stream_t* s);
 void af_uninit(af_stream_t* s);
 
 /**
+ * \brief  Reinit the filter list from the given filter on downwards
+ * \param  Filter instance to begin the reinit from
+ * \return AF_OK on success or AF_ERROR on failure
+ */
+int af_reinit(af_stream_t* s, af_instance_t* af);
+
+/**
  * \brief This function adds the filter "name" to the stream s.
  * \param name name of filter to add
  * \return pointer to the new filter, NULL if insert failed
@@ -177,7 +190,7 @@ void af_remove(af_stream_t* s, af_instance_t* af);
  * \brief find filter in chain by name
  * \param name name of the filter to find
  * \return first filter with right name or NULL if not found
- * 
+ *
  * This function is used for finding already initialized filters
  */
 af_instance_t* af_get(af_stream_t* s, char* name);
@@ -200,44 +213,14 @@ af_data_t* af_play(af_stream_t* s, af_data_t* data);
 af_instance_t *af_control_any_rev (af_stream_t* s, int cmd, void* arg);
 
 /**
- * \brief Calculate how long the output from the filters will be for a given
- *        input length.
- * \param len input lenght for which to calculate output length
- * \return calculated output length, will always be >= the resulting
- *         length when actually calling af_play.
+ * \brief calculate average ratio of filter output lenth to input length
+ * \return the ratio
  */
-int af_outputlen(af_stream_t* s, int len);
-
-/**
- * \brief Calculate how long the input to the filters should be to produce a
- *        certain output length
- * \param len wanted output length
- * \return input length required to produce the output length "len". Possibly
- *         smaller to avoid overflow of output buffer
- */
-int af_inputlen(af_stream_t* s, int len);
-
-/**
- * \brief calculate required input length for desired output size
- * \param len desired minimum output length
- * \param max_outsize maximum output length
- * \param max_insize maximum input length
- * \return input length or -1 on error
- *
-   Calculate how long the input IN to the filters should be to produce
-   a certain output length OUT but with the following three constraints:
-   1. IN <= max_insize, where max_insize is the maximum possible input
-      block length
-   2. OUT <= max_outsize, where max_outsize is the maximum possible
-      output block length
-   3. If possible OUT >= len. 
- */ 
-int af_calc_insize_constrained(af_stream_t* s, int len,
-			       int max_outsize,int max_insize);
+double af_calc_filter_multiplier(af_stream_t* s);
 
 /**
  * \brief Calculate the total delay caused by the filters
- * \return delay in seconds
+ * \return delay in bytes of "missing" output
  */
 double af_calc_delay(af_stream_t* s);
 
@@ -257,7 +240,7 @@ int af_resize_local_buffer(af_instance_t* af, af_data_t* data);
 /* Helper function used to calculate the exact buffer length needed
    when buffers are resized. The returned length is >= than what is
    needed */
-int af_lencalc(frac_t mul, af_data_t* data);
+int af_lencalc(double mul, af_data_t* data);
 
 /**
  * \brief convert dB to gain value
@@ -301,7 +284,7 @@ int af_from_ms(int n, float* in, int* out, int rate, float mi, float ma);
  * \param rate sample rate
  * \return AF_ERROR on error, AF_OK otherwise
  */
-int af_to_ms(int n, int* in, float* out, int rate); 
+int af_to_ms(int n, int* in, float* out, int rate);
 
 /**
  * \brief test if output format matches
@@ -330,7 +313,7 @@ void af_help(void);
  * \brief fill the missing parameters in the af_data_t structure
  * \param data structure to fill
  * \ingroup af_filter
- * 
+ *
  * Currently only sets bps based on format
  */
 void af_fix_parameters(af_data_t *data);
@@ -353,55 +336,4 @@ int *af_set_channel_map(int channels, char *routes);
 #define RESIZE_LOCAL_BUFFER(a,d)\
 ((a->data->len < af_lencalc(a->mul,d))?af_resize_local_buffer(a,d):AF_OK)
 
-/* Some other useful macro definitions*/
-#ifndef min
-#define min(a,b)(((a)>(b))?(b):(a))
-#endif
-
-#ifndef max
-#define max(a,b)(((a)>(b))?(a):(b))
-#endif
-
-#ifndef clamp
-#define clamp(a,min,max) (((a)>(max))?(max):(((a)<(min))?(min):(a)))
-#endif
-
-#ifndef sign
-#define sign(a) (((a)>0)?(1):(-1)) 
-#endif
-
-#ifndef lrnd
-#define lrnd(a,b) ((b)((a)>=0.0?(a)+0.5:(a)-0.5))
-#endif
-
-/* Error messages */
-
-typedef struct af_msg_cfg_s
-{
-  int level;   	/* Message level for debug and error messages max = 2
-		   min = -2 default = 0 */
-  FILE* err;	// Stream to print error messages to
-  FILE* msg;	// Stream to print information messages to
-}af_msg_cfg_t;
-
-extern af_msg_cfg_t af_msg_cfg; // Message 
-
-//! \addtogroup af_filter
-//! \{
-#define AF_MSG_FATAL	-3 ///< Fatal error exit immediately
-#define AF_MSG_ERROR    -2 ///< Error return gracefully
-#define AF_MSG_WARN     -1 ///< Print warning but do not exit (can be suppressed)
-#define AF_MSG_INFO	 0 ///< Important information
-#define AF_MSG_VERBOSE	 1 ///< Print this if verbose is enabled 
-#define AF_MSG_DEBUG0	 2 ///< Print if very verbose
-#define AF_MSG_DEBUG1	 3 ///< Print if very very verbose 
-
-//! Macro for printing error messages
-#ifndef af_msg
-#define af_msg(lev, args... ) \
-(((lev)<AF_MSG_WARN)?(fprintf(af_msg_cfg.err?af_msg_cfg.err:stderr, ## args )): \
-(((lev)<=af_msg_cfg.level)?(fprintf(af_msg_cfg.msg?af_msg_cfg.msg:stdout, ## args )):0))
-#endif
-//! \}
-
-#endif /* __af_h__ */
+#endif /* MPLAYER_AF_H */

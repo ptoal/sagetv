@@ -1,8 +1,26 @@
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "fastmemcpy.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
@@ -13,24 +31,21 @@
 #include <errno.h>
 
 #include "config.h"
+#include "aspect.h"
 #include "video_out.h"
+#define NO_DRAW_SLICE
 #include "video_out_internal.h"
 #include "mp_msg.h"
 #include "m_option.h"
-#include "sub.h"
+#include "sub/sub.h"
+#include "path.h"
+#include "libmpcodecs/vd.h"
 #include "libmpdemux/mpeg_packetizer.h"
-
-#ifdef X11_FULLSCREEN
 #include "x11_common.h"
-#endif
+#include "libvo/vo_dxr2.h"
 
 #include <dxr2ioctl.h>
 
-
-extern char *get_path(const char *filename);
-
-extern float monitor_aspect;
-extern float movie_aspect;
 
 int dxr2_fd = -1;
 
@@ -38,13 +53,13 @@ static int movie_w,movie_h;
 static int playing = 0;
 
 // vo device used to blank the screen for the overlay init
-static  vo_functions_t* sub_vo = NULL;
+static const vo_functions_t* sub_vo = NULL;
 
 static uint8_t* sub_img = NULL;
 static int sub_x,sub_y,sub_w,sub_h;
 static int sub_x_off,sub_y_off;
 static int sub_config_count;
-static int aspect;
+static int dxr2_aspect;
 static int sub_vo_win = 0;
 
 static int use_ol = 1;
@@ -75,7 +90,7 @@ static int ck_b = 0xFF;
 static int cr_left = 0, cr_right = 0;
 static int cr_top = 55, cr_bot = 300;
 
-m_option_t dxr2_opts[] = {
+const m_option_t dxr2_opts[] = {
   { "overlay", &use_ol, CONF_TYPE_FLAG, 0, 0, 1, NULL},
   { "nooverlay", &use_ol, CONF_TYPE_FLAG, 0, 1, 0, NULL},
   { "overlay-ratio", &ol_ratio, CONF_TYPE_INT, CONF_RANGE, 1, 2500, NULL },
@@ -133,14 +148,14 @@ m_option_t dxr2_opts[] = {
   { NULL,NULL, 0, 0, 0, 0, NULL}
 };
 
-static vo_info_t info = {
+static const vo_info_t info = {
   "DXR2 video out",
   "dxr2",
   "Alban Bedel <albeu@free.fr> and Tobias Diedrich <ranma@gmx.at>",
   ""
 };
 
-LIBVO_EXTERN (dxr2)
+const LIBVO_EXTERN (dxr2)
 
 static char *ucodesearchpath[] = {
   "/usr/local/lib/dxr2/dvd12.ux",
@@ -154,7 +169,7 @@ static char *ucodesearchpath[] = {
 static unsigned char dxr2buf[BUF_SIZE];
 static unsigned int  dxr2bufpos = 0;
 
-int write_dxr2(unsigned char *data, int len)
+int write_dxr2(const unsigned char *data, int len)
 {
   int w = 0;
 
@@ -163,15 +178,15 @@ int write_dxr2(unsigned char *data, int len)
     mp_msg (MSGT_VO, MSGL_ERR, "DXR2 fd is not valid\n");
     return 0;
   }
-  
+
   while (len>0) if ((dxr2bufpos+len) <= BUF_SIZE) {
-    memcpy(dxr2buf+dxr2bufpos, data, len);
+    fast_memcpy(dxr2buf+dxr2bufpos, data, len);
     dxr2bufpos+=len;
     len=0;
   } else {
     int copylen=BUF_SIZE-dxr2bufpos;
     if(copylen > 0) {
-      memcpy(dxr2buf+dxr2bufpos, data, copylen);
+      fast_memcpy(dxr2buf+dxr2bufpos, data, copylen);
       dxr2bufpos += copylen;
       data+=copylen;
       len-=copylen;
@@ -190,7 +205,7 @@ int write_dxr2(unsigned char *data, int len)
   return w;
 }
 
-static void flush_dxr2()
+static void flush_dxr2(void)
 {
   int w;
   while (dxr2bufpos) {
@@ -217,7 +232,7 @@ static void dxr2_send_eof(void)
   write_dxr2(mpg_eof, sizeof(mpg_eof));
 }
 
-void dxr2_send_sub_packet(unsigned char* data,int len,int id,unsigned int timestamp) {
+static void dxr2_send_sub_packet(unsigned char* data,int len,int id,unsigned int timestamp) {
   int ptslen=5;
 
   if(dxr2_fd < 0) {
@@ -238,7 +253,7 @@ void dxr2_send_sub_packet(unsigned char* data,int len,int id,unsigned int timest
   while(len>=4){
     int payload_size= PACK_MAX_SIZE-(7+ptslen+3);
     if(payload_size>len) payload_size= len;
-    
+
     pack[4]=(3+ptslen+1+payload_size)>>8;
     pack[5]=(3+ptslen+1+payload_size)&255;
 
@@ -259,11 +274,11 @@ void dxr2_send_sub_packet(unsigned char* data,int len,int id,unsigned int timest
       pack[8]=0x00;
     }
     pack[ptslen+9] = id;
-    
+
     write_dxr2(pack,7+ptslen+3);
     write_dxr2(data,payload_size);
     len -= payload_size;
-    data += payload_size;   
+    data += payload_size;
     ptslen = 0;
   }
 }
@@ -280,7 +295,7 @@ static int dxr2_set_vga_params(dxr2_vgaParams_t* vga,int detect) {
   crop.arg3 = cr_top;
   crop.arg4 = cr_bot;
   ioctl(dxr2_fd, DXR2_IOC_SET_OVERLAY_CROPPING, &crop);
-  
+
   oc.arg1 = 0x40;
   oc.arg2 = 0xff;
   oc.arg3 = 0x40;
@@ -309,7 +324,7 @@ static int dxr2_set_vga_params(dxr2_vgaParams_t* vga,int detect) {
     uint8_t* src[] = { img, NULL, NULL };
     int stride[] = { vo_screenwidth * 3 , 0, 0 };
     int cc = vo_config_count;
-   
+
     memset(img,255,vo_screenwidth*vo_screenheight*3);
     vo_config_count = sub_config_count;
     if(sub_vo->config(vo_screenwidth,vo_screenheight,vo_screenwidth,vo_screenheight,
@@ -326,10 +341,10 @@ static int dxr2_set_vga_params(dxr2_vgaParams_t* vga,int detect) {
     free(img);
     sub_config_count++;
     vo_config_count = cc;
-    
+
     om.arg = DXR2_OVERLAY_WINDOW_COLOUR_KEY;
     ioctl(dxr2_fd, DXR2_IOC_SET_OVERLAY_MODE,&om);
-    
+
     vga->xScreen = vo_screenwidth;
     vga->yScreen = vo_screenheight;
     vga->hOffWinKey = 100;
@@ -428,7 +443,7 @@ static int dxr2_load_vga_params(dxr2_vgaParams_t* vga,char* name) {
   if(ret > 11 && !olx_cor) olx_cor = xc;
   if(ret > 12 && !oly_cor) oly_cor = yc;
   if(ret > 13 && !olw_cor) olw_cor = wc;
-  if(ret > 14 && !olh_cor) olh_cor = hc;    
+  if(ret > 14 && !olh_cor) olh_cor = hc;
   return ret >= 11 ? 1 : 0;
 }
 
@@ -448,7 +463,6 @@ static void dxr2_set_overlay_window(void) {
   uint8_t* src[] = { sub_img, NULL, NULL };
   int stride[] = { movie_w * 3 , 0, 0 };
   dxr2_twoArg_t win;
-  int redisp = 0;
   int cc = vo_config_count;
   vo_config_count = sub_config_count;
   sub_vo->draw_slice(src,stride,movie_w,movie_h,0,0);
@@ -469,17 +483,17 @@ static void dxr2_set_overlay_window(void) {
       vo_dheight = movie_h;
       vo_dx = (vo_screenwidth - vo_dwidth) / 2;
       vo_dy = (vo_screenheight - vo_dheight) / 2;
-    }      
+    }
   }
 
   if(sub_w != vo_dwidth || sub_h != vo_dheight) {
     int new_aspect = ((1<<16)*vo_dwidth + vo_dheight/2)/vo_dheight;
     sub_w = vo_dwidth;
     sub_h = vo_dheight;
-    if(new_aspect > aspect)
-      sub_w = (sub_h*aspect + (1<<15))>>16;
+    if(new_aspect > dxr2_aspect)
+      sub_w = (sub_h*dxr2_aspect + (1<<15))>>16;
     else
-      sub_h = ((sub_w<<16) + (aspect>>1)) /aspect;
+      sub_h = ((sub_w<<16) + (dxr2_aspect>>1)) /dxr2_aspect;
     sub_w += olw_cor;
     sub_h += olh_cor;
     sub_x_off = (vo_dwidth-sub_w) / 2;
@@ -490,7 +504,7 @@ static void dxr2_set_overlay_window(void) {
     mp_msg(MSGT_VO,MSGL_V,"VO: [dxr2] set win size w=%d h=%d and offset x=%d y=%d \n",win.arg1,win.arg2,sub_x_off,sub_y_off);
     ioctl(dxr2_fd, DXR2_IOC_SET_OVERLAY_DIMENSION, &win);
   }
-  
+
   if(vo_dx != sub_x || vo_dy != sub_y) {
     sub_x = vo_dx + olx_cor + sub_x_off;
     sub_y = vo_dy + oly_cor + sub_y_off;
@@ -522,7 +536,7 @@ static int config(uint32_t s_width, uint32_t s_height, uint32_t width, uint32_t 
   // Video stream setup
   arg3.arg1 = DXR2_STREAM_VIDEO;
   arg3.arg2 = 0;
-  ioctl(dxr2_fd, DXR2_IOC_SELECT_STREAM, &arg3);	
+  ioctl(dxr2_fd, DXR2_IOC_SELECT_STREAM, &arg3);
   if (vo_fps > 28)
     arg3.arg1 = DXR2_SRC_VIDEO_FREQ_30;
   else arg3.arg1 = DXR2_SRC_VIDEO_FREQ_25;
@@ -564,7 +578,7 @@ static int config(uint32_t s_width, uint32_t s_height, uint32_t width, uint32_t 
   ioctl(dxr2_fd, DXR2_IOC_SET_TV_INTERLACED_MODE, &arg);
   arg = pixel_mode;
   ioctl(dxr2_fd, DXR2_IOC_SET_TV_PIXEL_MODE, &arg);
-  
+
   if (norm) {
     if (strcmp(norm, "ntsc")==0)
       arg = DXR2_OUTPUTFORMAT_NTSC;
@@ -656,8 +670,8 @@ static int config(uint32_t s_width, uint32_t s_height, uint32_t width, uint32_t 
     if(!sub_vo_win && !ol_osd) {
       sub_vo->uninit();
       sub_vo = NULL;
-    } 
- 
+    }
+
     while(sub_vo) {
       dxr2_sixArg_t oc;
       int i,sub_flags = VOFLAG_SWSCALE | (flags & VOFLAG_FULLSCREEN);
@@ -678,7 +692,7 @@ static int config(uint32_t s_width, uint32_t s_height, uint32_t width, uint32_t 
       oc.arg5 = ck_bmin;
       oc.arg6 = ck_bmax;
       ioctl(dxr2_fd, DXR2_IOC_SET_OVERLAY_COLOUR, &oc);
-      
+
       om.arg = DXR2_OVERLAY_WINDOW_COLOUR_KEY;
       ioctl(dxr2_fd, DXR2_IOC_SET_OVERLAY_MODE,&om);
       sub_img = malloc(width*height*3);
@@ -687,7 +701,7 @@ static int config(uint32_t s_width, uint32_t s_height, uint32_t width, uint32_t 
 	sub_img[i+1] = ck_g;
 	sub_img[i+2] = ck_r;
       }
-      aspect = ((1<<16)*width + height/2)/height;
+      dxr2_aspect = ((1<<16)*width + height/2)/height;
       sub_w = sub_h = 0;
       dxr2_set_overlay_window();
       break;
@@ -707,8 +721,6 @@ static int config(uint32_t s_width, uint32_t s_height, uint32_t width, uint32_t 
     break;
   }
 
-  if (vo_ontop) vo_x11_setlayer(mDisplay, vo_window, vo_ontop);
-  
   // start playing
   if(ioctl(dxr2_fd, DXR2_IOC_PLAY, NULL) == 0) {
     playing = 1;
@@ -750,11 +762,6 @@ static void flip_page (void)
     sub_vo->flip_page();
 }
 
-static int draw_slice( uint8_t *srcimg[], int stride[], int w, int h, int x0, int y0 )
-{
-  return 0;
-}
-
 
 static int query_format(uint32_t format)
 {
@@ -777,10 +784,8 @@ static void uninit(void)
     close(dxr2_fd);
     dxr2_fd = -1;
   }
-  if(sub_img) {
-    free(sub_img);
-    sub_img = NULL;
-  }
+  free(sub_img);
+  sub_img = NULL;
   if(sub_vo) {
     int cc = vo_config_count;
     vo_config_count = sub_config_count;
@@ -795,7 +800,6 @@ static void check_events(void)
 {
   // I'd like to have this done in an x11 independent way
   // It's because of this that we are limited to vo_x11 for windowed overlay :-(
-#ifdef X11_FULLSCREEN
   if(sub_vo && sub_vo_win) {
     int e=vo_x11_check_events(mDisplay);
     if ( !(e&VO_EVENT_RESIZE) && !(e&VO_EVENT_EXPOSE) ) return;
@@ -803,7 +807,6 @@ static void check_events(void)
     XClearWindow(mDisplay, vo_window);
     dxr2_set_overlay_window();
   }
-#endif
 }
 
 static int preinit(const char *arg) {
@@ -830,7 +833,7 @@ static int preinit(const char *arg) {
       use_ol = 0;
     }
   }
-  
+
   if(!sub_vo) {
     if(use_ol)
       mp_msg(MSGT_VO,MSGL_WARN,"VO: [dxr2] Sub driver '%s' not found => no overlay\n",arg);
@@ -842,7 +845,7 @@ static int preinit(const char *arg) {
       use_ol = 0;
     } else {
       uint32_t fmt = IMGFMT_BGR24;
-      mp_msg(MSGT_VO,MSGL_V,"VO: [dxr2] Sub vo %s inited\n",arg);
+      mp_msg(MSGT_VO,MSGL_V,"VO: [dxr2] Sub vo %s initialized\n",arg);
       if(sub_vo->control(VOCTRL_QUERY_FORMAT,&fmt) <= 0) {
 	mp_msg(MSGT_VO,MSGL_WARN,"VO: [dxr2] Sub vo %s doesn't support BGR24 => no overlay\n",arg);
 	sub_vo->uninit();
@@ -885,6 +888,7 @@ static int preinit(const char *arg) {
   if (read(uCodeFD, uCode+4, uCodeSize) != uCodeSize) {
 
     mp_msg(MSGT_VO,MSGL_ERR,"VO: [dxr2] Could not read uCode uCode: %s\n", strerror(errno));
+    free(uCode);
     return VO_ERROR;
   }
   close(uCodeFD);
@@ -904,10 +908,12 @@ static int preinit(const char *arg) {
     crop.arg4=0;
     ioctl(dxr2_fd, DXR2_IOC_SET_OVERLAY_CROPPING, &crop);
   }
+
+  free(uCode);
   return 0;
 }
 
-static int control(uint32_t request, void *data, ...)
+static int control(uint32_t request, void *data)
 {
   switch (request) {
   case VOCTRL_QUERY_FORMAT:
@@ -925,6 +931,9 @@ static int control(uint32_t request, void *data, ...)
   case VOCTRL_ONTOP:
     vo_x11_ontop();
     return VO_TRUE;
+  case VOCTRL_GUISUPPORT:
+    if (sub_vo) return sub_vo->control(VOCTRL_GUISUPPORT, NULL);
+    else return VO_FALSE;
   case VOCTRL_FULLSCREEN:
     if(!use_ol)
       return VO_NOTIMPL;
@@ -944,13 +953,13 @@ static int control(uint32_t request, void *data, ...)
       ioctl(dxr2_fd, DXR2_IOC_SET_OVERLAY_POSITION,&win);
       return VO_TRUE;
     }
-  case VOCTRL_SET_SPU_PALETTE: { 
+  case VOCTRL_SET_SPU_PALETTE: {
     if(ioctl(dxr2_fd,DXR2_IOC_SET_SUBPICTURE_PALETTE,data) < 0) {
       mp_msg(MSGT_VO,MSGL_WARN,"VO: [dxr2] SPU palette loading failed\n");
       return VO_ERROR;
     }
-    return VO_TRUE; 
-  } 
+    return VO_TRUE;
+  }
   }
   return VO_NOTIMPL;
 }

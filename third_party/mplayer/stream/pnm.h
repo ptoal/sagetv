@@ -17,17 +17,15 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  *
- * $Id: pnm.h,v 1.1 2007-04-10 20:11:30 Narflex Exp $
+ * $Id: pnm.h 29305 2009-05-13 02:58:57Z diego $
  *
  * pnm util functions header by joschka
  */
- 
-#ifndef HAVE_PNM_H
-#define HAVE_PNM_H
 
-#ifndef __CYGWIN__
+#ifndef MPLAYER_PNM_H
+#define MPLAYER_PNM_H
+
 #include <inttypes.h>
-#endif
 /*#include "xine_internal.h" */
 
 typedef struct pnm_s pnm_t;
@@ -35,9 +33,5 @@ typedef struct pnm_s pnm_t;
 //pnm_t*   pnm_connect (int fd,char *url);
 
 //int      pnm_read (pnm_t *this, char *data, int len);
-//void     pnm_close (pnm_t *this);
 
-//int      pnm_peek_header (pnm_t *this, char *data);
-
-#endif
-
+#endif /* MPLAYER_PNM_H */

@@ -6,17 +6,12 @@
 *********************************************************/
 #include "config.h"
 
-#ifndef NOAVIFILE_HEADERS
-#include "audiodecoder.h"
-#include "except.h"
-#else
 #include "libwin32.h"
-#endif
 
 #include "DS_Filter.h"
 
-struct _DS_AudioDecoder
-{ 
+struct DS_AudioDecoder
+{
     WAVEFORMATEX in_fmt;
     AM_MEDIA_TYPE m_sOurType, m_sDestType;
     DS_Filter* m_pDS_Filter;
@@ -26,7 +21,7 @@ struct _DS_AudioDecoder
 
 #include "DS_AudioDecoder.h"
 #ifdef WIN32_LOADER
-#include "../ldt_keeper.h"
+#include "loader/ldt_keeper.h"
 #endif
 
 #include <string.h>
@@ -49,22 +44,22 @@ DS_AudioDecoder * DS_AudioDecoder_Open(char* dllname, GUID* guid, WAVEFORMATEX* 
     Setup_LDT_Keeper();
     Setup_FS_Segment();
 #endif
-        
+
     this = malloc(sizeof(DS_AudioDecoder));
-    
+
     sz = 18 + wf->cbSize;
     this->m_sVhdr = malloc(sz);
     memcpy(this->m_sVhdr, wf, sz);
     this->m_sVhdr2 = malloc(18);
     memcpy(this->m_sVhdr2, this->m_sVhdr, 18);
-    
+
     pWF = (WAVEFORMATEX*)this->m_sVhdr2;
     pWF->wFormatTag = 1;
     pWF->wBitsPerSample = 16;
     pWF->nBlockAlign = pWF->nChannels * (pWF->wBitsPerSample + 7) / 8;
     pWF->cbSize = 0;
     pWF->nAvgBytesPerSec = pWF->nBlockAlign * pWF->nSamplesPerSec;
-    
+
     memcpy(&this->in_fmt,wf,sizeof(WAVEFORMATEX));
 
     memset(&this->m_sOurType, 0, sizeof(this->m_sOurType));
@@ -100,13 +95,12 @@ DS_AudioDecoder * DS_AudioDecoder_Open(char* dllname, GUID* guid, WAVEFORMATEX* 
 
     /*try*/
     {
-        ALLOCATOR_PROPERTIES props, props1;
         this->m_pDS_Filter = DS_FilterCreate(dllname, guid, &this->m_sOurType, &this->m_sDestType,&sampleProcData);
 	if( !this->m_pDS_Filter ) {
            free(this);
            return NULL;
         }
-        
+
         //Commit should be done before binary codec start
         this->m_pDS_Filter->m_pAll->vt->Commit(this->m_pDS_Filter->m_pAll);
 
@@ -140,7 +134,7 @@ int DS_AudioDecoder_Convert(DS_AudioDecoder *this, const void* in_data, unsigned
 {
     unsigned int written = 0;
     unsigned int read = 0;
-        
+
     if (!in_data || !out_data)
 	return -1;
 
@@ -190,8 +184,8 @@ int DS_AudioDecoder_GetSrcSize(DS_AudioDecoder *this, int dest_size)
 {
     double efficiency =(double) this->in_fmt.nAvgBytesPerSec
 	/ (this->in_fmt.nSamplesPerSec*this->in_fmt.nBlockAlign);
-    int frames = (int)(dest_size*efficiency);;
-    
+    int frames = (int)(dest_size*efficiency);
+
     if (frames < 1)
 	frames = 1;
     return frames * this->in_fmt.nBlockAlign;

@@ -1,25 +1,26 @@
-#include "config.h"
-/* 
-   This is an libaf filter to do simple decoding of matrixed surround
-   sound.  This will provide a (basic) surround-sound effect from
-   audio encoded for Dolby Surround, Pro Logic etc.
-
- * This program is free software; you can redistribute it and/or modify
+/*
+ * Filter to do simple decoding of matrixed surround sound.
+ * This will provide a (basic) surround-sound effect from
+ * audio encoded for Dolby Surround, Pro Logic etc.
+ *
+ * original author: Steve Davies <steve@daviesfam.org>
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
  * (at your option) any later version.
  *
- * This program is distributed in the hope that it will be useful,
+ * MPlayer is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc.,
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
-
-   Original author: Steve Davies <steve@daviesfam.org>
-*/
+ */
 
 /* The principle:  Make rear channels by extracting anti-phase data
    from the front channels, delay by 20ms and feed to rear in anti-phase
@@ -38,6 +39,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "mp_msg.h"
 #include "af.h"
 #include "dsp.h"
 
@@ -97,34 +99,32 @@ static int control(struct af_instance_s* af, int cmd, void* arg)
     af->data->bps    = 4;
 
     if (af->data->nch != 4){
-      af_msg(AF_MSG_ERROR,"[surround] Only stereo input is supported.\n");
+      mp_msg(MSGT_AFILTER, MSGL_ERR, "[surround] Only stereo input is supported.\n");
       return AF_DETACH;
     }
     // Surround filer coefficients
     fc = 2.0 * 7000.0/(float)af->data->rate;
     if (-1 == af_filter_design_fir(L, s->w, &fc, LP|HAMMING, 0)){
-      af_msg(AF_MSG_ERROR,"[surround] Unable to design low-pass filter.\n");
+      mp_msg(MSGT_AFILTER, MSGL_ERR, "[surround] Unable to design low-pass filter.\n");
       return AF_ERROR;
     }
 
     // Free previous delay queues
-    if(s->dl)
-      free(s->dl);
-    if(s->dr)
-      free(s->dr);
+    free(s->dl);
+    free(s->dr);
     // Allocate new delay queues
     s->dl = calloc(LD,af->data->bps);
     s->dr = calloc(LD,af->data->bps);
     if((NULL == s->dl) || (NULL == s->dr))
-      af_msg(AF_MSG_FATAL,"[delay] Out of memory\n");
-    
+      mp_msg(MSGT_AFILTER, MSGL_FATAL, "[delay] Out of memory\n");
+
     // Initialize delay queue index
     if(AF_OK != af_from_ms(1, &s->d, &s->wi, af->data->rate, 0.0, 1000.0))
       return AF_ERROR;
 //    printf("%i\n",s->wi);
     s->ri = 0;
 
-    if((af->data->format != ((af_data_t*)arg)->format) || 
+    if((af->data->format != ((af_data_t*)arg)->format) ||
        (af->data->bps    != ((af_data_t*)arg)->bps)){
       ((af_data_t*)arg)->format = af->data->format;
       ((af_data_t*)arg)->bps = af->data->bps;
@@ -136,7 +136,7 @@ static int control(struct af_instance_s* af, int cmd, void* arg)
     float d = 0;
     sscanf((char*)arg,"%f",&d);
     if ((d < 0) || (d > 1000)){
-      af_msg(AF_MSG_ERROR,"[surround] Invalid delay time, valid time values"
+      mp_msg(MSGT_AFILTER, MSGL_ERR, "[surround] Invalid delay time, valid time values"
 	     " are 0ms to 1000ms current value is %0.3f ms\n",d);
       return AF_ERROR;
     }
@@ -170,7 +170,7 @@ static float steering_matrix[][12] = {
 // Filter data through filter
 static af_data_t* play(struct af_instance_s* af, af_data_t* data){
   af_surround_t* s   = (af_surround_t*)af->setup;
-  float*	 m   = steering_matrix[0]; 
+  float*	 m   = steering_matrix[0];
   float*     	 in  = data->audio; 	// Input audio data
   float*     	 out = NULL;		// Output audio data
   float*	 end = in + data->len / sizeof(float); // Loop end
@@ -235,16 +235,16 @@ static af_data_t* play(struct af_instance_s* af, af_data_t* data){
 #endif
 
     // Next sample...
-    in = &in[data->nch];  
+    in = &in[data->nch];
     out = &out[af->data->nch];
   }
-  
+
   // Save indexes
   s->i  = i; s->ri = ri; s->wi = wi;
 
   // Set output data
   data->audio = af->data->audio;
-  data->len   = (data->len*af->mul.n)/af->mul.d;
+  data->len   *= 2;
   data->nch   = af->data->nch;
 
   return data;
@@ -254,8 +254,7 @@ static int af_open(af_instance_t* af){
   af->control=control;
   af->uninit=uninit;
   af->play=play;
-  af->mul.n=2;
-  af->mul.d=1;
+  af->mul=2;
   af->data=calloc(1,sizeof(af_data_t));
   af->setup=calloc(1,sizeof(af_surround_t));
   if(af->data == NULL || af->setup == NULL)

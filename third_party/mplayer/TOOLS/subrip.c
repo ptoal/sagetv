@@ -1,4 +1,3 @@
-/* -*- compile-command: "gcc -g -Wall -I.. -o subrip subrip.c ../vobsub.o ../spudec.o ../mp_msg.o ../unrarlib.o ../libswscale/swscale.o ../libswscale/rgb2rgb.o ../libswscale/yuv2rgb.o ../libmpcodecs/img_format.o -lm" -*- */
 /*
  * Use with CVS JOCR/GOCR.
  *
@@ -6,6 +5,19 @@
  *
  * HINT: you can view the subtitle that is being decoded with "display subtitle-*.pgm"
  *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 /* Make sure this accesses the CVS version of JOCR/GOCR */
@@ -14,12 +26,16 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include "libvo/video_out.h"
-#include "vobsub.h"
-#include "spudec.h"
+#include "sub/vobsub.h"
+#include "sub/spudec.h"
+
+/* linking hacks */
+char *mplayer_version;
 
 /* XXX Kludge ahead, this MUST be the same as the definitions found in ../spudec.c */
 typedef struct packet_t packet_t;
@@ -68,13 +84,10 @@ typedef struct {
   unsigned char *scaled_aimage;
   int auto_palette; /* 1 if we lack a palette and must use an heuristic. */
   int font_start_level;  /* Darkest value used for the computed font */
-  vo_functions_t *hw_spu;
+  const vo_functions_t *hw_spu;
   int spu_changed;
 } spudec_handle_t;
 
-int use_gui;
-int gtkMessageBox;
-int identify=0;
 int vobsub_id=0;
 int sub_pos=0;
 
@@ -185,12 +198,6 @@ draw_alpha(int x0, int y0, int w, int h, unsigned char *src, unsigned char *srca
     unlink(tmpfname);
 }
 
-void
-fast_memcpy(void *a, void *b, int s)
-{ //FIXME
-    memcpy(a, b, s);
-}
-
 int
 main(int argc, char **argv)
 {
@@ -198,9 +205,6 @@ main(int argc, char **argv)
     void *vobsub;
     void *packet;
     int packet_len;
-#ifdef BAD
-    unsigned int prev_pts;
-#endif
     unsigned int pts100;
 
     if (argc < 2 || 4 < argc) {
@@ -222,7 +226,7 @@ main(int argc, char **argv)
 	spudec_assemble(spudec, packet, packet_len, pts100);
 	if (spudec->queue_head) {
 		spudec_heartbeat(spudec, spudec->queue_head->start_pts);
-	if (spudec_changed(spudec)) 
+	if (spudec_changed(spudec))
 	    spudec_draw(spudec, draw_alpha);
 	}
     }

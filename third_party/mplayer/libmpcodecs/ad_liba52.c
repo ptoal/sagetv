@@ -1,9 +1,28 @@
-#include "config.h"
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
+#define _XOPEN_SOURCE 600
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <math.h>
 #include <assert.h>
+#include <stdint.h>
 
 #include "config.h"
 
@@ -11,13 +30,17 @@
 #include "help_mp.h"
 
 #include "ad_internal.h"
+#include "dec_audio.h"
 
 #include "cpudetect.h"
 
 #include "libaf/af_format.h"
 
-#include "liba52/a52.h"
-#include "liba52/mm_accel.h"
+#include <libavutil/common.h>
+
+#include <a52dec/a52.h>
+#include <a52dec/mm_accel.h>
+int (* a52_resample) (float * _f, int16_t * s16);
 
 static a52_state_t *a52_state;
 static uint32_t a52_flags=0;
@@ -34,13 +57,9 @@ static uint32_t channel_map;
 
 /** The output is multiplied by this var.  Used for volume control */
 static sample_t a52_level = 1;
-/** The value of the -a52drc switch. */
-float a52_drc_level = 1.0;
 static int a52_drc_action = DRC_NO_ACTION;
 
-#include "mpbswap.h"
-
-static ad_info_t info = 
+static const ad_info_t info =
 {
 	"AC3 decoding with liba52",
 	"liba52",
@@ -51,9 +70,18 @@ static ad_info_t info =
 
 LIBAD_EXTERN(liba52)
 
-extern int audio_output_channels;
+static void swap_bytes(uint8_t * buf, int size)
+{
+   size -= size & 1;
+   while (size > 0) {
+     FFSWAP(uint8_t, buf[0], buf[1]);
+     buf += 2;
+     size -= 2;
+   }
+}
 
-int a52_fillbuff(sh_audio_t *sh_audio){
+static int a52_fillbuff(sh_audio_t *sh_audio)
+{
 int length=0;
 int flags=0;
 int sample_rate=0;
@@ -67,11 +95,11 @@ while(1){
 	if(c<0) return -1; /* EOF*/
         sh_audio->a_in_buffer[sh_audio->a_in_buffer_len++]=c;
     }
-    if(sh_audio->format!=0x2000) swab(sh_audio->a_in_buffer,sh_audio->a_in_buffer,8);
+    if(sh_audio->format==MKTAG('d','n','e','t')) swap_bytes(sh_audio->a_in_buffer,8);
     length = a52_syncinfo (sh_audio->a_in_buffer, &flags, &sample_rate, &bit_rate);
     if(length>=7 && length<=3840) break; /* we're done.*/
     /* bad file => resync*/
-    if(sh_audio->format!=0x2000) swab(sh_audio->a_in_buffer,sh_audio->a_in_buffer,8);
+    if(sh_audio->format==MKTAG('d','n','e','t')) swap_bytes(sh_audio->a_in_buffer,8);
     memmove(sh_audio->a_in_buffer,sh_audio->a_in_buffer+1,7);
     --sh_audio->a_in_buffer_len;
 }
@@ -80,12 +108,14 @@ while(1){
     sh_audio->i_bps=bit_rate/8;
     sh_audio->samplesize=sh_audio->sample_format==AF_FORMAT_FLOAT_NE ? 4 : 2;
     demux_read_data(sh_audio->ds,sh_audio->a_in_buffer+8,length-8);
-    if(sh_audio->format!=0x2000)
-	swab(sh_audio->a_in_buffer+8,sh_audio->a_in_buffer+8,length-8);
-    
+    if(sh_audio->format==MKTAG('d','n','e','t'))
+	swap_bytes(sh_audio->a_in_buffer+8,length-8);
+
+#ifdef CONFIG_LIBA52_INTERNAL
     if(crc16_block(sh_audio->a_in_buffer+2,length-2)!=0)
 	mp_msg(MSGT_DECAUDIO,MSGL_STATUS,"a52: CRC check failed!  \n");
-    
+#endif
+
     return length;
 }
 
@@ -115,9 +145,10 @@ int channels=0;
   return (flags&A52_LFE) ? (channels+1) : channels;
 }
 
-sample_t dynrng_call (sample_t c, void *data) {
-//	fprintf(stderr, "(%lf, %lf): %lf\n", (double)c, (double)a52_drc_level, (double)pow((double)c, a52_drc_level));
-	return pow((double)c, a52_drc_level);
+static sample_t dynrng_call (sample_t c, void *data)
+{
+//	fprintf(stderr, "(%f, %f): %f\n", (double)c, (double)drc_level, (double)pow((double)c, drc_level));
+	return pow((double)c, drc_level);
 }
 
 
@@ -125,7 +156,7 @@ static int preinit(sh_audio_t *sh)
 {
   /* Dolby AC3 audio: */
   /* however many channels, 2 bytes in a word, 256 samples in a block, 6 blocks in a frame */
-  if (sh->samplesize < 2) sh->samplesize = 2;
+  if (sh->samplesize < 4) sh->samplesize = 4;
   sh->audio_out_minsize=audio_output_channels*sh->samplesize*256*6;
   sh->audio_in_minsize=3840;
   a52_level = 1.0;
@@ -162,17 +193,24 @@ static int init(sh_audio_t *sh_audio)
   sample_t level=a52_level, bias=384;
   int flags=0;
   /* Dolby AC3 audio:*/
+#ifdef MM_ACCEL_X86_SSE
   if(gCpuCaps.hasSSE) a52_accel|=MM_ACCEL_X86_SSE;
+#endif
   if(gCpuCaps.hasMMX) a52_accel|=MM_ACCEL_X86_MMX;
   if(gCpuCaps.hasMMX2) a52_accel|=MM_ACCEL_X86_MMXEXT;
   if(gCpuCaps.has3DNow) a52_accel|=MM_ACCEL_X86_3DNOW;
+#ifdef MM_ACCEL_X86_3DNOWEXT
   if(gCpuCaps.has3DNowExt) a52_accel|=MM_ACCEL_X86_3DNOWEXT;
+#endif
+#ifdef MM_ACCEL_PPC_ALTIVEC
   if(gCpuCaps.hasAltiVec) a52_accel|=MM_ACCEL_PPC_ALTIVEC;
+#endif
   a52_state=a52_init (a52_accel);
   if (a52_state == NULL) {
 	mp_msg(MSGT_DECAUDIO,MSGL_ERR,"A52 init failed\n");
 	return 0;
   }
+  sh_audio->sample_format = AF_FORMAT_FLOAT_NE;
   if(a52_fillbuff(sh_audio)<0){
 	mp_msg(MSGT_DECAUDIO,MSGL_ERR,"A52 sync failed\n");
 	return 0;
@@ -180,10 +218,10 @@ static int init(sh_audio_t *sh_audio)
 
 
   /* Init a52 dynrng */
-  if (a52_drc_level < 0.001) {
+  if (drc_level < 0.001) {
 	  /* level == 0 --> no compression, init library without callback */
 	  a52_drc_action = DRC_NO_COMPRESSION;
-  } else if (a52_drc_level > 0.999) {
+  } else if (drc_level > 0.999) {
 	  /* level == 1 --> full compression, do nothing at all (library default = full compression) */
 	  a52_drc_action = DRC_NO_ACTION;
   } else {
@@ -245,8 +283,7 @@ while(sh_audio->channels>0){
 	  break;
       }
   } else
-  if(a52_resample_init(a52_accel,flags,sh_audio->channels)) break;
-  --sh_audio->channels; /* try to decrease no. of channels*/
+  break;
 }
   if(sh_audio->channels<=0){
     mp_msg(MSGT_DECAUDIO,MSGL_ERR,"a52: no resampler. try different channel setup!\n");
@@ -257,6 +294,7 @@ while(sh_audio->channels>0){
 
 static void uninit(sh_audio_t *sh)
 {
+  a52_free(a52_state);
 }
 
 static int control(sh_audio_t *sh,int cmd,void* arg, ...)
@@ -289,7 +327,7 @@ static int decode_audio(sh_audio_t *sh_audio,unsigned char *buf,int minlen,int m
     int i,len=-1;
 	if (sh_audio->sample_format == AF_FORMAT_FLOAT_NE)
 	    bias = 0;
-	if(!sh_audio->a_in_buffer_len) 
+	if(!sh_audio->a_in_buffer_len)
 	    if(a52_fillbuff(sh_audio)<0) return len; /* EOF */
 	sh_audio->a_in_buffer_len=0;
 	if (a52_frame (a52_state, sh_audio->a_in_buffer, &flags, &level, bias)){

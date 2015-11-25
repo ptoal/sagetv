@@ -1,43 +1,58 @@
-#include "config.h"
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
 #include <errno.h>
 
+#include "config.h"
 #include "mp_msg.h"
 #include "cpudetect.h"
 
-#ifdef HAVE_MALLOC_H
+#if HAVE_MALLOC_H
 #include <malloc.h>
 #endif
 
+#include "dec_video.h"
 #include "img_format.h"
 #include "mp_image.h"
 #include "vf.h"
-
-
-#ifdef USE_LIBPOSTPROC_SO
-#include <postproc/postprocess.h>
-#elif defined(USE_LIBPOSTPROC)
-#define EMU_OLD
 #include "libpostproc/postprocess.h"
 
-#ifdef EMU_OLD
+#ifdef CONFIG_FFMPEG_A
+#define EMU_OLD
 #include "libpostproc/postprocess_internal.h"
 #endif
-#endif
+
+#undef malloc
 
 struct vf_priv_s {
     int pp;
-    pp_mode_t *ppMode[PP_QUALITY_MAX+1];
+    pp_mode *ppMode[PP_QUALITY_MAX+1];
     void *context;
     unsigned int outfmt;
 };
 
 //===========================================================================//
 
-static int config(struct vf_instance_s* vf,
+static int config(struct vf_instance *vf,
         int width, int height, int d_width, int d_height,
 	unsigned int voflags, unsigned int outfmt){
     int flags=
@@ -51,23 +66,24 @@ static int config(struct vf_instance_s* vf,
     case IMGFMT_411P: flags|= PP_FORMAT_411; break;
     default:          flags|= PP_FORMAT_420; break;
     }
-        
+
     if(vf->priv->context) pp_free_context(vf->priv->context);
     vf->priv->context= pp_get_context(width, height, flags);
 
     return vf_next_config(vf,width,height,d_width,d_height,voflags,outfmt);
 }
 
-static void uninit(struct vf_instance_s* vf){
+static void uninit(struct vf_instance *vf){
     int i;
     for(i=0; i<=PP_QUALITY_MAX; i++){
         if(vf->priv->ppMode[i])
 	    pp_free_mode(vf->priv->ppMode[i]);
     }
     if(vf->priv->context) pp_free_context(vf->priv->context);
+    free(vf->priv);
 }
 
-static int query_format(struct vf_instance_s* vf, unsigned int fmt){
+static int query_format(struct vf_instance *vf, unsigned int fmt){
     switch(fmt){
     case IMGFMT_YV12:
     case IMGFMT_I420:
@@ -80,7 +96,7 @@ static int query_format(struct vf_instance_s* vf, unsigned int fmt){
     return 0;
 }
 
-static int control(struct vf_instance_s* vf, int request, void* data){
+static int control(struct vf_instance *vf, int request, void* data){
     switch(request){
     case VFCTRL_QUERY_MAX_PP_LEVEL:
 	return PP_QUALITY_MAX;
@@ -91,9 +107,9 @@ static int control(struct vf_instance_s* vf, int request, void* data){
     return vf_next_control(vf,request,data);
 }
 
-static void get_image(struct vf_instance_s* vf, mp_image_t *mpi){
+static void get_image(struct vf_instance *vf, mp_image_t *mpi){
     if(vf->priv->pp&0xFFFF) return; // non-local filters enabled
-    if((mpi->type==MP_IMGTYPE_IPB || vf->priv->pp) && 
+    if((mpi->type==MP_IMGTYPE_IPB || vf->priv->pp) &&
 	mpi->flags&MP_IMGFLAG_PRESERVE) return; // don't change
     if(!(mpi->flags&MP_IMGFLAG_ACCEPT_STRIDE) && mpi->imgfmt!=vf->priv->outfmt)
 	return; // colorspace differ
@@ -112,7 +128,7 @@ static void get_image(struct vf_instance_s* vf, mp_image_t *mpi){
     mpi->flags|=MP_IMGFLAG_DIRECT;
 }
 
-static int put_image(struct vf_instance_s* vf, mp_image_t *mpi, double pts){
+static int put_image(struct vf_instance *vf, mp_image_t *mpi, double pts){
     if(!(mpi->flags&MP_IMGFLAG_DIRECT)){
 	// no DR, so get a new image! hope we'll get DR buffer:
 	vf->dmpi=vf_get_image(vf->next,mpi->imgfmt,
@@ -123,7 +139,7 @@ static int put_image(struct vf_instance_s* vf, mp_image_t *mpi, double pts){
 	    (mpi->width+7)&(~7),(mpi->height+7)&(~7));
 	vf->dmpi->w=mpi->w; vf->dmpi->h=mpi->h; // display w;h
     }
-    
+
     if(vf->priv->pp || !(mpi->flags&MP_IMGFLAG_DIRECT)){
 	// do the postprocessing! (or copy if no DR)
 	pp_postprocess(mpi->planes           ,mpi->stride,
@@ -142,9 +158,7 @@ static int put_image(struct vf_instance_s* vf, mp_image_t *mpi, double pts){
 
 //===========================================================================//
 
-extern int divx_quality;
-
-static unsigned int fmt_list[]={
+static const unsigned int fmt_list[]={
     IMGFMT_YV12,
     IMGFMT_I420,
     IMGFMT_IYUV,
@@ -154,11 +168,11 @@ static unsigned int fmt_list[]={
     0
 };
 
-static int open(vf_instance_t *vf, char* args){
+static int vf_open(vf_instance_t *vf, char *args){
     char *endptr, *name;
     int i;
     int hex_mode=0;
-    
+
     vf->query_format=query_format;
     vf->control=control;
     vf->config=config;
@@ -172,7 +186,7 @@ static int open(vf_instance_t *vf, char* args){
     // check csp:
     vf->priv->outfmt=vf_match_csp(&vf->next,fmt_list,IMGFMT_YV12);
     if(!vf->priv->outfmt) return 0; // no csp match :(
-    
+
     if(args){
 	hex_mode= strtol(args, &endptr, 0);
 	if(*endptr){
@@ -195,9 +209,9 @@ static int open(vf_instance_t *vf, char* args){
         /* hex mode for compatibility */
         for(i=0; i<=PP_QUALITY_MAX; i++){
 	    PPMode *ppMode;
-	    
-	    ppMode= (PPMode*)memalign(8, sizeof(PPMode));
-	    
+
+            ppMode = av_malloc(sizeof(PPMode));
+
 	    ppMode->lumMode= hex_mode;
 	    ppMode->chromMode= ((hex_mode&0xFF)>>4) | (hex_mode&0xFFFFFF00);
 	    ppMode->maxTmpNoise[0]= 700;
@@ -207,24 +221,23 @@ static int open(vf_instance_t *vf, char* args){
 	    ppMode->minAllowedY= 16;
 	    ppMode->baseDcDiff= 256/4;
 	    ppMode->flatnessThreshold=40;
-    
+
             vf->priv->ppMode[i]= ppMode;
         }
     }
 #endif
-    
+
     vf->priv->pp=PP_QUALITY_MAX;
     return 1;
 }
 
-vf_info_t vf_info_pp = {
+const vf_info_t vf_info_pp = {
     "postprocessing",
     "pp",
     "A'rpi",
     "",
-    open,
+    vf_open,
     NULL
 };
 
 //===========================================================================//
-

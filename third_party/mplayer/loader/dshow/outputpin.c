@@ -1,11 +1,10 @@
 /*
  * Modified for use with MPlayer, detailed changelog at
  * http://svn.mplayerhq.hu/mplayer/trunk/
- * $Id: outputpin.c,v 1.3 2007-04-10 19:33:30 Narflex Exp $
  */
 
-#include "wine/winerror.h"
-#include "wine/windef.h"
+#include "loader/wine/winerror.h"
+#include "loader/wine/windef.h"
 #include "outputpin.h"
 #include "mediatype.h"
 #include <stdio.h>
@@ -33,7 +32,7 @@ typedef struct CEnumMediaTypes
 /**
    IMemOutput interface implementation
 */
-struct _COutputMemPin
+struct COutputMemPin
 {
     IMemInputPin_vt* vt;
     DECLARE_IUNKNOWN();
@@ -160,12 +159,12 @@ IMPLEMENT_IUNKNOWN(CEnumMediaTypes)
  */
 static CEnumMediaTypes* CEnumMediaTypesCreate(const AM_MEDIA_TYPE* amt)
 {
-    CEnumMediaTypes *This = (CEnumMediaTypes*) malloc(sizeof(CEnumMediaTypes)) ;
+    CEnumMediaTypes *This = malloc(sizeof(CEnumMediaTypes)) ;
 
     if (!This)
         return NULL;
 
-    This->vt = (IEnumMediaTypes_vt*) malloc(sizeof(IEnumMediaTypes_vt));
+    This->vt = malloc(sizeof(IEnumMediaTypes_vt));
     if (!This->vt)
     {
 	free(This);
@@ -494,9 +493,9 @@ static HRESULT STDCALL COutputPin_QueryInternalConnections(IPin * This,
  * \return S_OK - success
  * \return E_UNEXPECTED - The pin is output pin
  *
- * \note 
- * IMemoryInputPin::Receive,IMemoryInputPin::ReceiveMultiple, IMemoryInputPin::EndOfStream, 
- * IMemAllocator::GetBuffer runs in different (streaming) thread then other 
+ * \note
+ * IMemoryInputPin::Receive,IMemoryInputPin::ReceiveMultiple, IMemoryInputPin::EndOfStream,
+ * IMemAllocator::GetBuffer runs in different (streaming) thread then other
  * methods (application thread).
  * IMemoryInputPin::NewSegment runs either in streaming or application thread.
  * Developer must use critical sections for thread-safing work.
@@ -698,9 +697,9 @@ static HRESULT STDCALL COutputMemPin_GetAllocatorRequirements(IMemInputPin* This
  * In the last case method might block indefinitely. If this might
  * happen IMemInpuPin::ReceiveCAnBlock returns S_OK
  *
- * \note 
- * IMemoryInputPin::Receive,IMemoryInputPin::ReceiveMultiple, IMemoryInputPin::EndOfStream, 
- * IMemAllocator::GetBuffer runs in different (streaming) thread then other 
+ * \note
+ * IMemoryInputPin::Receive,IMemoryInputPin::ReceiveMultiple, IMemoryInputPin::EndOfStream,
+ * IMemAllocator::GetBuffer runs in different (streaming) thread then other
  * methods (application thread).
  * IMemoryInputPin::NewSegment runs either in streaming or application thread.
  * Developer must use critical sections for thread-safing work.
@@ -737,9 +736,9 @@ static HRESULT STDCALL COutputMemPin_Receive(IMemInputPin* This,
  * \remarks
  * This method behaves like IMemInputPin::Receive but for array of samples
  *
- * \note 
- * IMemoryInputPin::Receive,IMemoryInputPin::ReceiveMultiple, IMemoryInputPin::EndOfStream, 
- * IMemAllocator::GetBuffer runs in different (streaming) thread then other 
+ * \note
+ * IMemoryInputPin::Receive,IMemoryInputPin::ReceiveMultiple, IMemoryInputPin::EndOfStream,
+ * IMemAllocator::GetBuffer runs in different (streaming) thread then other
  * methods (application thread).
  * IMemoryInputPin::NewSegment runs either in streaming or application thread.
  * Developer must use critical sections for thread-safing work.
@@ -751,7 +750,7 @@ static HRESULT STDCALL COutputMemPin_ReceiveMultiple(IMemInputPin * This,
 					    /* [out] */ long *nSamplesProcessed)
 {
     HRESULT hr;
-    Debug printf("COutputMemPin_ReceiveMultiple(%p) %d\n", This,nSamples);
+    Debug printf("COutputMemPin_ReceiveMultiple(%p) %ld\n", This,nSamples);
     for(*nSamplesProcessed=0; *nSamplesProcessed < nSamples; *nSamplesProcessed++) {
          hr = This->vt->Receive(This,pSamples[*nSamplesProcessed]);
          if (hr != S_OK) break;
@@ -793,12 +792,9 @@ static void COutputPin_SetNewFormat(COutputPin* This, const AM_MEDIA_TYPE* amt)
  */
 static void COutputPin_Destroy(COutputPin* This)
 {
-    if (This->mempin->vt)
-	free(This->mempin->vt);
-    if (This->mempin)
-	free(This->mempin);
-    if (This->vt)
-	free(This->vt);
+    free(This->mempin->vt);
+    free(This->mempin);
+    free(This->vt);
     FreeMediaType(&(This->type));
     free(This);
 }
@@ -894,19 +890,20 @@ static HRESULT STDCALL COutputMemPin_Release(IUnknown* This)
  */
 COutputPin* COutputPinCreate(const AM_MEDIA_TYPE* amt,SAMPLEPROC SampleProc,void* pUserData)
 {
-    COutputPin* This = (COutputPin*) malloc(sizeof(COutputPin));
+    COutputPin* This = malloc(sizeof(COutputPin));
     IMemInputPin_vt* ivt;
 
     if (!This)
         return NULL;
 
-    This->vt = (IPin_vt*) malloc(sizeof(IPin_vt));
-    This->mempin = (COutputMemPin*) malloc(sizeof(COutputMemPin));
-    ivt = (IMemInputPin_vt*) malloc(sizeof(IMemInputPin_vt));
+    This->vt = malloc(sizeof(IPin_vt));
+    This->mempin = malloc(sizeof(COutputMemPin));
+    ivt = malloc(sizeof(IMemInputPin_vt));
 
     if (!This->vt || !This->mempin || !ivt)
     {
         COutputPin_Destroy(This);
+        free(ivt);
 	return NULL;
     }
 

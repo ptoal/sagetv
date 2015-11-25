@@ -1,66 +1,88 @@
-//  AVI file parser for DEMUXER v2.9  by A'rpi/ESP-team
-#include "config.h"
+/*
+ * AVI file parser for DEMUXER v2.9
+ * Copyright (c) 2001 A'rpi/ESP-team
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 
+#include "config.h"
 #include "mp_msg.h"
 #include "help_mp.h"
 
 #include "stream/stream.h"
 #include "demuxer.h"
 #include "stheader.h"
-
+#include "demux_ogg.h"
 #include "aviheader.h"
 
-extern demuxer_t* init_avi_with_ogg(demuxer_t* demuxer);
-extern int demux_ogg_open(demuxer_t* demuxer);
-
-extern demuxer_desc_t demuxer_desc_avi_ni;
-extern demuxer_desc_t demuxer_desc_avi_nini;
+extern const demuxer_desc_t demuxer_desc_avi_ni;
+extern const demuxer_desc_t demuxer_desc_avi_nini;
 
 // PTS:  0=interleaved  1=BPS-based
 int pts_from_bps=1;
 
+static void update_audio_block_size(demuxer_t *demux)
+{
+  avi_priv_t *priv = demux->priv;
+  sh_audio_t *sh = demux->audio->sh;
+  if (!sh)
+    return;
+  priv->audio_block_size = sh->audio.dwSampleSize;
+  if (sh->wf) {
+    priv->audio_block_size = sh->wf->nBlockAlign;
+    if (!priv->audio_block_size) {
+      // for PCM audio we can calculate the blocksize:
+      if (sh->format == 1)
+        priv->audio_block_size = sh->wf->nChannels*(sh->wf->wBitsPerSample/8);
+      else
+        priv->audio_block_size = 1; // hope the best...
+    } else {
+      // workaround old mencoder bug:
+      if (sh->audio.dwSampleSize == 1 && sh->audio.dwScale == 1 &&
+          (sh->wf->nBlockAlign == 1152 || sh->wf->nBlockAlign == 576)) {
+        mp_msg(MSGT_DEMUX, MSGL_WARN, MSGTR_WorkAroundBlockAlignHeaderBug);
+        priv->audio_block_size = 1;
+      }
+    }
+  }
+}
+
 // Select ds from ID
-demux_stream_t* demux_avi_select_stream(demuxer_t *demux,unsigned int id){
+static demux_stream_t *demux_avi_select_stream(demuxer_t *demux,
+                                               unsigned int id)
+{
   int stream_id=avi_stream_id(id);
 
 
-  if(demux->video->id==-1)
-    if(demux->v_streams[stream_id])
+  if(demux->video->id==-1 && demux->v_streams[stream_id])
         demux->video->id=stream_id;
 
-  if(demux->audio->id==-1)
-    if(demux->a_streams[stream_id])
+  if(demux->audio->id==-1 && demux->a_streams[stream_id])
         demux->audio->id=stream_id;
 
   if(stream_id==demux->audio->id){
       if(!demux->audio->sh){
-        sh_audio_t* sh;
-	avi_priv_t *priv=demux->priv;
-        sh=demux->audio->sh=demux->a_streams[stream_id];
+        demux->audio->sh=demux->a_streams[stream_id];
         mp_msg(MSGT_DEMUX,MSGL_V,"Auto-selected AVI audio ID = %d\n",demux->audio->id);
-	if(sh->wf){
-	  priv->audio_block_size=sh->wf->nBlockAlign;
-	  if(!priv->audio_block_size){
-	    // for PCM audio we can calculate the blocksize:
-	    if(sh->format==1)
-		priv->audio_block_size=sh->wf->nChannels*(sh->wf->wBitsPerSample/8);
-	    else
-		priv->audio_block_size=1; // hope the best...
-	  } else {
-	    // workaround old mencoder's bug:
-	    if(sh->audio.dwSampleSize==1 && sh->audio.dwScale==1 &&
-	       (sh->wf->nBlockAlign==1152 || sh->wf->nBlockAlign==576)){
-		mp_msg(MSGT_DEMUX,MSGL_WARN,MSGTR_WorkAroundBlockAlignHeaderBug);
-		priv->audio_block_size=1;
-	    }
-	  }
-	} else {
-	  priv->audio_block_size=sh->audio.dwSampleSize;
-	}
+        update_audio_block_size(demux);
       }
       return demux->audio;
   }
@@ -87,6 +109,12 @@ static int valid_fourcc(unsigned int id){
            strchr(valid, fcc[2]) && strchr(valid, fcc[3]);
 }
 
+static int valid_stream_id(unsigned int id) {
+    unsigned char* fcc=(unsigned char*)(&id);
+    return fcc[0] >= '0' && fcc[0] <= '9' && fcc[1] >= '0' && fcc[1] <= '9' &&
+           ((fcc[2] == 'w' && fcc[3] == 'b') || (fcc[2] == 'd' && fcc[3] == 'c'));
+}
+
 static int choose_chunk_len(unsigned int len1,unsigned int len2){
     // len1 has a bit more priority than len2. len1!=len2
     // Note: this is a first-idea-logic, may be wrong. comments welcomed.
@@ -103,7 +131,7 @@ static int demux_avi_read_packet(demuxer_t *demux,demux_stream_t *ds,unsigned in
   avi_priv_t *priv=demux->priv;
   int skip;
   float pts=0;
-  
+
   mp_dbg(MSGT_DEMUX,MSGL_DBG3,"demux_avi.read_packet: %X\n",id);
 
   if(ds==demux->audio){
@@ -129,9 +157,9 @@ static int demux_avi_read_packet(demuxer_t *demux,demux_stream_t *ds,unsigned in
           pts=priv->avi_audio_pts; //+priv->pts_correction;
       priv->avi_audio_pts=0;
       // update blockcount:
-      priv->audio_block_no+=priv->audio_block_size ?
-	((len+priv->audio_block_size-1)/priv->audio_block_size) : 1;
-  } else 
+      priv->audio_block_no+=
+	(len+priv->audio_block_size-1)/priv->audio_block_size;
+  } else
   if(ds==demux->video){
      // video
      if(priv->skip_video_frames>0){
@@ -150,19 +178,52 @@ static int demux_avi_read_packet(demuxer_t *demux,demux_stream_t *ds,unsigned in
      if(ds) ++priv->video_pack_no;
 
   }
-  
+
   skip=(len+1)&(~1); // total bytes in this chunk
-  
+
   if(ds){
     mp_dbg(MSGT_DEMUX,MSGL_DBG2,"DEMUX_AVI: Read %d data bytes from packet %04X\n",len,id);
     ds_read_packet(ds,demux->stream,len,pts,idxpos,flags);
     skip-=len;
   }
+  skip = FFMAX(skip, 0);
+  if (avi_stream_id(id) > 99 && id != mmioFOURCC('J','U','N','K'))
+    skip = FFMIN(skip, 65536);
   if(skip){
     mp_dbg(MSGT_DEMUX,MSGL_DBG2,"DEMUX_AVI: Skipping %d bytes from packet %04X\n",skip,id);
     stream_skip(demux->stream,skip);
   }
   return ds?1:0;
+}
+
+static uint32_t avi_find_id(stream_t *stream) {
+  uint32_t id = stream_read_dword_le(stream);
+  if (!id) {
+    mp_msg(MSGT_DEMUX, MSGL_WARN, "Incomplete stream? Trying resync.\n");
+    do {
+      id = stream_read_dword_le(stream);
+      if (stream_eof(stream)) return 0;
+    } while (avi_stream_id(id) > 99);
+  }
+  return id;
+}
+
+static void switch_to_ni(demuxer_t *demux) {
+  avi_priv_t *priv=demux->priv;
+  mp_msg(MSGT_DEMUX,MSGL_WARN,MSGTR_SwitchToNi);
+  if(priv->idx_size>0){
+    // has index
+    demux->type=DEMUXER_TYPE_AVI_NI;
+    demux->desc=&demuxer_desc_avi_ni;
+    if (priv->idx_pos > 0)
+      --priv->idx_pos; // hack
+  } else {
+    // no index
+    demux->type=DEMUXER_TYPE_AVI_NINI;
+    demux->desc=&demuxer_desc_avi_nini;
+    priv->idx_pos=demux->filepos; // hack
+  }
+  priv->idx_pos_v=priv->idx_pos_a=priv->idx_pos;
 }
 
 // return value:
@@ -177,15 +238,18 @@ demux_stream_t *ds;
 
 do{
   int flags=1;
-  AVIINDEXENTRY *idx=NULL;
   if(priv->idx_size>0 && priv->idx_pos<priv->idx_size){
     off_t pos;
-    
-    idx=&((AVIINDEXENTRY *)priv->idx)[priv->idx_pos++];
-    
+
+    AVIINDEXENTRY *idx = priv->idx + priv->idx_pos++;
+
     if(idx->dwFlags&AVIIF_LIST){
+      if (!valid_stream_id(idx->ckid))
       // LIST
       continue;
+      if (!priv->warned_unaligned)
+        mp_msg(MSGT_DEMUX, MSGL_WARN, "Looks like unaligned chunk in index, broken AVI file!\n");
+      priv->warned_unaligned = 1;
     }
     if(!demux_avi_select_stream(demux,idx->ckid)){
       mp_dbg(MSGT_DEMUX,MSGL_DBG3,"Skip chunk %.4s (0x%X)  \n",(char *)&idx->ckid,(unsigned int)idx->ckid);
@@ -193,7 +257,7 @@ do{
     }
 
     pos = (off_t)priv->idx_offset+AVI_IDX_OFFSET(idx);
-    if((pos<demux->movi_start || pos>=demux->movi_end) && (demux->movi_end>demux->movi_start) && (demux->stream->flags & STREAM_SEEK)){
+    if((pos<demux->movi_start || pos>=demux->movi_end) && (demux->movi_end>demux->movi_start) && (demux->stream->flags & MP_STREAM_SEEK)){
       mp_msg(MSGT_DEMUX,MSGL_V,"ChunkOffset out of range!   idx=0x%"PRIX64"  \n",(int64_t)pos);
       continue;
     }
@@ -201,7 +265,7 @@ do{
     demux->filepos=stream_tell(demux->stream);
     id=stream_read_dword_le(demux->stream);
     if(stream_eof(demux->stream)) return 0; // EOF!
-    
+
     if(id!=idx->ckid){
       mp_msg(MSGT_DEMUX,MSGL_V,"ChunkID mismatch! raw=%.4s idx=%.4s  \n",(char *)&id,(char *)&idx->ckid);
       if(valid_fourcc(idx->ckid))
@@ -218,14 +282,14 @@ do{
     if(!(idx->dwFlags&AVIIF_KEYFRAME)) flags=0;
   } else {
     demux->filepos=stream_tell(demux->stream);
-    if(demux->filepos>=demux->movi_end && demux->movi_end>demux->movi_start && (demux->stream->flags & STREAM_SEEK)){
+    if(demux->filepos>=demux->movi_end && demux->movi_end>demux->movi_start && (demux->stream->flags & MP_STREAM_SEEK)){
           demux->stream->eof=1;
           return 0;
     }
-    id=stream_read_dword_le(demux->stream);
+    id=avi_find_id(demux->stream);
     len=stream_read_dword_le(demux->stream);
     if(stream_eof(demux->stream)) return 0; // EOF!
-    
+
     if(id==mmioFOURCC('L','I','S','T') || id==mmioFOURCC('R', 'I', 'F', 'F')){
       id=stream_read_dword_le(demux->stream); // list or RIFF type
       continue;
@@ -236,29 +300,11 @@ do{
   if(ds)
     if(ds->packs+1>=MAX_PACKS || ds->bytes+len>=MAX_PACK_BYTES){
 	// this packet will cause a buffer overflow, switch to -ni mode!!!
-	mp_msg(MSGT_DEMUX,MSGL_WARN,MSGTR_SwitchToNi);
-	if(priv->idx_size>0){
-	    // has index
-	    demux->type=DEMUXER_TYPE_AVI_NI;
-	    demux->desc=&demuxer_desc_avi_ni;
-	    --priv->idx_pos; // hack
-	} else {
-	    // no index
-	    demux->type=DEMUXER_TYPE_AVI_NINI;
-	    demux->desc=&demuxer_desc_avi_nini;
-	    priv->idx_pos=demux->filepos; // hack
-	}
-	priv->idx_pos_v=priv->idx_pos_a=priv->idx_pos;
+	switch_to_ni(demux);
 	// quit now, we can't even (no enough buffer memory) read this packet :(
 	return -1;
     }
-    // NOTE: Added by Narflex 7/27/06 - With HDTV MPEG4 AVIs I created MPlayer would crash
-    // on load of them because it think it had read an audio pack, but the audio buffer was still null.
-	// by only returning success from fill_buffer when we actually have read data, the problem
-	// was alleviated. I don't think this should have any negative side effects, but I'm not sure at this point...
-	// 7/13/07 - This was causing A/V sync issues with H.264 playback so I put it back the way it was. If I find
-	// a test case again where it crashes I better save that test case this time!
-//  if (!len) continue;
+
   ret=demux_avi_read_packet(demux,ds,id,len,priv->idx_pos-1,flags);
 } while(ret!=1);
   return 1;
@@ -268,7 +314,8 @@ do{
 // return value:
 //     0 = EOF or no stream found
 //     1 = successfully read a packet
-int demux_avi_fill_buffer_ni(demuxer_t *demux,demux_stream_t* ds){
+static int demux_avi_fill_buffer_ni(demuxer_t *demux, demux_stream_t *ds)
+{
 avi_priv_t *priv=demux->priv;
 unsigned int id=0;
 unsigned int len;
@@ -276,21 +323,24 @@ int ret=0;
 
 do{
   int flags=1;
-  AVIINDEXENTRY *idx=NULL;
   int idx_pos=0;
   demux->filepos=stream_tell(demux->stream);
-  
+
   if(ds==demux->video) idx_pos=priv->idx_pos_v++; else
   if(ds==demux->audio) idx_pos=priv->idx_pos_a++; else
                        idx_pos=priv->idx_pos++;
-  
+
   if(priv->idx_size>0 && idx_pos<priv->idx_size){
     off_t pos;
-    idx=&((AVIINDEXENTRY *)priv->idx)[idx_pos];
-    
+    AVIINDEXENTRY *idx = priv->idx + idx_pos;
+
     if(idx->dwFlags&AVIIF_LIST){
+      if (!valid_stream_id(idx->ckid))
       // LIST
       continue;
+      if (!priv->warned_unaligned)
+        mp_msg(MSGT_DEMUX, MSGL_WARN, "Looks like unaligned chunk in index, broken AVI file!\n");
+      priv->warned_unaligned = 1;
     }
     if(ds && demux_avi_select_stream(demux,idx->ckid)!=ds){
       mp_dbg(MSGT_DEMUX,MSGL_DBG3,"Skip chunk %.4s (0x%X)  \n",(char *)&idx->ckid,(unsigned int)idx->ckid);
@@ -332,7 +382,8 @@ do{
 // return value:
 //     0 = EOF or no stream found
 //     1 = successfully read a packet
-int demux_avi_fill_buffer_nini(demuxer_t *demux,demux_stream_t* ds){
+static int demux_avi_fill_buffer_nini(demuxer_t *demux, demux_stream_t *ds)
+{
 avi_priv_t *priv=demux->priv;
 unsigned int id=0;
 unsigned int len;
@@ -353,22 +404,22 @@ do{
           return 0;
   }
 
-  id=stream_read_dword_le(demux->stream);
+  id=avi_find_id(demux->stream);
   len=stream_read_dword_le(demux->stream);
 
   if(stream_eof(demux->stream)) return 0;
-  
+
   if(id==mmioFOURCC('L','I','S','T')){
       id=stream_read_dword_le(demux->stream);      // list type
       continue;
   }
-  
+
   if(id==mmioFOURCC('R','I','F','F')){
       mp_msg(MSGT_DEMUX,MSGL_V,"additional RIFF header...\n");
       id=stream_read_dword_le(demux->stream);      // "AVIX"
       continue;
   }
-  
+
   if(ds==demux_avi_select_stream(demux,id)){
     // read it!
     ret=demux_avi_read_packet(demux,ds,id,len,priv->idx_pos-1,0);
@@ -377,92 +428,83 @@ do{
     int skip=(len+1)&(~1); // total bytes in this chunk
     stream_skip(demux->stream,skip);
   }
-  
+
 } while(ret!=1);
   fpos[0]=stream_tell(demux->stream);
   return 1;
 }
 
 // AVI demuxer parameters:
-int index_mode=-1;  // -1=untouched  0=don't use index  1=use (geneate) index
+int index_mode=-1;  // -1=untouched  0=don't use index  1=use (generate) index
 char *index_file_save = NULL, *index_file_load = NULL;
 int force_ni=0;     // force non-interleaved AVI parsing
 
-void read_avi_header(demuxer_t *demuxer,int index_mode);
+static int try_ds_fill(demuxer_t *demux, demux_stream_t *ds) {
+  int is_ni = demux->type != DEMUXER_TYPE_AVI;
+  if (ds_fill_buffer(ds))
+    return 1;
+  if (is_ni)
+    return 0;
+  switch_to_ni(demux);
+  ds->eof = 0;
+  ds->fill_count = 0;
+  return ds_fill_buffer(ds);
+}
 
 static demuxer_t* demux_open_avi(demuxer_t* demuxer){
     demux_stream_t *d_audio=demuxer->audio;
     demux_stream_t *d_video=demuxer->video;
     sh_audio_t *sh_audio=NULL;
     sh_video_t *sh_video=NULL;
-    avi_priv_t* priv=malloc(sizeof(avi_priv_t));
+    avi_priv_t* priv=calloc(1, sizeof(avi_priv_t));
 
-  // priv struct:
-  priv->avi_audio_pts=priv->avi_video_pts=0.0f;
-  priv->pts_correction=0.0f;
-  priv->skip_video_frames=0;
-  priv->pts_corr_bytes=0;
-  priv->pts_has_video=priv->pts_corrected=0;
-  priv->video_pack_no=0;
-  priv->audio_block_no=0;
-  priv->audio_block_size=0;
-  priv->isodml = 0;
-  priv->suidx_size = 0;
-  priv->suidx = NULL;
-
-  demuxer->priv=(void*)priv;
+  demuxer->priv=priv;
 
   //---- AVI header:
-  read_avi_header(demuxer,(demuxer->stream->flags & STREAM_SEEK_BW)?index_mode:-2);
-  
-  if(demuxer->audio->id>=0 && !demuxer->a_streams[demuxer->audio->id]){
-      mp_msg(MSGT_DEMUX,MSGL_WARN,MSGTR_InvalidAudioStreamNosound,demuxer->audio->id);
-      demuxer->audio->id=-2; // disabled
+  read_avi_header(demuxer,(demuxer->stream->flags & MP_STREAM_SEEK_BW)?index_mode:-2);
+  update_audio_block_size(demuxer);
+
+  if(d_audio->id>=0 && !demuxer->a_streams[d_audio->id]){
+      mp_msg(MSGT_DEMUX,MSGL_WARN,MSGTR_InvalidAudioStreamNosound,d_audio->id);
+      d_audio->id=-2; // disabled
   }
-  if(demuxer->video->id>=0 && !demuxer->v_streams[demuxer->video->id]){
-      mp_msg(MSGT_DEMUX,MSGL_WARN,MSGTR_InvalidAudioStreamUsingDefault,demuxer->video->id);
-      demuxer->video->id=-1; // autodetect
+  if(d_video->id>=0 && !demuxer->v_streams[d_video->id]){
+      mp_msg(MSGT_DEMUX,MSGL_WARN,MSGTR_InvalidAudioStreamUsingDefault,d_video->id);
+      d_video->id=-1; // autodetect
   }
-  
+
   stream_reset(demuxer->stream);
   stream_seek(demuxer->stream,demuxer->movi_start);
-  priv->idx_pos=0;
-  priv->idx_pos_a=0;
-  priv->idx_pos_v=0;
   if(priv->idx_size>1){
     // decide index format:
 #if 1
-    if((AVI_IDX_OFFSET(&((AVIINDEXENTRY *)priv->idx)[0])<demuxer->movi_start ||
-        AVI_IDX_OFFSET(&((AVIINDEXENTRY *)priv->idx)[1])<demuxer->movi_start )&& !priv->isodml)
+    if((AVI_IDX_OFFSET(priv->idx + 0)<demuxer->movi_start ||
+        AVI_IDX_OFFSET(priv->idx + 1)<demuxer->movi_start )&& !priv->isodml)
       priv->idx_offset=demuxer->movi_start-4;
-    else
-      priv->idx_offset=0;
 #else
-    if(AVI_IDX_OFFSET(&((AVIINDEXENTRY *)priv->idx)[0])<demuxer->movi_start)
+    if(AVI_IDX_OFFSET(priv->idx)<demuxer->movi_start)
       priv->idx_offset=demuxer->movi_start-4;
-    else
-      priv->idx_offset=0;
 #endif
     mp_msg(MSGT_DEMUX,MSGL_V,"AVI index offset: 0x%X (movi=0x%X idx0=0x%X idx1=0x%X)\n",
 	    (int)priv->idx_offset,(int)demuxer->movi_start,
-	    (int)((AVIINDEXENTRY *)priv->idx)[0].dwChunkOffset,
-	    (int)((AVIINDEXENTRY *)priv->idx)[1].dwChunkOffset);
+	    (int)priv->idx[0].dwChunkOffset,
+	    (int)priv->idx[1].dwChunkOffset);
   }
-  
+
   if(priv->idx_size>0){
       // check that file is non-interleaved:
       int i;
       off_t a_pos=-1;
       off_t v_pos=-1;
       for(i=0;i<priv->idx_size;i++){
-        AVIINDEXENTRY* idx=&((AVIINDEXENTRY *)priv->idx)[i];
+        AVIINDEXENTRY *idx = priv->idx + i;
         demux_stream_t* ds=demux_avi_select_stream(demuxer,idx->ckid);
         off_t pos = priv->idx_offset + AVI_IDX_OFFSET(idx);
-        if(a_pos==-1 && ds==demuxer->audio){
+        if(a_pos==-1 && ds==d_audio){
           a_pos=pos;
           if(v_pos!=-1) break;
         }
-        if(v_pos==-1 && ds==demuxer->video){
+        if(v_pos==-1 && ds==d_video){
           v_pos=pos;
           if(a_pos!=-1) break;
         }
@@ -493,42 +535,45 @@ static demuxer_t* demux_open_avi(demuxer_t* demuxer){
       }
       demuxer->seekable=0;
   }
-  if(!ds_fill_buffer(d_video)){
+  if(!try_ds_fill(demuxer, d_video)){
     mp_msg(MSGT_DEMUX,MSGL_ERR,"AVI: " MSGTR_MissingVideoStreamBug);
     return NULL;
   }
-  sh_video=d_video->sh;sh_video->ds=d_video;
+  sh_video=d_video->sh;
   if(d_audio->id!=-2){
     mp_msg(MSGT_DEMUX,MSGL_V,"AVI: Searching for audio stream (id:%d)\n",d_audio->id);
-    if(!priv->audio_streams || !ds_fill_buffer(d_audio)){
+    if(!priv->audio_streams || !try_ds_fill(demuxer, d_audio)){
       mp_msg(MSGT_DEMUX,MSGL_INFO,"AVI: " MSGTR_MissingAudioStream);
       d_audio->sh=sh_audio=NULL;
     } else {
-      sh_audio=d_audio->sh;sh_audio->ds=d_audio;
+      sh_audio=d_audio->sh;
     }
   }
 
   // calculating audio/video bitrate:
   if(priv->idx_size>0){
     // we have index, let's count 'em!
+    AVIINDEXENTRY *idx = priv->idx;
     int64_t vsize=0;
     int64_t asize=0;
     size_t vsamples=0;
     size_t asamples=0;
     int i;
-    for(i=0;i<priv->idx_size;i++){ 
-      int id=avi_stream_id(((AVIINDEXENTRY *)priv->idx)[i].ckid);
-      int len=((AVIINDEXENTRY *)priv->idx)[i].dwChunkLength;
-      if(sh_video->ds->id == id) {
+    for(i=0;i<priv->idx_size;i++){
+      int id=avi_stream_id(idx[i].ckid);
+      unsigned len=idx[i].dwChunkLength;
+      if(d_video->id == id) {
         vsize+=len;
         ++vsamples;
       }
-      else if(sh_audio && sh_audio->ds->id == id) {
+      else if(d_audio->id == id) {
         asize+=len;
 	asamples+=(len+priv->audio_block_size-1)/priv->audio_block_size;
       }
     }
-    mp_msg(MSGT_DEMUX,MSGL_V,"AVI video size=%"PRId64" (%u) audio size=%"PRId64" (%u)\n",vsize,vsamples,asize,asamples);
+    mp_msg(MSGT_DEMUX, MSGL_V,
+           "AVI video size=%"PRId64" (%zu) audio size=%"PRId64" (%zu)\n",
+           vsize, vsamples, asize, asamples);
     priv->numberofframes=vsamples;
     sh_video->i_bps=((float)vsize/(float)vsamples)*(float)sh_video->video.dwRate/(float)sh_video->video.dwScale;
     if(sh_audio) sh_audio->i_bps=((float)asize/(float)asamples)*(float)sh_audio->audio.dwRate/(float)sh_audio->audio.dwScale;
@@ -543,7 +588,7 @@ static demuxer_t* demux_open_avi(demuxer_t* demuxer){
     if(priv->numberofframes<=1){
       mp_msg(MSGT_SEEK,MSGL_WARN,MSGTR_CouldntDetFNo);
       priv->numberofframes=0;
-    }          
+    }
 
     if(sh_audio){
       if(sh_audio->wf->nAvgBytesPerSec && sh_audio->audio.dwSampleSize!=1){
@@ -559,11 +604,13 @@ static demuxer_t* demux_open_avi(demuxer_t* demuxer){
   }
 
   return demuxer;
-  
+
 }
 
 
-void demux_seek_avi(demuxer_t *demuxer,float rel_seek_secs,float audio_delay,int flags){
+static void demux_seek_avi(demuxer_t *demuxer, float rel_seek_secs,
+                           float audio_delay, int flags)
+{
     avi_priv_t *priv=demuxer->priv;
     demux_stream_t *d_audio=demuxer->audio;
     demux_stream_t *d_video=demuxer->video;
@@ -577,15 +624,15 @@ void demux_seek_avi(demuxer_t *demuxer,float rel_seek_secs,float audio_delay,int
     int video_chunk_pos=d_video->pos;
     int i;
 
-      if(flags&1){
+      if(flags&SEEK_ABSOLUTE){
 	// seek absolute
 	video_chunk_pos=0;
       }
-      
-      if(flags&2){
+
+      if(flags&SEEK_FACTOR){
 	rel_seek_frames=rel_seek_secs*priv->numberofframes;
       }
-    
+
       priv->skip_video_frames=0;
       priv->avi_audio_pts=0;
 
@@ -594,18 +641,18 @@ void demux_seek_avi(demuxer_t *demuxer,float rel_seek_secs,float audio_delay,int
       if(rel_seek_frames>0){
         // seek forward
         while(video_chunk_pos<priv->idx_size-1){
-          int id=((AVIINDEXENTRY *)priv->idx)[video_chunk_pos].ckid;
+          int id=priv->idx[video_chunk_pos].ckid;
           if(avi_stream_id(id)==d_video->id){  // video frame
-            if((--rel_seek_frames)<0 && ((AVIINDEXENTRY *)priv->idx)[video_chunk_pos].dwFlags&AVIIF_KEYFRAME) break;
+            if((--rel_seek_frames)<0 && priv->idx[video_chunk_pos].dwFlags&AVIIF_KEYFRAME) break;
           }
           ++video_chunk_pos;
         }
       } else {
         // seek backward
         while(video_chunk_pos>0){
-          int id=((AVIINDEXENTRY *)priv->idx)[video_chunk_pos].ckid;
+          int id=priv->idx[video_chunk_pos].ckid;
           if(avi_stream_id(id)==d_video->id){  // video frame
-            if((++rel_seek_frames)>0 && ((AVIINDEXENTRY *)priv->idx)[video_chunk_pos].dwFlags&AVIIF_KEYFRAME) break;
+            if((++rel_seek_frames)>0 && priv->idx[video_chunk_pos].dwFlags&AVIIF_KEYFRAME) break;
           }
           --video_chunk_pos;
         }
@@ -615,14 +662,14 @@ void demux_seek_avi(demuxer_t *demuxer,float rel_seek_secs,float audio_delay,int
       // re-calc video pts:
       d_video->pack_no=0;
       for(i=0;i<video_chunk_pos;i++){
-          int id=((AVIINDEXENTRY *)priv->idx)[i].ckid;
+          int id=priv->idx[i].ckid;
           if(avi_stream_id(id)==d_video->id) ++d_video->pack_no;
       }
       priv->video_pack_no=
       sh_video->num_frames=sh_video->num_frames_decoded=d_video->pack_no;
       priv->avi_video_pts=d_video->pack_no*(float)sh_video->video.dwScale/(float)sh_video->video.dwRate;
       d_video->pos=video_chunk_pos;
-      
+
       mp_msg(MSGT_SEEK,MSGL_DBG2,"V_SEEK:  pack=%d  pts=%5.3f  chunk=%d  \n",d_video->pack_no,priv->avi_video_pts,video_chunk_pos);
 
 // ------------ STEP 2: seek audio, find the right chunk & pos ------------
@@ -638,7 +685,7 @@ void demux_seek_avi(demuxer_t *demuxer,float rel_seek_secs,float audio_delay,int
 	int curr_audio_pos=-1;
 	int audio_chunk_pos=-1;
 	int chunk_max=(demuxer->type==DEMUXER_TYPE_AVI)?video_chunk_pos:priv->idx_size;
-	
+
 	if(sh_audio->audio.dwSampleSize){
 	    // constant rate audio stream
 	    /* immediate seeking to audio position, including when streams are delayed */
@@ -647,15 +694,15 @@ void demux_seek_avi(demuxer_t *demuxer,float rel_seek_secs,float audio_delay,int
 
         // find audio chunk pos:
           for(i=0;i<chunk_max;i++){
-            int id=((AVIINDEXENTRY *)priv->idx)[i].ckid;
+            int id=priv->idx[i].ckid;
             if(avi_stream_id(id)==d_audio->id){
-                len=((AVIINDEXENTRY *)priv->idx)[i].dwChunkLength;
+                len=priv->idx[i].dwChunkLength;
                 if(d_audio->dpos<=curr_audio_pos && curr_audio_pos<(d_audio->dpos+len)){
                   break;
                 }
                 ++d_audio->pack_no;
-                priv->audio_block_no+=priv->audio_block_size ?
-		    ((len+priv->audio_block_size-1)/priv->audio_block_size) : 1;
+                priv->audio_block_no+=
+		    (len+priv->audio_block_size-1)/priv->audio_block_size;
                 d_audio->dpos+=len;
             }
           }
@@ -664,49 +711,48 @@ void demux_seek_avi(demuxer_t *demuxer,float rel_seek_secs,float audio_delay,int
 
           mp_msg(MSGT_SEEK,MSGL_V,"SEEK: i=%d (max:%d) dpos=%d (wanted:%d)  \n",
 	      i,chunk_max,(int)d_audio->dpos,curr_audio_pos);
-	      
+
 	} else {
 	    // VBR audio
 	    /* immediate seeking to audio position, including when streams are delayed */
 	    int chunks=(priv->avi_video_pts + audio_delay)*(float)sh_audio->audio.dwRate/(float)sh_audio->audio.dwScale;
 	    audio_chunk_pos=0;
-	    
+
         // find audio chunk pos:
           for(i=0;i<priv->idx_size && chunks>0;i++){
-            int id=((AVIINDEXENTRY *)priv->idx)[i].ckid;
+            int id=priv->idx[i].ckid;
             if(avi_stream_id(id)==d_audio->id){
-                len=((AVIINDEXENTRY *)priv->idx)[i].dwChunkLength;
+                len=priv->idx[i].dwChunkLength;
 		if(i>chunk_max){
 		  skip_audio_bytes+=len;
 		} else {
 		  ++d_audio->pack_no;
-                  priv->audio_block_no+=priv->audio_block_size ?
-		    ((len+priv->audio_block_size-1)/priv->audio_block_size) : 1;
+                  priv->audio_block_no+=
+		    (len+priv->audio_block_size-1)/priv->audio_block_size;
                   d_audio->dpos+=len;
 		  audio_chunk_pos=i;
 		}
-		if(priv->audio_block_size)
 		    chunks-=(len+priv->audio_block_size-1)/priv->audio_block_size;
             }
           }
 	}
-	
+
 	// Now we have:
 	//      audio_chunk_pos = chunk no in index table (it's <=chunk_max)
 	//      skip_audio_bytes = bytes to be skipped after chunk seek
 	//      d-audio->pack_no = chunk_no in stream at audio_chunk_pos
 	//      d_audio->dpos = bytepos in stream at audio_chunk_pos
 	// let's seek!
-	
+
           // update stream position:
           d_audio->pos=audio_chunk_pos;
-	
+
 	if(demuxer->type==DEMUXER_TYPE_AVI){
 	  // interleaved stream:
 	  if(audio_chunk_pos<video_chunk_pos){
             // calc priv->skip_video_frames & adjust video pts counter:
 	    for(i=audio_chunk_pos;i<video_chunk_pos;i++){
-              int id=((AVIINDEXENTRY *)priv->idx)[i].ckid;
+              int id=priv->idx[i].ckid;
               if(avi_stream_id(id)==d_video->id) ++priv->skip_video_frames;
             }
             // requires for correct audio pts calculation (demuxer):
@@ -736,7 +782,8 @@ void demux_seek_avi(demuxer_t *demuxer,float rel_seek_secs,float audio_delay,int
 }
 
 
-void demux_close_avi(demuxer_t *demuxer) {
+static void demux_close_avi(demuxer_t *demuxer)
+{
   avi_priv_t* priv=demuxer->priv;
 
   if(!priv)
@@ -776,7 +823,7 @@ static int demux_avi_control(demuxer_t *demuxer,int cmd, void *arg){
 	    int maxid = FFMIN(100, audio ? MAX_A_STREAMS : MAX_V_STREAMS);
 	    int chunkid;
 	    if (ds->id < -1)
-	      return DEMUXER_CTRL_NOTIMPL;
+	      ds->id = -1;
 
 	    if (*(int *)arg >= 0)
 	      ds->id = *(int *)arg;
@@ -811,13 +858,18 @@ static int avi_check_file(demuxer_t *demuxer)
   if((id==mmioFOURCC('R','I','F','F')) || (id==mmioFOURCC('O','N','2',' '))) {
     stream_read_dword_le(demuxer->stream); //filesize
     id=stream_read_dword_le(demuxer->stream); // "AVI "
-    if(id==formtypeAVI)
-      return DEMUXER_TYPE_AVI;
-    // "Samsung Digimax i6 PMP" crap according to bug 742
-    if(id==mmioFOURCC('A','V','I',0x19))
-      return DEMUXER_TYPE_AVI;
-    if(id==mmioFOURCC('O','N','2','f')){
+    switch (id)
+    {
+    case mmioFOURCC('O','N','2','f'):
       mp_msg(MSGT_DEMUXER,MSGL_INFO,MSGTR_ON2AviFormat);
+      /* Fallthrough */
+    case formtypeAVI:
+    case mmioFOURCC('A','V','I',0x19): // "Samsung Digimax i6 PMP" crap according to bug 742
+      if (demuxer->video->id == -2)
+      {
+          mp_msg(MSGT_DEMUXER, MSGL_INFO, "-novideo not supported by native AVI demuxer, selecting libavformat\n");
+          return DEMUXER_TYPE_LAVF;
+      }
       return DEMUXER_TYPE_AVI;
     }
   }
@@ -830,11 +882,11 @@ static demuxer_t* demux_open_hack_avi(demuxer_t *demuxer)
 {
    sh_audio_t* sh_a;
 
-   demuxer = (demuxer_t*) demux_open_avi(demuxer);
+   demuxer = demux_open_avi(demuxer);
    if(!demuxer) return NULL; // failed to open
-   sh_a = (sh_audio_t*)demuxer->audio->sh;
+   sh_a = demuxer->audio->sh;
    if(demuxer->audio->id != -2 && sh_a) {
-#ifdef HAVE_OGGVORBIS
+#ifdef CONFIG_OGGVORBIS
     // support for Ogg-in-AVI:
     if(sh_a->format == 0xFFFE)
       demuxer = init_avi_with_ogg(demuxer);
@@ -857,7 +909,7 @@ static demuxer_t* demux_open_hack_avi(demuxer_t *demuxer)
 }
 
 
-demuxer_desc_t demuxer_desc_avi = {
+const demuxer_desc_t demuxer_desc_avi = {
   "AVI demuxer",
   "avi",
   "AVI",
@@ -873,7 +925,7 @@ demuxer_desc_t demuxer_desc_avi = {
   demux_avi_control
 };
 
-demuxer_desc_t demuxer_desc_avi_ni = {
+const demuxer_desc_t demuxer_desc_avi_ni = {
   "AVI demuxer, non-interleaved",
   "avini",
   "AVI",
@@ -889,7 +941,7 @@ demuxer_desc_t demuxer_desc_avi_ni = {
   demux_avi_control
 };
 
-demuxer_desc_t demuxer_desc_avi_nini = {
+const demuxer_desc_t demuxer_desc_avi_nini = {
   "AVI demuxer, non-interleaved and no index",
   "avinini",
   "AVI",

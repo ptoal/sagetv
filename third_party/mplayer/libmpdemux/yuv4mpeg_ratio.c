@@ -3,7 +3,7 @@
  *
  *  Copyright (C) 2001 Matthew J. Marjanovic <maddog@mir.com>
  *
- *  This file is part of the lavtools packaged (mjpeg.sourceforge.net)
+ *  This file is part of the MJPEG Tools package (mjpeg.sourceforge.net).
  *
  *  This program is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU General Public License
@@ -68,7 +68,7 @@ static int gcd(int a, int b)
   }
   return a;
 }
-    
+
 
 /*************************************************************************
  *
@@ -93,7 +93,7 @@ void y4m_ratio_reduce(y4m_ratio_t *r)
  * Parse "nnn:ddd" into a ratio
  *
  * returns:         Y4M_OK  - success
- *           Y4M_ERR_RANGE  - range error 
+ *           Y4M_ERR_RANGE  - range error
  *
  *************************************************************************/
 
@@ -110,4 +110,3 @@ int y4m_parse_ratio(y4m_ratio_t *r, const char *s)
   y4m_ratio_reduce(r);
   return Y4M_OK;
 }
-

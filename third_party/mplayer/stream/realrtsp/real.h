@@ -26,14 +26,14 @@
  * adopted from joschkas real tools.
  *
  */
- 
-#ifndef HAVE_REAL_H
-#define HAVE_REAL_H
+
+#ifndef MPLAYER_REAL_H
+#define MPLAYER_REAL_H
 
 #include "rmff.h"
-#include "../librtsp/rtsp.h"
+#include "stream/librtsp/rtsp.h"
 
-#define HEADER_SIZE 4096
+#define REAL_HEADER_SIZE 4096
 
 struct real_rtsp_session_t {
   /* receive buffer */
@@ -42,7 +42,7 @@ struct real_rtsp_session_t {
   int recv_read;
 
   /* header buffer */
-  uint8_t header[HEADER_SIZE];
+  uint8_t header[REAL_HEADER_SIZE];
   int header_len;
   int header_read;
 
@@ -57,5 +57,4 @@ rmff_header_t *real_setup_and_get_header(rtsp_t *rtsp_session, uint32_t bandwidt
 struct real_rtsp_session_t *init_real_rtsp_session (void);
 void free_real_rtsp_session (struct real_rtsp_session_t* real_session);
 
-#endif
-
+#endif /* MPLAYER_REAL_H */

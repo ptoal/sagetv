@@ -1,14 +1,28 @@
 /*
-   generic implementation of sin(x) and cos(x) functions.
-   Specially for Linux.
-   Licence: GPL
-   Copyright (C) 2002 Nick Kurshev
-*/
+ * generic implementation of sin(x) and cos(x) functions specially for Linux
+ * Copyright (C) 2002 Nick Kurshev
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-#ifndef GENERIC_MATH_H
-#define GENERIC_MATH_H
+#ifndef MPLAYER_GENERIC_MATH_H
+#define MPLAYER_GENERIC_MATH_H
 
-typedef struct _gen_sincos
+typedef struct gen_sincos
 {
   double x;
   double sinx;
@@ -219,7 +233,7 @@ static gen_sincos_t g_sincos[201] = {
 { 3.141600e+00, -7.346410e-06, -1.000000e-00 }
 };
 
-# define M_PI		3.14159265358979323846	/* pi */
+#define M_PI 3.14159265358979323846 /* pi */
 
 static double inline gen_sin(double x)
 {
@@ -255,4 +269,4 @@ static double inline gen_cos(double x)
 #undef cos
 #define cos(x) gen_cos(x)
 
-#endif
+#endif /* MPLAYER_GENERIC_MATH_H */

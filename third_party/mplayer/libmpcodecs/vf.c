@@ -1,9 +1,27 @@
-#include "config.h"
+/*
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef HAVE_MALLOC_H
+#include "config.h"
+#if HAVE_MALLOC_H
 #include <malloc.h>
 #endif
 
@@ -22,111 +40,119 @@
 #include "vf.h"
 
 #include "libvo/fastmemcpy.h"
+#include "libavutil/common.h"
+#include "libavutil/mem.h"
 
-extern vf_info_t vf_info_vo;
-extern vf_info_t vf_info_rectangle;
-extern vf_info_t vf_info_bmovl;
-extern vf_info_t vf_info_crop;
-extern vf_info_t vf_info_expand;
-extern vf_info_t vf_info_pp;
-extern vf_info_t vf_info_scale;
-extern vf_info_t vf_info_format;
-extern vf_info_t vf_info_noformat;
-extern vf_info_t vf_info_yuy2;
-extern vf_info_t vf_info_flip;
-extern vf_info_t vf_info_rgb2bgr;
-extern vf_info_t vf_info_rotate;
-extern vf_info_t vf_info_mirror;
-extern vf_info_t vf_info_palette;
-extern vf_info_t vf_info_lavc;
-extern vf_info_t vf_info_zrmjpeg;
-extern vf_info_t vf_info_dvbscale;
-extern vf_info_t vf_info_cropdetect;
-extern vf_info_t vf_info_test;
-extern vf_info_t vf_info_noise;
-extern vf_info_t vf_info_yvu9;
-extern vf_info_t vf_info_lavcdeint;
-extern vf_info_t vf_info_eq;
-extern vf_info_t vf_info_eq2;
-extern vf_info_t vf_info_halfpack;
-extern vf_info_t vf_info_dint;
-extern vf_info_t vf_info_1bpp;
-extern vf_info_t vf_info_2xsai;
-extern vf_info_t vf_info_unsharp;
-extern vf_info_t vf_info_swapuv;
-extern vf_info_t vf_info_il;
-extern vf_info_t vf_info_fil;
-extern vf_info_t vf_info_boxblur;
-extern vf_info_t vf_info_sab;
-extern vf_info_t vf_info_smartblur;
-extern vf_info_t vf_info_perspective;
-extern vf_info_t vf_info_down3dright;
-extern vf_info_t vf_info_field;
-extern vf_info_t vf_info_denoise3d;
-extern vf_info_t vf_info_hqdn3d;
-extern vf_info_t vf_info_detc;
-extern vf_info_t vf_info_telecine;
-extern vf_info_t vf_info_tinterlace;
-extern vf_info_t vf_info_tfields;
-extern vf_info_t vf_info_ivtc;
-extern vf_info_t vf_info_ilpack;
-extern vf_info_t vf_info_dsize;
-extern vf_info_t vf_info_decimate;
-extern vf_info_t vf_info_softpulldown;
-extern vf_info_t vf_info_pullup;
-extern vf_info_t vf_info_filmdint;
-extern vf_info_t vf_info_framestep;
-extern vf_info_t vf_info_tile;
-extern vf_info_t vf_info_delogo;
-extern vf_info_t vf_info_remove_logo;
-extern vf_info_t vf_info_hue;
-extern vf_info_t vf_info_spp;
-extern vf_info_t vf_info_uspp;
-extern vf_info_t vf_info_fspp;
-extern vf_info_t vf_info_pp7;
-extern vf_info_t vf_info_yuvcsp;
-extern vf_info_t vf_info_kerndeint;
-extern vf_info_t vf_info_rgbtest;
-extern vf_info_t vf_info_qp;
-extern vf_info_t vf_info_phase;
-extern vf_info_t vf_info_divtc;
-extern vf_info_t vf_info_harddup;
-extern vf_info_t vf_info_softskip;
-extern vf_info_t vf_info_screenshot;
-extern vf_info_t vf_info_ass;
-extern vf_info_t vf_info_mcdeint;
-extern vf_info_t vf_info_yadif;
-extern vf_info_t vf_info_blackframe;
-extern vf_info_t vf_info_geq;
+extern const vf_info_t vf_info_1bpp;
+extern const vf_info_t vf_info_2xsai;
+extern const vf_info_t vf_info_ass;
+extern const vf_info_t vf_info_blackframe;
+extern const vf_info_t vf_info_bmovl;
+extern const vf_info_t vf_info_boxblur;
+extern const vf_info_t vf_info_crop;
+extern const vf_info_t vf_info_cropdetect;
+extern const vf_info_t vf_info_decimate;
+extern const vf_info_t vf_info_delogo;
+extern const vf_info_t vf_info_denoise3d;
+extern const vf_info_t vf_info_detc;
+extern const vf_info_t vf_info_dint;
+extern const vf_info_t vf_info_divtc;
+extern const vf_info_t vf_info_down3dright;
+extern const vf_info_t vf_info_dsize;
+extern const vf_info_t vf_info_dvbscale;
+extern const vf_info_t vf_info_eq2;
+extern const vf_info_t vf_info_eq;
+extern const vf_info_t vf_info_expand;
+extern const vf_info_t vf_info_field;
+extern const vf_info_t vf_info_fil;
+extern const vf_info_t vf_info_filmdint;
+extern const vf_info_t vf_info_fixpts;
+extern const vf_info_t vf_info_flip;
+extern const vf_info_t vf_info_format;
+extern const vf_info_t vf_info_framestep;
+extern const vf_info_t vf_info_fspp;
+extern const vf_info_t vf_info_geq;
+extern const vf_info_t vf_info_gradfun;
+extern const vf_info_t vf_info_halfpack;
+extern const vf_info_t vf_info_harddup;
+extern const vf_info_t vf_info_hqdn3d;
+extern const vf_info_t vf_info_hue;
+extern const vf_info_t vf_info_il;
+extern const vf_info_t vf_info_ilpack;
+extern const vf_info_t vf_info_ivtc;
+extern const vf_info_t vf_info_kerndeint;
+extern const vf_info_t vf_info_lavc;
+extern const vf_info_t vf_info_lavcdeint;
+extern const vf_info_t vf_info_lavfi;
+extern const vf_info_t vf_info_mcdeint;
+extern const vf_info_t vf_info_mirror;
+extern const vf_info_t vf_info_noformat;
+extern const vf_info_t vf_info_noise;
+extern const vf_info_t vf_info_ow;
+extern const vf_info_t vf_info_palette;
+extern const vf_info_t vf_info_perspective;
+extern const vf_info_t vf_info_phase;
+extern const vf_info_t vf_info_pp7;
+extern const vf_info_t vf_info_pp;
+extern const vf_info_t vf_info_pullup;
+extern const vf_info_t vf_info_qp;
+extern const vf_info_t vf_info_rectangle;
+extern const vf_info_t vf_info_remove_logo;
+extern const vf_info_t vf_info_rgbtest;
+extern const vf_info_t vf_info_rotate;
+extern const vf_info_t vf_info_sab;
+extern const vf_info_t vf_info_scale;
+extern const vf_info_t vf_info_screenshot;
+extern const vf_info_t vf_info_smartblur;
+extern const vf_info_t vf_info_softpulldown;
+extern const vf_info_t vf_info_softskip;
+extern const vf_info_t vf_info_spp;
+extern const vf_info_t vf_info_stereo3d;
+extern const vf_info_t vf_info_swapuv;
+extern const vf_info_t vf_info_telecine;
+extern const vf_info_t vf_info_test;
+extern const vf_info_t vf_info_tfields;
+extern const vf_info_t vf_info_tile;
+extern const vf_info_t vf_info_tinterlace;
+extern const vf_info_t vf_info_unsharp;
+extern const vf_info_t vf_info_uspp;
+extern const vf_info_t vf_info_vo;
+extern const vf_info_t vf_info_yadif;
+extern const vf_info_t vf_info_yuvcsp;
+extern const vf_info_t vf_info_yvu9;
+extern const vf_info_t vf_info_zrmjpeg;
 
 // list of available filters:
-static vf_info_t* filter_list[]={
+static const vf_info_t* const filter_list[]={
     &vf_info_rectangle,
 #ifdef HAVE_POSIX_SELECT
     &vf_info_bmovl,
 #endif
     &vf_info_crop,
     &vf_info_expand,
-#if defined(USE_LIBPOSTPROC) || defined(USE_LIBPOSTPROC_SO)
-    &vf_info_pp,
-#endif
     &vf_info_scale,
 //    &vf_info_osd,
     &vf_info_vo,
     &vf_info_format,
     &vf_info_noformat,
-    &vf_info_yuy2,
     &vf_info_flip,
-    &vf_info_rgb2bgr,
     &vf_info_rotate,
     &vf_info_mirror,
     &vf_info_palette,
-#ifdef USE_LIBAVCODEC
+    &vf_info_pp7,
+#ifdef CONFIG_FFMPEG
     &vf_info_lavc,
     &vf_info_lavcdeint,
-    &vf_info_pp7,
+#ifdef CONFIG_VF_LAVFI
+    &vf_info_lavfi,
 #endif
-#ifdef HAVE_ZR
+    &vf_info_screenshot,
+    &vf_info_geq,
+#endif
+#ifdef CONFIG_POSTPROC
+    &vf_info_pp,
+#endif
+#ifdef CONFIG_ZR
     &vf_info_zrmjpeg,
 #endif
     &vf_info_dvbscale,
@@ -136,6 +162,7 @@ static vf_info_t* filter_list[]={
     &vf_info_yvu9,
     &vf_info_eq,
     &vf_info_eq2,
+    &vf_info_gradfun,
     &vf_info_halfpack,
     &vf_info_dint,
     &vf_info_1bpp,
@@ -168,13 +195,12 @@ static vf_info_t* filter_list[]={
     &vf_info_delogo,
     &vf_info_remove_logo,
     &vf_info_hue,
-#ifdef USE_LIBAVCODEC_DSPUTIL
+#ifdef CONFIG_FFMPEG_A
     &vf_info_spp,
     &vf_info_uspp,
     &vf_info_fspp,
     &vf_info_qp,
     &vf_info_mcdeint,
-    &vf_info_geq,
 #endif
     &vf_info_yuvcsp,
     &vf_info_kerndeint,
@@ -183,20 +209,20 @@ static vf_info_t* filter_list[]={
     &vf_info_divtc,
     &vf_info_harddup,
     &vf_info_softskip,
-#ifdef HAVE_PNG
-    &vf_info_screenshot,
-#endif
-#ifdef USE_ASS
+#ifdef CONFIG_ASS
     &vf_info_ass,
 #endif
     &vf_info_yadif,
     &vf_info_blackframe,
+    &vf_info_ow,
+    &vf_info_fixpts,
+    &vf_info_stereo3d,
     NULL
 };
 
 // For the vf option
 m_obj_settings_t* vf_settings = NULL;
-m_obj_list_t vf_obj_list = {
+const m_obj_list_t vf_obj_list = {
   (void**)filter_list,
   M_ST_OFF(vf_info_t,name),
   M_ST_OFF(vf_info_t,info),
@@ -209,50 +235,52 @@ m_obj_list_t vf_obj_list = {
 void vf_mpi_clear(mp_image_t* mpi,int x0,int y0,int w,int h){
     int y;
     if(mpi->flags&MP_IMGFLAG_PLANAR){
-	y0&=~1;h+=h&1;
-	if(x0==0 && w==mpi->width){
-	    // full width clear:
-	    memset(mpi->planes[0]+mpi->stride[0]*y0,0,mpi->stride[0]*h);
-	    memset(mpi->planes[1]+mpi->stride[1]*(y0>>mpi->chroma_y_shift),128,mpi->stride[1]*(h>>mpi->chroma_y_shift));
-	    memset(mpi->planes[2]+mpi->stride[2]*(y0>>mpi->chroma_y_shift),128,mpi->stride[2]*(h>>mpi->chroma_y_shift));
-	} else
-	for(y=y0;y<y0+h;y+=2){
-	    memset(mpi->planes[0]+x0+mpi->stride[0]*y,0,w);
-	    memset(mpi->planes[0]+x0+mpi->stride[0]*(y+1),0,w);
-	    memset(mpi->planes[1]+(x0>>mpi->chroma_x_shift)+mpi->stride[1]*(y>>mpi->chroma_y_shift),128,(w>>mpi->chroma_x_shift));
-	    memset(mpi->planes[2]+(x0>>mpi->chroma_x_shift)+mpi->stride[2]*(y>>mpi->chroma_y_shift),128,(w>>mpi->chroma_x_shift));
-	}
-	return;
+        y0&=~1;h+=h&1;
+        if(x0==0 && w==mpi->width){
+            // full width clear:
+            memset(mpi->planes[0]+mpi->stride[0]*y0,0,mpi->stride[0]*h);
+            memset(mpi->planes[1]+mpi->stride[1]*(y0>>mpi->chroma_y_shift),128,mpi->stride[1]*(h>>mpi->chroma_y_shift));
+            memset(mpi->planes[2]+mpi->stride[2]*(y0>>mpi->chroma_y_shift),128,mpi->stride[2]*(h>>mpi->chroma_y_shift));
+        } else
+        for(y=y0;y<y0+h;y+=2){
+            memset(mpi->planes[0]+x0+mpi->stride[0]*y,0,w);
+            memset(mpi->planes[0]+x0+mpi->stride[0]*(y+1),0,w);
+            memset(mpi->planes[1]+(x0>>mpi->chroma_x_shift)+mpi->stride[1]*(y>>mpi->chroma_y_shift),128,(w>>mpi->chroma_x_shift));
+            memset(mpi->planes[2]+(x0>>mpi->chroma_x_shift)+mpi->stride[2]*(y>>mpi->chroma_y_shift),128,(w>>mpi->chroma_x_shift));
+        }
+        return;
     }
     // packed:
     for(y=y0;y<y0+h;y++){
-	unsigned char* dst=mpi->planes[0]+mpi->stride[0]*y+(mpi->bpp>>3)*x0;
-	if(mpi->flags&MP_IMGFLAG_YUV){
-	    unsigned int* p=(unsigned int*) dst;
-	    int size=(mpi->bpp>>3)*w/4;
-	    int i;
-#ifdef WORDS_BIGENDIAN
+        unsigned char* dst=mpi->planes[0]+mpi->stride[0]*y+(mpi->bpp>>3)*x0;
+        if(mpi->flags&MP_IMGFLAG_YUV){
+            unsigned int* p=(unsigned int*) dst;
+            int size=(mpi->bpp>>3)*w/4;
+            int i;
+#if HAVE_BIGENDIAN
 #define CLEAR_PACKEDYUV_PATTERN 0x00800080
 #define CLEAR_PACKEDYUV_PATTERN_SWAPPED 0x80008000
 #else
 #define CLEAR_PACKEDYUV_PATTERN 0x80008000
 #define CLEAR_PACKEDYUV_PATTERN_SWAPPED 0x00800080
 #endif
-	    if(mpi->flags&MP_IMGFLAG_SWAPPED){
-	        for(i=0;i<size-3;i+=4) p[i]=p[i+1]=p[i+2]=p[i+3]=CLEAR_PACKEDYUV_PATTERN_SWAPPED;
-		for(;i<size;i++) p[i]=CLEAR_PACKEDYUV_PATTERN_SWAPPED;
-	    } else {
-	        for(i=0;i<size-3;i+=4) p[i]=p[i+1]=p[i+2]=p[i+3]=CLEAR_PACKEDYUV_PATTERN;
-		for(;i<size;i++) p[i]=CLEAR_PACKEDYUV_PATTERN;
-	    }
-	} else
-	    memset(dst,0,(mpi->bpp>>3)*w);
+            if(mpi->flags&MP_IMGFLAG_SWAPPED){
+                for(i=0;i<size-3;i+=4) p[i]=p[i+1]=p[i+2]=p[i+3]=CLEAR_PACKEDYUV_PATTERN_SWAPPED;
+                for(;i<size;i++) p[i]=CLEAR_PACKEDYUV_PATTERN_SWAPPED;
+            } else {
+                for(i=0;i<size-3;i+=4) p[i]=p[i+1]=p[i+2]=p[i+3]=CLEAR_PACKEDYUV_PATTERN;
+                for(;i<size;i++) p[i]=CLEAR_PACKEDYUV_PATTERN;
+            }
+        } else
+            memset(dst,0,(mpi->bpp>>3)*w);
     }
 }
 
 mp_image_t* vf_get_image(vf_instance_t* vf, unsigned int outfmt, int mp_imgtype, int mp_imgflag, int w, int h){
   mp_image_t* mpi=NULL;
   int w2;
+  int number = (mp_imgtype >> 16) - 1;
+  int missing_palette;
 
 #ifdef MP_DEBUG
   assert(w == -1 || w >= vf->w);
@@ -266,16 +294,18 @@ mp_image_t* vf_get_image(vf_instance_t* vf, unsigned int outfmt, int mp_imgtype,
   if (w == -1) w = vf->w;
   if (h == -1) h = vf->h;
 
-  w2=(mp_imgflag&MP_IMGFLAG_ACCEPT_ALIGNED_STRIDE)?((w+15)&(~15)):w;
-  
+  w2=(mp_imgflag&MP_IMGFLAG_ACCEPT_ALIGNED_STRIDE)?FFALIGN(w, 32):w;
+
   if(vf->put_image==vf_next_put_image){
       // passthru mode, if the filter uses the fallback/default put_image() code
-      return vf_get_image(vf->next,outfmt,mp_imgtype,mp_imgflag,w,h);
+      mpi = vf_get_image(vf->next,outfmt,mp_imgtype,mp_imgflag,w,h);
+      mpi->usage_count++;
+      return mpi;
   }
-  
+
   // Note: we should call libvo first to check if it supports direct rendering
   // and if not, then fallback to software buffers:
-  switch(mp_imgtype){
+  switch(mp_imgtype & 0xff){
   case MP_IMGTYPE_EXPORT:
     if(!vf->imgctx.export_images[0]) vf->imgctx.export_images[0]=new_mp_image(w2,h);
     mpi=vf->imgctx.export_images[0];
@@ -299,142 +329,140 @@ mp_image_t* vf_get_image(vf_instance_t* vf, unsigned int outfmt, int mp_imgtype,
     mpi=vf->imgctx.static_images[vf->imgctx.static_idx];
     vf->imgctx.static_idx^=1;
     break;
+  case MP_IMGTYPE_NUMBERED:
+    if (number == -1) {
+      int i;
+      for (i = 0; i < NUM_NUMBERED_MPI; i++)
+        if (!vf->imgctx.numbered_images[i] || !vf->imgctx.numbered_images[i]->usage_count)
+          break;
+      number = i;
+    }
+    if (number < 0 || number >= NUM_NUMBERED_MPI) {
+      mp_msg(MSGT_VFILTER, MSGL_FATAL, "Ran out of numbered images, expect crash. Filter before %s is broken.\n", vf->info->name);
+      return NULL;
+    }
+    if (!vf->imgctx.numbered_images[number]) vf->imgctx.numbered_images[number] = new_mp_image(w2,h);
+    mpi = vf->imgctx.numbered_images[number];
+    mpi->number = number;
+    break;
   }
-  if(mpi){
+
+  if (!mpi)
+    return NULL;
+
     mpi->type=mp_imgtype;
     mpi->w=vf->w; mpi->h=vf->h;
     // keep buffer allocation status & color flags only:
-//    mpi->flags&=~(MP_IMGFLAG_PRESERVE|MP_IMGFLAG_READABLE|MP_IMGFLAG_DIRECT);
+//  mpi->flags&=~(MP_IMGFLAG_PRESERVE|MP_IMGFLAG_READABLE|MP_IMGFLAG_DIRECT);
     mpi->flags&=MP_IMGFLAG_ALLOCATED|MP_IMGFLAG_TYPE_DISPLAYED|MP_IMGFLAGMASK_COLORS;
-    // accept restrictions & draw_slice flags only:
-    mpi->flags|=mp_imgflag&(MP_IMGFLAGMASK_RESTRICTIONS|MP_IMGFLAG_DRAW_CALLBACK);
+    // accept restrictions, draw_slice and palette flags only:
+    mpi->flags|=mp_imgflag&(MP_IMGFLAGMASK_RESTRICTIONS|MP_IMGFLAG_DRAW_CALLBACK|MP_IMGFLAG_RGB_PALETTE);
     if(!vf->draw_slice) mpi->flags&=~MP_IMGFLAG_DRAW_CALLBACK;
-    if(mpi->width!=w2 || mpi->height!=h){
-//	printf("vf.c: MPI parameters changed!  %dx%d -> %dx%d   \n", mpi->width,mpi->height,w2,h);
-	if(mpi->flags&MP_IMGFLAG_ALLOCATED){
-	    if(mpi->width<w2 || mpi->height<h){
-		// need to re-allocate buffer memory:
-		free(mpi->planes[0]);
-		mpi->flags&=~MP_IMGFLAG_ALLOCATED;
-		mp_msg(MSGT_VFILTER,MSGL_V,"vf.c: have to REALLOCATE buffer memory :(\n");
-	    }
-//	} else {
-	} {
-	    mpi->width=w2; mpi->chroma_width=(w2 + (1<<mpi->chroma_x_shift) - 1)>>mpi->chroma_x_shift;
-	    mpi->height=h; mpi->chroma_height=(h + (1<<mpi->chroma_y_shift) - 1)>>mpi->chroma_y_shift;
-	}
+    missing_palette = !(mpi->flags & MP_IMGFLAG_RGB_PALETTE) && (mp_imgflag & MP_IMGFLAG_RGB_PALETTE);
+    if(mpi->width!=w2 || mpi->height!=h || mpi->imgfmt != outfmt || missing_palette){
+//      printf("vf.c: MPI parameters changed!  %dx%d -> %dx%d   \n", mpi->width,mpi->height,w2,h);
+        if(mpi->flags&MP_IMGFLAG_ALLOCATED){
+            if(mpi->width<w2 || mpi->height<h || mpi->imgfmt != outfmt || missing_palette){
+                // need to re-allocate buffer memory:
+                av_freep(&mpi->planes[0]);
+                if (mpi->flags & MP_IMGFLAG_RGB_PALETTE)
+                    av_freep(&mpi->planes[1]);
+                mpi->flags&=~MP_IMGFLAG_ALLOCATED;
+                mpi->bpp = 0;
+                mp_msg(MSGT_VFILTER,MSGL_V,"vf.c: have to REALLOCATE buffer memory in vf_%s :(\n",
+                       vf->info->name);
+            }
+//      } else {
+        } {
+            mpi->width=w2; mpi->chroma_width=(w2 + (1<<mpi->chroma_x_shift) - 1)>>mpi->chroma_x_shift;
+            mpi->height=h; mpi->chroma_height=(h + (1<<mpi->chroma_y_shift) - 1)>>mpi->chroma_y_shift;
+        }
     }
     if(!mpi->bpp) mp_image_setfmt(mpi,outfmt);
     if(!(mpi->flags&MP_IMGFLAG_ALLOCATED) && mpi->type>MP_IMGTYPE_EXPORT){
 
-	// check libvo first!
-	if(vf->get_image) vf->get_image(vf,mpi);
-	
+        // check libvo first!
+        if(vf->get_image) vf->get_image(vf,mpi);
+
         if(!(mpi->flags&MP_IMGFLAG_DIRECT)){
           // non-direct and not yet allocated image. allocate it!
-	  
-	  // check if codec prefer aligned stride:  
-	  if(mp_imgflag&MP_IMGFLAG_PREFER_ALIGNED_STRIDE){
-	      int align=(mpi->flags&MP_IMGFLAG_PLANAR &&
-	                 mpi->flags&MP_IMGFLAG_YUV) ?
-			 (8<<mpi->chroma_x_shift)-1 : 15; // -- maybe FIXME
-	      w2=((w+align)&(~align));
-	      if(mpi->width!=w2){
-	          // we have to change width... check if we CAN co it:
-		  int flags=vf->query_format(vf,outfmt); // should not fail
-		  if(!(flags&3)) mp_msg(MSGT_DECVIDEO,MSGL_WARN,"??? vf_get_image{vf->query_format(outfmt)} failed!\n");
-//		  printf("query -> 0x%X    \n",flags);
-		  if(flags&VFCAP_ACCEPT_STRIDE){
-	              mpi->width=w2;
-		      mpi->chroma_width=(w2 + (1<<mpi->chroma_x_shift) - 1)>>mpi->chroma_x_shift;
-		  }
-	      }
-	  }
-	  
-	  // IF09 - allocate space for 4. plane delta info - unused
-	  if (mpi->imgfmt == IMGFMT_IF09)
-	  {
-	     mpi->planes[0]=memalign(64, mpi->bpp*mpi->width*(mpi->height+2)/8+
-	    				mpi->chroma_width*mpi->chroma_height);
-	     /* export delta table */
-	     mpi->planes[3]=mpi->planes[0]+(mpi->width*mpi->height)+2*(mpi->chroma_width*mpi->chroma_height);
-	  }
-	  else
-	     mpi->planes[0]=memalign(64, mpi->bpp*mpi->width*(mpi->height+2)/8);
-	  if(mpi->flags&MP_IMGFLAG_PLANAR){
-	      // YV12/I420/YVU9/IF09. feel free to add other planar formats here...
-	      //if(!mpi->stride[0]) 
-	      mpi->stride[0]=mpi->width;
-	      //if(!mpi->stride[1]) 
-	      if(mpi->num_planes > 2){
-	      mpi->stride[1]=mpi->stride[2]=mpi->chroma_width;
-	      if(mpi->flags&MP_IMGFLAG_SWAPPED){
-	          // I420/IYUV  (Y,U,V)
-	          mpi->planes[1]=mpi->planes[0]+mpi->width*mpi->height;
-	          mpi->planes[2]=mpi->planes[1]+mpi->chroma_width*mpi->chroma_height;
-	      } else {
-	          // YV12,YVU9,IF09  (Y,V,U)
-	          mpi->planes[2]=mpi->planes[0]+mpi->width*mpi->height;
-	          mpi->planes[1]=mpi->planes[2]+mpi->chroma_width*mpi->chroma_height;
-	      }
-	      } else {
-	          // NV12/NV21
-	          mpi->stride[1]=mpi->chroma_width;
-	          mpi->planes[1]=mpi->planes[0]+mpi->width*mpi->height;
-	      }
-	  } else {
-	      //if(!mpi->stride[0]) 
-	      mpi->stride[0]=mpi->width*mpi->bpp/8;
-	  }
-//	  printf("clearing img!\n");
-	  vf_mpi_clear(mpi,0,0,mpi->width,mpi->height);
-	  mpi->flags|=MP_IMGFLAG_ALLOCATED;
+          if (!mpi->bpp) { // no way we can allocate this
+              mp_msg(MSGT_DECVIDEO, MSGL_FATAL,
+                     "vf_get_image: Tried to allocate a format that can not be allocated!\n");
+              return NULL;
+          }
+
+          // check if codec prefer aligned stride:
+          if(mp_imgflag&MP_IMGFLAG_PREFER_ALIGNED_STRIDE){
+              int align=(mpi->flags&MP_IMGFLAG_PLANAR &&
+                         mpi->flags&MP_IMGFLAG_YUV) ?
+                         (16<<mpi->chroma_x_shift) : 32; // -- maybe FIXME
+              w2=FFALIGN(w, align);
+              if(mpi->width!=w2){
+                  // we have to change width... check if we CAN co it:
+                  int flags=vf->query_format(vf,outfmt); // should not fail
+                  if(!(flags&3)) mp_msg(MSGT_DECVIDEO,MSGL_WARN,"??? vf_get_image{vf->query_format(outfmt)} failed!\n");
+//                  printf("query -> 0x%X    \n",flags);
+                  if(flags&VFCAP_ACCEPT_STRIDE){
+                      mpi->width=w2;
+                      mpi->chroma_width=(w2 + (1<<mpi->chroma_x_shift) - 1)>>mpi->chroma_x_shift;
+                  }
+              }
+          }
+
+          mp_image_alloc_planes(mpi);
+//        printf("clearing img!\n");
+          vf_mpi_clear(mpi,0,0,mpi->width,mpi->height);
         }
     }
     if(mpi->flags&MP_IMGFLAG_DRAW_CALLBACK)
-	if(vf->start_slice) vf->start_slice(vf,mpi);
+        if(vf->start_slice) vf->start_slice(vf,mpi);
     if(!(mpi->flags&MP_IMGFLAG_TYPE_DISPLAYED)){
-	    mp_msg(MSGT_DECVIDEO,MSGL_V,"*** [%s] %s%s mp_image_t, %dx%dx%dbpp %s %s, %d bytes\n",
-		  vf->info->name,
-		  (mpi->type==MP_IMGTYPE_EXPORT)?"Exporting":
-	          ((mpi->flags&MP_IMGFLAG_DIRECT)?"Direct Rendering":"Allocating"),
-	          (mpi->flags&MP_IMGFLAG_DRAW_CALLBACK)?" (slices)":"",
-	          mpi->width,mpi->height,mpi->bpp,
-		  (mpi->flags&MP_IMGFLAG_YUV)?"YUV":((mpi->flags&MP_IMGFLAG_SWAPPED)?"BGR":"RGB"),
-		  (mpi->flags&MP_IMGFLAG_PLANAR)?"planar":"packed",
-	          mpi->bpp*mpi->width*mpi->height/8);
-	    mp_msg(MSGT_DECVIDEO,MSGL_DBG2,"(imgfmt: %x, planes: %p,%p,%p strides: %d,%d,%d, chroma: %dx%d, shift: h:%d,v:%d)\n",
-		mpi->imgfmt, mpi->planes[0], mpi->planes[1], mpi->planes[2],
-		mpi->stride[0], mpi->stride[1], mpi->stride[2],
-		mpi->chroma_width, mpi->chroma_height, mpi->chroma_x_shift, mpi->chroma_y_shift);
-	    mpi->flags|=MP_IMGFLAG_TYPE_DISPLAYED;
+            mp_msg(MSGT_DECVIDEO,MSGL_V,"*** [%s] %s%s mp_image_t, %dx%dx%dbpp %s %s, %d bytes\n",
+                  vf->info->name,
+                  (mpi->type==MP_IMGTYPE_EXPORT)?"Exporting":
+                  ((mpi->flags&MP_IMGFLAG_DIRECT)?"Direct Rendering":"Allocating"),
+                  (mpi->flags&MP_IMGFLAG_DRAW_CALLBACK)?" (slices)":"",
+                  mpi->width,mpi->height,mpi->bpp,
+                  (mpi->flags&MP_IMGFLAG_YUV)?"YUV":((mpi->flags&MP_IMGFLAG_SWAPPED)?"BGR":"RGB"),
+                  (mpi->flags&MP_IMGFLAG_PLANAR)?"planar":"packed",
+                  mpi->bpp*mpi->width*mpi->height/8);
+            mp_msg(MSGT_DECVIDEO,MSGL_DBG2,"(imgfmt: %x, planes: %p,%p,%p strides: %d,%d,%d, chroma: %dx%d, shift: h:%d,v:%d)\n",
+                mpi->imgfmt, mpi->planes[0], mpi->planes[1], mpi->planes[2],
+                mpi->stride[0], mpi->stride[1], mpi->stride[2],
+                mpi->chroma_width, mpi->chroma_height, mpi->chroma_x_shift, mpi->chroma_y_shift);
+            mpi->flags|=MP_IMGFLAG_TYPE_DISPLAYED;
     }
 
   mpi->qscale = NULL;
-  }
-//    printf("\rVF_MPI: %p %p %p %d %d %d    \n",
-//	mpi->planes[0],mpi->planes[1],mpi->planes[2],
-//	mpi->stride[0],mpi->stride[1],mpi->stride[2]);
+  mpi->usage_count++;
+  // TODO: figure out what is going on with EXPORT types
+  if (mpi->usage_count > 1 && mpi->type != MP_IMGTYPE_EXPORT)
+      mp_msg(MSGT_VFILTER, MSGL_V, "Suspicious mp_image usage count %i in vf_%s (type %i)\n",
+             mpi->usage_count, vf->info->name, mpi->type);
+//  printf("\rVF_MPI: %p %p %p %d %d %d    \n",
+//      mpi->planes[0],mpi->planes[1],mpi->planes[2],
+//      mpi->stride[0],mpi->stride[1],mpi->stride[2]);
   return mpi;
 }
 
 //============================================================================
 
 // By default vf doesn't accept MPEGPES
-static int vf_default_query_format(struct vf_instance_s* vf, unsigned int fmt){
+static int vf_default_query_format(struct vf_instance *vf, unsigned int fmt){
   if(fmt == IMGFMT_MPEGPES) return 0;
   return vf_next_query_format(vf,fmt);
 }
 
-vf_instance_t* vf_open_plugin(vf_info_t** filter_list, vf_instance_t* next, const char *name, char **args){
+vf_instance_t* vf_open_plugin(const vf_info_t* const* filter_list, vf_instance_t* next, const char *name, char **args){
     vf_instance_t* vf;
     int i;
     for(i=0;;i++){
-	if(!filter_list[i]){
-	    mp_msg(MSGT_VFILTER,MSGL_ERR,MSGTR_CouldNotFindVideoFilter,name);
-	    return NULL; // no such filter!
-	}
-	if(!strcmp(filter_list[i]->name,name)) break;
+        if(!filter_list[i]){
+            mp_msg(MSGT_VFILTER,MSGL_ERR,MSGTR_CouldNotFindVideoFilter,name);
+            return NULL; // no such filter!
+        }
+        if(!strcmp(filter_list[i]->name,name)) break;
     }
     vf=malloc(sizeof(vf_instance_t));
     memset(vf,0,sizeof(vf_instance_t));
@@ -447,19 +475,19 @@ vf_instance_t* vf_open_plugin(vf_info_t** filter_list, vf_instance_t* next, cons
     vf->default_caps=VFCAP_ACCEPT_STRIDE;
     vf->default_reqs=0;
     if(vf->info->opts) { // vf_vo get some special argument
-      m_struct_t* st = vf->info->opts;
+      const m_struct_t* st = vf->info->opts;
       void* vf_priv = m_struct_alloc(st);
       int n;
       for(n = 0 ; args && args[2*n] ; n++)
-	m_struct_set(st,vf_priv,args[2*n],args[2*n+1]);
+        m_struct_set(st,vf_priv,args[2*n],args[2*n+1]);
       vf->priv = vf_priv;
       args = NULL;
     } else // Otherwise we should have the '_oldargs_'
       if(args && !strcmp(args[0],"_oldargs_"))
-	args = (char**)args[1];
+        args = (char**)args[1];
       else
-	args = NULL;
-    if(vf->info->open(vf,(char*)args)>0) return vf; // Success!
+        args = NULL;
+    if(vf->info->vf_open(vf,(char*)args)>0) return vf; // Success!
     free(vf);
     mp_msg(MSGT_VFILTER,MSGL_ERR,MSGTR_CouldNotOpenVideoFilter,name);
     return NULL;
@@ -476,16 +504,16 @@ vf_instance_t* vf_open_filter(vf_instance_t* next, const char *name, char **args
       char* p = str;
       p += sprintf(str,"%s",name);
       for(i = 0 ; args && args[2*i] ; i++)
-	p += sprintf(p," %s=%s",args[2*i],args[2*i+1]);
+        p += sprintf(p," %s=%s",args[2*i],args[2*i+1]);
       mp_msg(MSGT_VFILTER,MSGL_INFO,MSGTR_OpeningVideoFilter "[%s]\n",str);
     }
   } else if(strcmp(name,"vo")) {
     if(args && strcmp(args[0],"_oldargs_") == 0)
       mp_msg(MSGT_VFILTER,MSGL_INFO,MSGTR_OpeningVideoFilter
-	     "[%s=%s]\n", name,args[1]);
+             "[%s=%s]\n", name,args[1]);
     else
       mp_msg(MSGT_VFILTER,MSGL_INFO,MSGTR_OpeningVideoFilter
-	     "[%s]\n", name);
+             "[%s]\n", name);
   }
   return vf_open_plugin(filter_list,next,name,args);
 }
@@ -512,17 +540,17 @@ vf_instance_t* vf_add_before_vo(vf_instance_t **vf, char *name, char **args) {
 
 //============================================================================
 
-unsigned int vf_match_csp(vf_instance_t** vfp,unsigned int* list,unsigned int preferred){
+unsigned int vf_match_csp(vf_instance_t** vfp,const unsigned int* list,unsigned int preferred){
     vf_instance_t* vf=*vfp;
-    unsigned int* p;
+    const unsigned int* p;
     unsigned int best=0;
     int ret;
     if((p=list)) while(*p){
-	ret=vf->query_format(vf,*p);
-	mp_msg(MSGT_VFILTER,MSGL_V,"[%s] query(%s) -> %d\n",vf->info->name,vo_format_name(*p),ret&3);
-	if(ret&2){ best=*p; break;} // no conversion -> bingo!
-	if(ret&1 && !best) best=*p; // best with conversion
-	++p;
+        ret=vf->query_format(vf,*p);
+        mp_msg(MSGT_VFILTER,MSGL_V,"[%s] query(%s) -> %d\n",vf->info->name,vo_format_name(*p),ret&3);
+        if(ret&2){ best=*p; break;} // no conversion -> bingo!
+        if(ret&1 && !best) best=*p; // best with conversion
+        ++p;
     }
     if(best) return best; // bingo, they have common csp!
     // ok, then try with scale:
@@ -533,11 +561,11 @@ unsigned int vf_match_csp(vf_instance_t** vfp,unsigned int* list,unsigned int pr
     if(preferred && vf->query_format(vf,preferred)) best=preferred; else
     // try the list again, now with "scaler" :
     if((p=list)) while(*p){
-	ret=vf->query_format(vf,*p);
-	mp_msg(MSGT_VFILTER,MSGL_V,"[%s] query(%s) -> %d\n",vf->info->name,vo_format_name(*p),ret&3);
-	if(ret&2){ best=*p; break;} // no conversion -> bingo!
-	if(ret&1 && !best) best=*p; // best with conversion
-	++p;
+        ret=vf->query_format(vf,*p);
+        mp_msg(MSGT_VFILTER,MSGL_V,"[%s] query(%s) -> %d\n",vf->info->name,vo_format_name(*p),ret&3);
+        if(ret&2){ best=*p; break;} // no conversion -> bingo!
+        if(ret&1 && !best) best=*p; // best with conversion
+        ++p;
     }
     if(best) *vfp=vf; // else uninit vf  !FIXME!
     return best;
@@ -548,8 +576,8 @@ void vf_clone_mpi_attributes(mp_image_t* dst, mp_image_t* src){
     dst->fields = src->fields;
     dst->qscale_type= src->qscale_type;
     if(dst->width == src->width && dst->height == src->height){
-	dst->qstride= src->qstride;
-	dst->qscale= src->qscale;
+        dst->qstride= src->qstride;
+        dst->qscale= src->qscale;
     }
 }
 
@@ -566,20 +594,26 @@ void vf_queue_frame(vf_instance_t *vf, int (*func)(vf_instance_t *))
 int vf_output_queued_frame(vf_instance_t *vf)
 {
     while (1) {
-	int ret;
-	vf_instance_t *current;
-	vf_instance_t *last=NULL;
-	int (*tmp)(vf_instance_t *);
-	for (current = vf; current; current = current->next)
-	    if (current->continue_buffered_image)
-		last = current;
-	if (!last)
-	    return 0;
-	tmp = last->continue_buffered_image;
-	last->continue_buffered_image = NULL;
-	ret = tmp(last);
-	if (ret)
-	    return ret;
+        int ret;
+        vf_instance_t *current;
+        vf_instance_t *last=NULL;
+        int (*tmp)(vf_instance_t *);
+        for (current = vf; current; current = current->next)
+            if (current->continue_buffered_image)
+                last = current;
+        if (!last)
+            return 0;
+        tmp = last->continue_buffered_image;
+        last->continue_buffered_image = NULL;
+        ret = tmp(last);
+        if (ret > 0) {
+            vf->control(vf, VFCTRL_DRAW_OSD, NULL);
+#ifdef CONFIG_ASS
+            vf->control(vf, VFCTRL_DRAW_EOSD, NULL);
+#endif
+        }
+        if (ret)
+            return ret;
     }
 }
 
@@ -596,15 +630,15 @@ int vf_output_queued_frame(vf_instance_t *vf)
  * are unchanged, and returns either success or error.
  *
 */
-int vf_config_wrapper(struct vf_instance_s* vf,
-		    int width, int height, int d_width, int d_height,
-		    unsigned int flags, unsigned int outfmt)
+int vf_config_wrapper(struct vf_instance *vf,
+                    int width, int height, int d_width, int d_height,
+                    unsigned int flags, unsigned int outfmt)
 {
     int r;
     if ((vf->default_caps&VFCAP_CONSTANT) && vf->fmt.have_configured) {
         if ((vf->fmt.orig_width != width)
-	    || (vf->fmt.orig_height != height)
-	    || (vf->fmt.orig_fmt != outfmt)) {
+            || (vf->fmt.orig_height != height)
+            || (vf->fmt.orig_fmt != outfmt)) {
             mp_msg(MSGT_VFILTER,MSGL_ERR,MSGTR_ResolutionDoesntMatch);
             return 0;
         }
@@ -619,79 +653,93 @@ int vf_config_wrapper(struct vf_instance_s* vf,
     return r;
 }
 
-int vf_next_config(struct vf_instance_s* vf,
+int vf_next_config(struct vf_instance *vf,
         int width, int height, int d_width, int d_height,
-	unsigned int voflags, unsigned int outfmt){
+        unsigned int voflags, unsigned int outfmt){
     int miss;
     int flags=vf->next->query_format(vf->next,outfmt);
     if(!flags){
-	// hmm. colorspace mismatch!!!
-	// let's insert the 'scale' filter, it does the job for us:
-	vf_instance_t* vf2;
-	if(vf->next->info==&vf_info_scale) return 0; // scale->scale
-	vf2=vf_open_filter(vf->next,"scale",NULL);
-	if(!vf2) return 0; // shouldn't happen!
-	vf->next=vf2;
-	flags=vf->next->query_format(vf->next,outfmt);
-	if(!flags){
-	    mp_msg(MSGT_VFILTER,MSGL_ERR,MSGTR_CannotFindColorspace);
-	    return 0; // FAIL
-	}
+        // hmm. colorspace mismatch!!!
+        // let's insert the 'scale' filter, it does the job for us:
+        vf_instance_t* vf2;
+        if(vf->next->info==&vf_info_scale) return 0; // scale->scale
+        vf2=vf_open_filter(vf->next,"scale",NULL);
+        if(!vf2) return 0; // shouldn't happen!
+        vf->next=vf2;
+        flags=vf->next->query_format(vf->next,outfmt);
+        if(!flags){
+            mp_msg(MSGT_VFILTER,MSGL_ERR,MSGTR_CannotFindColorspace);
+            return 0; // FAIL
+        }
     }
     mp_msg(MSGT_VFILTER,MSGL_V,"REQ: flags=0x%X  req=0x%X  \n",flags,vf->default_reqs);
     miss=vf->default_reqs - (flags&vf->default_reqs);
     if(miss&VFCAP_ACCEPT_STRIDE){
-	// vf requires stride support but vf->next doesn't support it!
-	// let's insert the 'expand' filter, it does the job for us:
-	vf_instance_t* vf2=vf_open_filter(vf->next,"expand",NULL);
-	if(!vf2) return 0; // shouldn't happen!
-	vf->next=vf2;
+        // vf requires stride support but vf->next doesn't support it!
+        // let's insert the 'expand' filter, it does the job for us:
+        vf_instance_t* vf2=vf_open_filter(vf->next,"expand",NULL);
+        if(!vf2) return 0; // shouldn't happen!
+        vf->next=vf2;
     }
     vf->next->w = width; vf->next->h = height;
     return vf_config_wrapper(vf->next,width,height,d_width,d_height,voflags,outfmt);
 }
 
-int vf_next_control(struct vf_instance_s* vf, int request, void* data){
+int vf_next_control(struct vf_instance *vf, int request, void* data){
     return vf->next->control(vf->next,request,data);
 }
 
-int vf_next_query_format(struct vf_instance_s* vf, unsigned int fmt){
+void vf_extra_flip(struct vf_instance *vf) {
+    vf_next_control(vf, VFCTRL_DRAW_OSD, NULL);
+#ifdef CONFIG_ASS
+    vf_next_control(vf, VFCTRL_DRAW_EOSD, NULL);
+#endif
+    vf_next_control(vf, VFCTRL_FLIP_PAGE, NULL);
+}
+
+int vf_next_query_format(struct vf_instance *vf, unsigned int fmt){
     int flags=vf->next->query_format(vf->next,fmt);
     if(flags) flags|=vf->default_caps;
     return flags;
 }
 
-int vf_next_put_image(struct vf_instance_s* vf,mp_image_t *mpi, double pts){
+int vf_next_put_image(struct vf_instance *vf,mp_image_t *mpi, double pts){
+    mpi->usage_count--;
+    if (mpi->usage_count < 0) {
+        mp_msg(MSGT_VFILTER, MSGL_V, "Bad mp_image usage count %i in vf_%s (type %i)\n",
+               mpi->usage_count, vf->info->name, mpi->type);
+        mpi->usage_count = 0;
+    }
     return vf->next->put_image(vf->next,mpi, pts);
 }
 
-void vf_next_draw_slice(struct vf_instance_s* vf,unsigned char** src, int * stride,int w, int h, int x, int y){
+void vf_next_draw_slice(struct vf_instance *vf,unsigned char** src, int * stride,int w, int h, int x, int y){
     if (vf->next->draw_slice) {
-	vf->next->draw_slice(vf->next,src,stride,w,h,x,y);
-	return;
+        vf->next->draw_slice(vf->next,src,stride,w,h,x,y);
+        return;
     }
     if (!vf->dmpi) {
-	mp_msg(MSGT_VFILTER,MSGL_ERR,"draw_slice: dmpi not stored by vf_%s\n", vf->info->name);
-	return;
+        mp_msg(MSGT_VFILTER,MSGL_ERR,"draw_slice: dmpi not stored by vf_%s\n", vf->info->name);
+        return;
     }
     if (!(vf->dmpi->flags & MP_IMGFLAG_PLANAR)) {
-	memcpy_pic(vf->dmpi->planes[0]+y*vf->dmpi->stride[0]+vf->dmpi->bpp/8*x,
-	    src[0], vf->dmpi->bpp/8*w, h, vf->dmpi->stride[0], stride[0]);
-	return;
+        memcpy_pic(vf->dmpi->planes[0]+y*vf->dmpi->stride[0]+vf->dmpi->bpp/8*x,
+            src[0], vf->dmpi->bpp/8*w, h, vf->dmpi->stride[0], stride[0]);
+        return;
     }
     memcpy_pic(vf->dmpi->planes[0]+y*vf->dmpi->stride[0]+x, src[0],
-	w, h, vf->dmpi->stride[0], stride[0]);
+        w, h, vf->dmpi->stride[0], stride[0]);
     memcpy_pic(vf->dmpi->planes[1]+(y>>vf->dmpi->chroma_y_shift)*vf->dmpi->stride[1]+(x>>vf->dmpi->chroma_x_shift),
-	src[1], w>>vf->dmpi->chroma_x_shift, h>>vf->dmpi->chroma_y_shift, vf->dmpi->stride[1], stride[1]);
+        src[1], w>>vf->dmpi->chroma_x_shift, h>>vf->dmpi->chroma_y_shift, vf->dmpi->stride[1], stride[1]);
     memcpy_pic(vf->dmpi->planes[2]+(y>>vf->dmpi->chroma_y_shift)*vf->dmpi->stride[2]+(x>>vf->dmpi->chroma_x_shift),
-	src[2], w>>vf->dmpi->chroma_x_shift, h>>vf->dmpi->chroma_y_shift, vf->dmpi->stride[2], stride[2]);
+        src[2], w>>vf->dmpi->chroma_x_shift, h>>vf->dmpi->chroma_y_shift, vf->dmpi->stride[2], stride[2]);
 }
 
 //============================================================================
 
 vf_instance_t* append_filters(vf_instance_t* last){
   vf_instance_t* vf;
-  int i; 
+  int i;
 
   if(vf_settings) {
     // We want to add them in the 'right order'
@@ -719,8 +767,8 @@ void vf_uninit_filter(vf_instance_t* vf){
 
 void vf_uninit_filter_chain(vf_instance_t* vf){
     while(vf){
-	vf_instance_t* next=vf->next;
-	vf_uninit_filter(vf);
-	vf=next;
+        vf_instance_t* next=vf->next;
+        vf_uninit_filter(vf);
+        vf=next;
     }
 }

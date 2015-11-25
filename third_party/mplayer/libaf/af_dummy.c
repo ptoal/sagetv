@@ -1,10 +1,29 @@
-/* The name speaks for itself this filter is a dummy and will not blow
-   up regardless of what you do with it. */
-#include "config.h"
+/*
+ * The name speaks for itself. This filter is a dummy and will
+ * not blow up regardless of what you do with it.
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "mp_msg.h"
 #include "af.h"
 
 // Initialization and runtime control
@@ -13,17 +32,16 @@ static int control(struct af_instance_s* af, int cmd, void* arg)
   switch(cmd){
   case AF_CONTROL_REINIT:
     memcpy(af->data,(af_data_t*)arg,sizeof(af_data_t));
-    af_msg(AF_MSG_VERBOSE,"[dummy] Was reinitialized: %iHz/%ich/%s\n",
+    mp_msg(MSGT_AFILTER, MSGL_V, "[dummy] Was reinitialized: %iHz/%ich/%s\n",
 	af->data->rate,af->data->nch,af_fmt2str_short(af->data->format));
     return AF_OK;
   }
   return AF_UNKNOWN;
 }
 
-// Deallocate memory 
+// Deallocate memory
 static void uninit(struct af_instance_s* af)
 {
-  if(af->data)
     free(af->data);
 }
 
@@ -32,7 +50,7 @@ static af_data_t* play(struct af_instance_s* af, af_data_t* data)
 {
   // Do something necessary to get rid of annoying warning during compile
   if(!af)
-    af_msg(AF_MSG_ERROR,"EEEK: Argument af == NULL in af_dummy.c play().");
+    mp_msg(MSGT_AFILTER, MSGL_ERR, "EEEK: Argument af == NULL in af_dummy.c play().");
   return data;
 }
 
@@ -41,8 +59,7 @@ static int af_open(af_instance_t* af){
   af->control=control;
   af->uninit=uninit;
   af->play=play;
-  af->mul.d=1;
-  af->mul.n=1;
+  af->mul=1;
   af->data=malloc(sizeof(af_data_t));
   if(af->data == NULL)
     return AF_ERROR;

@@ -1,9 +1,26 @@
-#include "config.h"
-/* vf_bmovl.c v0.9.1 - BitMap OVerLay videofilter for MPlayer
+/*
+ * BitMap OVerLay video filter for MPlayer
  *
  * (C) 2002 Per Wigren <wigren@home.se>
- * Licenced under the GNU General Public License
  *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
+/*
  * Use MPlayer as a framebuffer to read bitmaps and commands from a FIFO
  * and display them in the window.
  *
@@ -64,6 +81,7 @@
 #include <sys/types.h>
 #include <sys/time.h>
 #include <fcntl.h>
+#include "config.h"
 #include "mp_image.h"
 #include "vf.h"
 #include "img_format.h"
@@ -107,14 +125,14 @@ struct vf_priv_s {
 };
 
 static int
-query_format(struct vf_instance_s* vf, unsigned int fmt){
+query_format(struct vf_instance *vf, unsigned int fmt){
     if(fmt==IMGFMT_YV12) return VFCAP_CSP_SUPPORTED;
     return 0;
 }
 
 
 static int
-config(struct vf_instance_s* vf,
+config(struct vf_instance *vf,
        int width, int height, int d_width, int d_height,
        unsigned int flags, unsigned int outfmt)
 {
@@ -144,7 +162,7 @@ config(struct vf_instance_s* vf,
 }
 
 static void
-uninit(struct vf_instance_s *vf)
+uninit(struct vf_instance *vf)
 {
 	if(vf->priv) {
 		free(vf->priv->bitmap.y);
@@ -193,10 +211,10 @@ _read_cmd(int fd, char *cmd, char *args) {
 	}
 	return TRUE;
 }
-			
+
 
 static int
-put_image(struct vf_instance_s* vf, mp_image_t* mpi, double pts){
+put_image(struct vf_instance *vf, mp_image_t* mpi, double pts){
 	int buf_x=0, buf_y=0, buf_pos=0;
 	int have, got, want;
 	int xpos=0, ypos=0, pos=0;
@@ -300,7 +318,7 @@ put_image(struct vf_instance_s* vf, mp_image_t* mpi, double pts){
 				vf->priv->x2 = av_clip(imgx + imgw, vf->priv->x2, vf->priv->w);
 				vf->priv->y2 = av_clip(imgy + imgh, vf->priv->y2, vf->priv->h);
 			}
-			
+
 			if( command == CMD_CLEAR ) {
 				sscanf( args, "%d %d %d %d", &imgw, &imgh, &imgx, &imgy);
 				mp_msg(MSGT_VFILTER, MSGL_DBG2, "\nDEBUG: CLEAR: %d %d %d %d\n\n", imgw, imgh, imgx, imgy);
@@ -388,14 +406,14 @@ put_image(struct vf_instance_s* vf, mp_image_t* mpi, double pts){
 
 	if(vf->priv->opaque) {	// Just copy buffer memory to screen
 		for( ypos=vf->priv->y1 ; ypos < vf->priv->y2 ; ypos++ ) {
-			memcpy( dmpi->planes[0] + (ypos*dmpi->stride[0]) + vf->priv->x1,
+			fast_memcpy( dmpi->planes[0] + (ypos*dmpi->stride[0]) + vf->priv->x1,
 			        vf->priv->bitmap.y + (ypos*vf->priv->w) + vf->priv->x1,
 					vf->priv->x2 - vf->priv->x1 );
 			if(ypos%2) {
-				memcpy( dmpi->planes[1] + ((ypos/2)*dmpi->stride[1]) + (vf->priv->x1/2),
+				fast_memcpy( dmpi->planes[1] + ((ypos/2)*dmpi->stride[1]) + (vf->priv->x1/2),
 				        vf->priv->bitmap.u + (((ypos/2)*(vf->priv->w)/2)) + (vf->priv->x1/2),
 				        (vf->priv->x2 - vf->priv->x1)/2 );
-				memcpy( dmpi->planes[2] + ((ypos/2)*dmpi->stride[2]) + (vf->priv->x1/2),
+				fast_memcpy( dmpi->planes[2] + ((ypos/2)*dmpi->stride[2]) + (vf->priv->x1/2),
 				        vf->priv->bitmap.v + (((ypos/2)*(vf->priv->w)/2)) + (vf->priv->x1/2),
 				        (vf->priv->x2 - vf->priv->x1)/2 );
 			}
@@ -417,19 +435,19 @@ put_image(struct vf_instance_s* vf, mp_image_t* mpi, double pts){
 						dmpi->planes[2][pos] = vf->priv->bitmap.v[pos];
 					}
 				} else { // Alphablended pixel
-					dmpi->planes[0][pos] = 
-						((255 - alpha) * (int)dmpi->planes[0][pos] + 
+					dmpi->planes[0][pos] =
+						((255 - alpha) * (int)dmpi->planes[0][pos] +
 						alpha * (int)vf->priv->bitmap.y[pos]) >> 8;
-					
+
 					if ((ypos%2) && (xpos%2)) {
 						pos = ( (ypos/2) * dmpi->stride[1] ) + (xpos/2);
 
-						dmpi->planes[1][pos] = 
-							((255 - alpha) * (int)dmpi->planes[1][pos] + 
+						dmpi->planes[1][pos] =
+							((255 - alpha) * (int)dmpi->planes[1][pos] +
 							alpha * (int)vf->priv->bitmap.u[pos]) >> 8;
-						
-						dmpi->planes[2][pos] = 
-							((255 - alpha) * (int)dmpi->planes[2][pos] + 
+
+						dmpi->planes[2][pos] =
+							((255 - alpha) * (int)dmpi->planes[2][pos] +
 							alpha * (int)vf->priv->bitmap.v[pos]) >> 8;
 					}
 			    }
@@ -440,7 +458,7 @@ put_image(struct vf_instance_s* vf, mp_image_t* mpi, double pts){
 } // put_image
 
 static int
-vf_open(vf_instance_t* vf, char* args)
+vf_open(vf_instance_t *vf, char *args)
 {
     char filename[1000];
 
@@ -469,7 +487,7 @@ vf_open(vf_instance_t* vf, char* args)
     return TRUE;
 }
 
-vf_info_t vf_info_bmovl = {
+const vf_info_t vf_info_bmovl = {
     "Read bitmaps from a FIFO and display them in window",
     "bmovl",
     "Per Wigren",

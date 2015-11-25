@@ -3,23 +3,23 @@
 # QEPDVCD
 #
 # Most of this stuff comes straight from MPlayer documentation.
-# Options are limited only to a small useful subset, if you 
+# Options are limited only to a small useful subset, if you
 # want more control, RTFM and DIY.
 #
 # Version:          0.1
 #
 # Licence:          GPL
 #
-# Author:           Reynaldo H. Verdejo Pinochet <reynaldo@opendot.cl> 
+# Author:           Reynaldo H. Verdejo Pinochet <reynaldo@opendot.cl>
 #
-# Script:           MPlayer Sources. Anything supported to vcd/svcd pal/ntsc 
+# Script:           MPlayer Sources. Anything supported to vcd/svcd pal/ntsc
 #
 # requires:         mencoder
 #
-# sugests:          vcdimager / cdrecord 
+# sugests:          vcdimager / cdrecord
 #
 # Thanks to:        Carlos Navarro Salas - name author ;)
-#					
+#
 #
 
 # Defaults
@@ -43,7 +43,7 @@ RATIOY=3
 
 OPTIONS="INPUTFILENAME TARGET ENCQ ABPS VBPS NORM SPLIT TOLERANCE OUTNAME"
 
-function usage()
+usage()
 {
 echo ""
 echo "usage $MYNAME inputfile [options]"
@@ -65,7 +65,7 @@ echo "http://www.mplayerhq.hu/DOCS/HTML/en/menc-feat-vcd-dvd.html"
 echo ""
 }
 
-function test_needed()
+test_needed()
 {
 
 for i in mencoder; do
@@ -77,7 +77,7 @@ done
 
 }
 
-function test_sugested()
+test_sugested()
 {
 
 for i in vcdimager cdrecord; do
@@ -234,7 +234,7 @@ else
 	SUBTITLESTRING="$SUBFILENAME"
 fi
 
-if [ $SPLIT == "0" ]; then
+if [ $SPLIT = "0" ]; then
 	CICLES=0
 	TIMESTRING=""
 else
@@ -276,7 +276,7 @@ for j in $(seq 0 $CICLES); do
 			fi
 		done
 	fi
-		
+
 # Mencoder Time ;-) ###################################################
 
 mencoder \

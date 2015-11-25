@@ -1,3 +1,8 @@
+#ifndef MPLAYER_QT_FV_H
+#define MPLAYER_QT_FV_H
+
+#include <stddef.h>
+
 typedef struct qt_fv_s {
     unsigned int id;
     char* name;
@@ -1584,3 +1589,5 @@ qt_fv_t qt_fv_list[]={
 { 0x270028, "TENumStyles"},
 { 0x270029, "TEFeatureFlag"},
 { 0,NULL } };
+
+#endif /* MPLAYER_QT_FV_H */

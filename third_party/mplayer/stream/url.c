@@ -1,11 +1,27 @@
 /*
  * URL Helper
- * by Bertrand Baudet <bertrand_baudet@yahoo.com>
- * (C) 2001, MPlayer team.
  *
+ * Copyright (C) 2001 Bertrand Baudet <bertrand_baudet@yahoo.com>
+ *
+ * This file is part of MPlayer.
+ *
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
-#include "config.h"
+
 #include <string.h>
+#include <strings.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <ctype.h>
@@ -13,34 +29,97 @@
 
 #include "url.h"
 #include "mp_msg.h"
+#include "mp_strings.h"
 #include "help_mp.h"
 
 #ifndef SIZE_MAX
 #define SIZE_MAX ((size_t)-1)
 #endif
 
+static int is_proxy(const URL_t *url) {
+  return !strcasecmp(url->protocol, "http_proxy") && url->file && strstr(url->file, "://");
+}
+
+int url_is_protocol(const URL_t *url, const char *proto) {
+  int proxy = is_proxy(url);
+  if (proxy) {
+    URL_t *tmp = url_new(url->file + 1);
+    int res = !strcasecmp(tmp->protocol, proto);
+    url_free(tmp);
+    return res;
+  }
+  return !strcasecmp(url->protocol, proto);
+}
+
+void url_set_protocol(URL_t *url, const char *proto) {
+  int proxy = is_proxy(url);
+  if (proxy) {
+    char *dst = url->file + 1;
+    int oldlen = strstr(dst, "://") - dst;
+    int newlen = strlen(proto);
+    if (newlen != oldlen) {
+      mp_msg(MSGT_NETWORK, MSGL_ERR, "Setting protocol not implemented!\n");
+      return;
+    }
+    memcpy(dst, proto, newlen);
+    return;
+  }
+  free(url->protocol);
+  url->protocol = strdup(proto);
+}
+
 URL_t *url_redirect(URL_t **url, const char *redir) {
   URL_t *u = *url;
+  int proxy = is_proxy(u);
+  const char *oldurl = proxy ? u->file + 1 : u->url;
+  const char *newurl = redir;
+  char *buffer = NULL;
   URL_t *res;
   if (!strchr(redir, '/') || *redir == '/') {
     char *tmp;
-    char *newurl = malloc(strlen(u->url) + strlen(redir) + 1);
-    strcpy(newurl, u->url);
+    newurl = buffer = malloc(strlen(oldurl) + strlen(redir) + 1);
+    strcpy(buffer, oldurl);
     if (*redir == '/') {
       redir++;
-      tmp = strstr(newurl, "://");
+      tmp = strstr(buffer, "://");
       if (tmp) tmp = strchr(tmp + 3, '/');
     } else
-      tmp = strrchr(newurl, '/');
+      tmp = strrchr(buffer, '/');
     if (tmp) tmp[1] = 0;
-    strcat(newurl, redir);
-    res = url_new(newurl);
-    free(newurl);
-  } else
-    res = url_new(redir);
+    strcat(buffer, redir);
+  }
+  if (proxy) {
+    char *tmp = get_http_proxy_url(u, newurl);
+    free(buffer);
+    newurl = buffer = tmp;
+  }
+  res = url_new(newurl);
+  free(buffer);
   url_free(u);
   *url = res;
   return res;
+}
+
+static char *get_noauth_url(const URL_t *url)
+{
+    if (url->port)
+        return mp_asprintf("%s://%s:%d%s",
+                           url->protocol, url->hostname, url->port, url->file);
+    else
+        return mp_asprintf("%s://%s%s",
+                           url->protocol, url->hostname, url->file);
+}
+
+char *get_http_proxy_url(const URL_t *proxy, const char *host_url)
+{
+    if (proxy->username)
+        return mp_asprintf("http_proxy://%s:%s@%s:%d/%s",
+                           proxy->username,
+                           proxy->password ? proxy->password : "",
+                           proxy->hostname, proxy->port, host_url);
+    else
+        return mp_asprintf("http_proxy://%s:%d/%s",
+                           proxy->hostname, proxy->port, host_url);
 }
 
 URL_t*
@@ -52,7 +131,7 @@ url_new(const char* url) {
 	int jumpSize = 3;
 
 	if( url==NULL ) return NULL;
-	
+
         if (strlen(url) > (SIZE_MAX / 3 - 1)) {
                 mp_msg(MSGT_NETWORK,MSGL_FATAL,MSGTR_MemAllocFailed);
                 goto err_out;
@@ -64,14 +143,11 @@ url_new(const char* url) {
         }
 
 	// Create the URL container
-	Curl = malloc(sizeof(URL_t));
+	Curl = calloc(1, sizeof(*Curl));
 	if( Curl==NULL ) {
 		mp_msg(MSGT_NETWORK,MSGL_FATAL,MSGTR_MemAllocFailed);
 		goto err_out;
 	}
-
-	// Initialisation of the URL container members
-	memset( Curl, 0, sizeof(URL_t) );
 
 	url_escape_string(escfilename,url);
 
@@ -138,7 +214,9 @@ url_new(const char* url) {
 			}
 			strncpy( Curl->password, ptr3+1, len2);
 			Curl->password[len2]='\0';
+			url_unescape_string(Curl->password, Curl->password);
 		}
+		url_unescape_string(Curl->username, Curl->username);
 		ptr1 = ptr2+1;
 		pos1 = ptr1-escfilename;
 	}
@@ -158,7 +236,7 @@ url_new(const char* url) {
 		ptr2 = ptr1;
 
 	}
-	
+
 	// look if the port is given
 	ptr2 = strstr(ptr2, ":");
 	// If the : is after the first / it isn't the port
@@ -204,7 +282,7 @@ url_new(const char* url) {
 				goto err_out;
 			}
 		}
-	} 
+	}
 	// Check if a filename was given or set, else set it with '/'
 	if( Curl->file==NULL ) {
 		Curl->file = malloc(2);
@@ -214,11 +292,17 @@ url_new(const char* url) {
 		}
 		strcpy(Curl->file, "/");
 	}
-	
+
+	Curl->noauth_url = get_noauth_url(Curl);
+		if (!Curl->noauth_url) {
+			mp_msg(MSGT_NETWORK, MSGL_FATAL, MSGTR_MemAllocFailed);
+			goto err_out;
+		}
+
         free(escfilename);
 	return Curl;
 err_out:
-	if (escfilename) free(escfilename);
+	free(escfilename);
 	if (Curl) url_free(Curl);
 	return NULL;
 }
@@ -226,18 +310,20 @@ err_out:
 void
 url_free(URL_t* url) {
 	if(!url) return;
-	if(url->url) free(url->url);
-	if(url->protocol) free(url->protocol);
-	if(url->hostname) free(url->hostname);
-	if(url->file) free(url->file);
-	if(url->username) free(url->username);
-	if(url->password) free(url->password);
+	free(url->url);
+	free(url->noauth_url);
+	free(url->protocol);
+	free(url->hostname);
+	free(url->file);
+	free(url->username);
+	free(url->password);
 	free(url);
 }
 
 
 /* Replace escape sequences in an URL (or a part of an URL) */
-/* works like strcpy(), but without return argument */
+/* works like strcpy(), but without return argument,
+   except that outbuf == inbuf is allowed */
 void
 url_unescape_string(char *outbuf, const char *inbuf)
 {
@@ -259,7 +345,7 @@ url_unescape_string(char *outbuf, const char *inbuf)
 			}
 		}
 		*outbuf++ = c;
-	} 
+	}
         *outbuf++='\0'; //add nullterm to string
 }
 
@@ -278,14 +364,13 @@ url_escape_string_part(char *outbuf, const char *inbuf) {
 
 		if(	(c >= 'A' && c <= 'Z') ||
 			(c >= 'a' && c <= 'z') ||
-			(c >= '0' && c <= '9') ||
-			(c >= 0x7f)) {
+			(c >= '0' && c <= '9')) {
 			*outbuf++ = c;
                 } else if ( c=='%' && ((c1 >= '0' && c1 <= '9') || (c1 >= 'A' && c1 <= 'F')) &&
                            ((c2 >= '0' && c2 <= '9') || (c2 >= 'A' && c2 <= 'F'))) {
                                                               // check if part of an escape sequence
                             *outbuf++=c;                      // already
-			      
+
                                                               // dont escape again
                             mp_msg(MSGT_NETWORK,MSGL_ERR,MSGTR_MPDEMUX_URL_StringAlreadyEscaped,c,c1,c2);
                                                               // error as this should not happen against RFC 2396
@@ -313,7 +398,7 @@ url_escape_string(char *outbuf, const char *inbuf) {
 	unsigned char c;
         int i = 0,j,len = strlen(inbuf);
 	char* tmp,*unesc = NULL, *in;
-	
+
 	// Look if we have an ip6 address, if so skip it there is
 	// no need to escape anything in there.
 	tmp = strstr(inbuf,"://[");
@@ -327,7 +412,8 @@ url_escape_string(char *outbuf, const char *inbuf) {
 			tmp = NULL;
 		}
 	}
-	
+
+	tmp = NULL;
 	while(i < len) {
 		// look for the next char that must be kept
 		for  (j=i;j<len;j++) {
@@ -352,7 +438,7 @@ url_escape_string(char *outbuf, const char *inbuf) {
 			in = tmp;
 		} else // take the rest of the string
 			in = (char*)inbuf+i;
-		
+
 		if(!unesc) unesc = malloc(len+1);
 		// unescape first to avoid escaping escape
 		url_unescape_string(unesc,in);
@@ -363,11 +449,11 @@ url_escape_string(char *outbuf, const char *inbuf) {
 		i += strlen(in);
 	}
 	*outbuf = '\0';
-	if(tmp) free(tmp);
-	if(unesc) free(unesc);
+	free(tmp);
+	free(unesc);
 }
 
-#ifdef __URL_DEBUG
+#ifdef URL_DEBUG
 void
 url_debug(const URL_t *url) {
 	if( url==NULL ) {
@@ -394,4 +480,4 @@ url_debug(const URL_t *url) {
 		printf("password=%s\n", url->password );
 	}
 }
-#endif //__URL_DEBUG
+#endif /* URL_DEBUG */

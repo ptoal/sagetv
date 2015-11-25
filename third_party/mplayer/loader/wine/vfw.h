@@ -1,16 +1,12 @@
 /*
  * Modified for use with MPlayer, detailed changelog at
  * http://svn.mplayerhq.hu/mplayer/trunk/
- * $Id: vfw.h,v 1.3 2007-04-10 19:33:31 Narflex Exp $
  */
 
-#ifndef __WINE_VFW_H
-#define __WINE_VFW_H
+#ifndef MPLAYER_VFW_H
+#define MPLAYER_VFW_H
 //#include "pshpack1.h"
-#ifdef __cplusplus
-extern "C" {
-#endif
-#ifndef __WINE_WINGDI_H
+#include "windef.h"
 
 typedef struct __attribute__((__packed__))
 {
@@ -43,10 +39,9 @@ typedef struct {
 } BITMAPINFO, *LPBITMAPINFO;
 #endif
 
-#endif
-#define VFWAPI	
-#define VFWAPIV	
-#ifndef __WINE_WINDEF_H
+#define VFWAPI
+#define VFWAPIV
+#ifndef MPLAYER_WINDEF_H
 typedef long (__stdcall__ *DRIVERPROC)(long,HDRVR,unsigned int,long,long);
 #endif
 
@@ -212,6 +207,9 @@ typedef struct {
     void*		lpPrev;
 } ICCOMPRESS;
 
+
+long VFWAPI VideoForWindowsVersion(void);
+
 long VFWAPIV ICCompress(
 	HIC hic,long dwFlags,LPBITMAPINFOHEADER lpbiOutput,void* lpData,
 	LPBITMAPINFOHEADER lpbiInput,void* lpBits,long* lpckid,
@@ -232,14 +230,14 @@ long VFWAPIV ICCompress(
 	ICSendMessage(					\
 	    hic, ICM_GETDEFAULTKEYFRAMERATE,		\
 	    (long)(void*)(lpint), 			\
-	    0	)		
+	    0	)
 
 #define ICGetDefaultQuality(hic,lpint) 			\
 	ICSendMessage(					\
 	    hic, ICM_GETDEFAULTQUALITY,			\
 	    (long)(void*)(lpint), 			\
-	    0	)		
-	    	
+	    0	)
+
 
 #define ICCompressBegin(hic, lpbiInput, lpbiOutput) 			\
     ICSendMessage(							\
@@ -504,7 +502,7 @@ long VFWAPIV ICDraw(HIC hic,long dwFlags,void* lpFormat,void* lpData,long cbData
 
 #define	AVIGETFRAMEF_BESTDISPLAYFMT	1
 
-typedef struct _AVISTREAMINFOA {
+typedef struct AVISTREAMINFOA {
     long	fccType;
     long	fccHandler;
     long	dwFlags;        /* AVIIF_* */
@@ -525,7 +523,7 @@ typedef struct _AVISTREAMINFOA {
     char	szName[64];
 } AVISTREAMINFOA, * LPAVISTREAMINFOA, *PAVISTREAMINFOA;
 
-typedef struct _AVISTREAMINFOW {
+typedef struct AVISTREAMINFOW {
     long	fccType;
     long	fccHandler;
     long	dwFlags;
@@ -565,7 +563,7 @@ DECL_WINELIB_TYPE_AW(PAVISTREAMINFO)
 #define AVIFILECAPS_ALLKEYFRAMES	0x00000010
 #define AVIFILECAPS_NOCOMPRESSION	0x00000020
 
-typedef struct _AVIFILEINFOW {
+typedef struct AVIFILEINFOW {
     long               dwMaxBytesPerSec;
     long               dwFlags;
     long               dwCaps;
@@ -573,14 +571,14 @@ typedef struct _AVIFILEINFOW {
     long               dwSuggestedBufferSize;
     long               dwWidth;
     long               dwHeight;
-    long               dwScale;        
+    long               dwScale;
     long               dwRate;
     long               dwLength;
     long               dwEditCount;
     short               szFileType[64];
 } AVIFILEINFOW, * LPAVIFILEINFOW, *PAVIFILEINFOW;
 
-typedef struct _AVIFILEINFOA {
+typedef struct AVIFILEINFOA {
     long               dwMaxBytesPerSec;
     long               dwFlags;
     long               dwCaps;
@@ -588,7 +586,7 @@ typedef struct _AVIFILEINFOA {
     long               dwSuggestedBufferSize;
     long               dwWidth;
     long               dwHeight;
-    long               dwScale;        
+    long               dwScale;
     long               dwRate;
     long               dwLength;
     long               dwEditCount;
@@ -668,7 +666,4 @@ typedef struct {
 #define AVIERR_USERABORT	MAKE_AVIERR(198)
 #define AVIERR_ERROR		MAKE_AVIERR(199)
 
-#ifdef __cplusplus
-}
-#endif
-#endif /* __WINE_VFW_H */
+#endif /* MPLAYER_VFW_H */

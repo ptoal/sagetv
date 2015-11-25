@@ -1,11 +1,22 @@
 /*
- *  video_out_vesa.c
+ * copyright (C) 2001 Nick Kurshev <nickols_k@mail.ru>
+ * This file is partly based on vbetest.c from lrmi distributive.
  *
- *	Copyright (C) Nick Kurshev <nickols_k@mail.ru> - Oct 2001
+ * This file is part of MPlayer.
  *
- *  You can redistribute this file under terms and conditions
- *  of GNU General Public licence v2.
- *  This file is partly based on vbetest.c from lrmi distributive.
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 /*
@@ -19,7 +30,7 @@
 #include "help_mp.h"
 #include "gtf.h"
 #include <stdio.h>
-#ifdef HAVE_MALLOC_H
+#if HAVE_MALLOC_H
 #include <malloc.h>
 #endif
 #include <stdlib.h>
@@ -31,47 +42,28 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-
+#include <libavutil/common.h>
 #include <vbe.h>
 
 #include "video_out.h"
 #include "video_out_internal.h"
 
 #include "fastmemcpy.h"
-#include "sub.h"
+#include "sub/sub.h"
 #include "libavutil/common.h"
 #include "mpbswap.h"
 #include "aspect.h"
 #include "vesa_lvo.h"
-#ifdef CONFIG_VIDIX
 #include "vosub_vidix.h"
-#endif
 #include "mp_msg.h"
 
 #include "libswscale/swscale.h"
 #include "libmpcodecs/vf_scale.h"
 
 
-#ifdef HAVE_PNG
-extern vo_functions_t video_out_png;
-#endif
-
-extern char *monitor_hfreq_str;
-extern char *monitor_vfreq_str;
-extern char *monitor_dotclock_str;
-
 #define MAX_BUFFERS 3
 
-#ifndef max
-#define max(a,b) ((a)>(b)?(a):(b))
-#endif
-#ifndef min
-#define min(a,b) ((a)<(b)?(a):(b))
-#endif
-
-#define UNUSED(x) ((void)(x)) /**< Removes warning about unused arguments */
-
-static vo_info_t info = 
+static const vo_info_t info =
 {
 	"VESA VBE 2.0 video output",
 	"vesa",
@@ -128,7 +120,7 @@ static vidix_grkey_t gr_key;
 /* Neomagic TV out */
 static int neomagic_tvout = 0;
 static int neomagic_tvnorm = NEO_PAL;
- 
+
 #define HAS_DGA()  (win.idx == -1)
 #define MOVIE_MODE (MODE_ATTR_COLOR | MODE_ATTR_GRAPHICS)
 #define FRAME_MODE (MODE_WIN_RELOCATABLE | MODE_WIN_WRITEABLE)
@@ -144,7 +136,7 @@ static char * vbeErrToStr(int err)
   }
   else
   switch(err)
-  { 
+  {
     case VBE_OK: retval = "No error"; break;
     case VBE_VM86_FAIL: retval = "vm86() syscall failed"; break;
     case VBE_OUT_OF_DOS_MEM: retval = "Out of DOS memory"; break;
@@ -178,7 +170,7 @@ static void vesa_term( void )
 #define VALID_WIN_FRAME(offset) (offset >= win.low && offset < win.high)
 #define VIDEO_PTR(offset) (win.ptr + offset - win.low)
 
-static inline void __vbeSwitchBank(unsigned long offset)
+static inline void vbeSwitchBank(unsigned long offset)
 {
   unsigned long gran;
   unsigned new_offset;
@@ -198,7 +190,7 @@ static inline void __vbeSwitchBank(unsigned long offset)
   win.high = win.low + video_mode_info.WinSize*1024;
 }
 
-static void __vbeSetPixel(int x, int y, int r, int g, int b)
+static void vbeSetPixel(int x, int y, int r, int g, int b)
 {
 	int x_res = video_mode_info.XResolution;
 	int y_res = video_mode_info.YResolution;
@@ -216,7 +208,7 @@ static void __vbeSetPixel(int x, int y, int r, int g, int b)
 	b >>= 8 - video_mode_info.BlueMaskSize;
 	color = (r << shift_r) | (g << shift_g) | (b << shift_b);
 	offset = y * bpl + (x * pixel_size);
-        if(!VALID_WIN_FRAME(offset)) __vbeSwitchBank(offset);
+        if(!VALID_WIN_FRAME(offset)) vbeSwitchBank(offset);
 	memcpy(VIDEO_PTR(offset), &color, pixel_size);
 }
 
@@ -224,19 +216,19 @@ static void __vbeSetPixel(int x, int y, int r, int g, int b)
   Copies part of frame to video memory. Data should be in the same format
   as video memory.
 */
-static void __vbeCopyBlockFast(unsigned long offset,uint8_t *image,unsigned long size)
+static void vbeCopyBlockFast(unsigned long offset,uint8_t *image,unsigned long size)
 {
-  memcpy(&win.ptr[offset],image,size);
+  fast_memcpy(&win.ptr[offset],image,size);
 }
 
-static void __vbeCopyBlock(unsigned long offset,uint8_t *image,unsigned long size)
+static void vbeCopyBlock(unsigned long offset,uint8_t *image,unsigned long size)
 {
    unsigned long delta,src_idx = 0;
    while(size)
    {
-	if(!VALID_WIN_FRAME(offset)) __vbeSwitchBank(offset);
-	delta = min(size,win.high - offset);
-	memcpy(VIDEO_PTR(offset),&image[src_idx],delta);
+	if(!VALID_WIN_FRAME(offset)) vbeSwitchBank(offset);
+	delta = FFMIN(size, win.high - offset);
+	fast_memcpy(VIDEO_PTR(offset),&image[src_idx],delta);
 	src_idx += delta;
 	offset += delta;
 	size -= delta;
@@ -252,7 +244,7 @@ static void __vbeCopyBlock(unsigned long offset,uint8_t *image,unsigned long siz
 #define SCREEN_LINE_SIZE(pixel_size) (video_mode_info.XResolution*(pixel_size) )
 #define IMAGE_LINE_SIZE(pixel_size) (dstW*(pixel_size))
 
-static void __vbeCopyData(uint8_t *image)
+static void vbeCopyData(uint8_t *image)
 {
    unsigned long i,j,image_offset,offset;
    unsigned pixel_size,image_line_size,screen_line_size,x_shift;
@@ -280,15 +272,15 @@ static void __vbeCopyData(uint8_t *image)
 static int draw_slice(uint8_t *image[], int stride[], int w,int h,int x,int y)
 {
     int dstride=HAS_DGA()?video_mode_info.XResolution:dstW;
-    uint8_t *dst[3]= {dga_buffer, NULL, NULL};
-    int dstStride[3];
+    uint8_t *dst[MP_MAX_PLANES]={dga_buffer};
+    int dstStride[MP_MAX_PLANES]={0};
     if( mp_msg_test(MSGT_VO,MSGL_DBG3) )
 	mp_msg(MSGT_VO,MSGL_DBG3, "vo_vesa: draw_slice was called: w=%u h=%u x=%u y=%u\n",w,h,x,y);
     dstStride[0]=dstride*((dstBpp+7)/8);
     dstStride[1]=
     dstStride[2]=dstStride[0]>>1;
     if(HAS_DGA()) dst[0] += y_offset*SCREEN_LINE_SIZE(PIXEL_SIZE())+x_offset*PIXEL_SIZE();
-    sws_scale_ordered(sws,image,stride,y,h,dst,dstStride);
+    sws_scale(sws,image,stride,y,h,dst,dstStride);
     flip_trigger = 1;
     return 0;
 }
@@ -350,13 +342,6 @@ static void draw_alpha_15(int x0,int y0, int w,int h, unsigned char* src, unsign
 
 static void draw_alpha_null(int x0,int y0, int w,int h, unsigned char* src, unsigned char *srca, int stride)
 {
-  UNUSED(x0);
-  UNUSED(y0);
-  UNUSED(w);
-  UNUSED(h);
-  UNUSED(src);
-  UNUSED(srca);
-  UNUSED(stride);
 }
 
 
@@ -381,9 +366,9 @@ static void flip_page(void)
 {
   if( mp_msg_test(MSGT_VO,MSGL_DBG3) )
 	mp_msg(MSGT_VO,MSGL_DBG3, "vo_vesa: flip_page was called\n");
-  if(flip_trigger) 
+  if(flip_trigger)
   {
-    if(!HAS_DGA()) __vbeCopyData(dga_buffer);
+    if(!HAS_DGA()) vbeCopyData(dga_buffer);
     flip_trigger = 0;
   }
   if(vo_doublebuffering && multi_size > 1)
@@ -420,8 +405,8 @@ static int draw_frame(uint8_t *src[])
     {
 	int dstride=HAS_DGA()?video_mode_info.XResolution:dstW;
 	int srcStride[1];
-	uint8_t *dst[3]= {dga_buffer, NULL, NULL};
-	int dstStride[3];
+	uint8_t *dst[MP_MAX_PLANES]={dga_buffer};
+	int dstStride[MP_MAX_PLANES]={0};
 	dstStride[0]=dstride*((dstBpp+7)/8);
 	dstStride[1]=
 	dstStride[2]=dstStride[0]>>1;
@@ -433,7 +418,7 @@ static int draw_frame(uint8_t *src[])
 	else
 	    srcStride[0] = srcW*2;
 	if(HAS_DGA()) dst[0] += y_offset*SCREEN_LINE_SIZE(PIXEL_SIZE())+x_offset*PIXEL_SIZE();
-	sws_scale_ordered(sws,src,srcStride,0,srcH,dst,dstStride);
+	sws_scale(sws,src,srcStride,0,srcH,dst,dstStride);
 	flip_trigger=1;
     }
     return 0;
@@ -468,7 +453,7 @@ static int query_format(uint32_t format)
     if( mp_msg_test(MSGT_VO,MSGL_DBG3) )
         mp_msg(MSGT_VO,MSGL_DBG3, "vo_vesa: query_format was called: %x (%s)\n",format,vo_format_name(format));
 #ifdef CONFIG_VIDIX
-    if(vidix_name)return(vidix_query_fourcc(format));
+    if(vidix_name) return vidix_query_fourcc(format);
 #endif
     if (format == IMGFMT_MPEGPES)
 	return 0;
@@ -499,7 +484,7 @@ static void paintBkGnd( void )
 		g = y * 255 / y_res;
 		b = 255 - y * 255 / y_res;
 	    }
-	    __vbeSetPixel(x, y, r, g, b);
+	    vbeSetPixel(x, y, r, g, b);
 	}
     }
 }
@@ -512,7 +497,7 @@ static void clear_screen( void )
 
     for (y = 0; y < y_res; ++y)
 	for (x = 0; x < x_res; ++x)
-	    __vbeSetPixel(x, y, 0, 0, 0);
+	    vbeSetPixel(x, y, 0, 0, 0);
 }
 
 static char *model2str(unsigned char type)
@@ -533,7 +518,7 @@ static char *model2str(unsigned char type)
   return retval;
 }
 
-unsigned fillMultiBuffer( unsigned long vsize, unsigned nbuffs )
+static unsigned fillMultiBuffer(unsigned long vsize, unsigned nbuffs)
 {
   unsigned long screen_size, offset;
   unsigned total,i;
@@ -544,7 +529,7 @@ unsigned fillMultiBuffer( unsigned long vsize, unsigned nbuffs )
     mp_msg(MSGT_VO,MSGL_V, "vo_vesa: Can use up to %u video buffers\n",total);
   i = 0;
   offset = 0;
-  total = min(total,nbuffs);
+  total = FFMIN(total, nbuffs);
   while(i < total) { multi_buff[i++] = offset; offset += screen_size; }
   if(!i)
     mp_msg(MSGT_VO,MSGL_WARN, MSGTR_LIBVO_VESA_YouHaveTooLittleVideoMemory, screen_size, vsize);
@@ -556,7 +541,7 @@ static int set_refresh(unsigned x, unsigned y, unsigned mode,struct VesaCRTCInfo
 {
     unsigned pixclk;
     float H_freq;
-    
+
     range_t *monitor_hfreq = NULL;
     range_t *monitor_vfreq = NULL;
     range_t *monitor_dotclock = NULL;
@@ -564,43 +549,43 @@ static int set_refresh(unsigned x, unsigned y, unsigned mode,struct VesaCRTCInfo
     monitor_hfreq = str2range(monitor_hfreq_str);
     monitor_vfreq = str2range(monitor_vfreq_str);
     monitor_dotclock = str2range(monitor_dotclock_str);
-    
+
 		if (!monitor_hfreq || !monitor_vfreq || !monitor_dotclock) {
 			mp_msg(MSGT_VO,MSGL_WARN, MSGTR_LIBVO_VESA_YouHaveToSpecifyTheCapabilitiesOfTheMonitor);
 			return 0;
 		}
 
     H_freq = range_max(monitor_hfreq)/1000;
-    
+
 //    printf("H_freq MAX %f\n",H_freq);
-    
+
     do
     {
     H_freq -= 0.01;
-    GTF_calcTimings(x,y,H_freq,GTF_HF,0, 0,crtc_pass);		      
-//    printf("PixelCLK %d\n",(unsigned)crtc_pass->PixelClock);    
+    GTF_calcTimings(x,y,H_freq,GTF_HF,0, 0,crtc_pass);
+//    printf("PixelCLK %d\n",(unsigned)crtc_pass->PixelClock);
     }
     while ( (!in_range(monitor_vfreq,crtc_pass->RefreshRate/100)||
 	    !in_range(monitor_hfreq,H_freq*1000))&&(H_freq>0));
-    
+
     pixclk = crtc_pass->PixelClock;
 //    printf("PIXclk before %d\n",pixclk);
-    vbeGetPixelClock(&mode,&pixclk); 
+    vbeGetPixelClock(&mode,&pixclk);
 //    printf("PIXclk after %d\n",pixclk);
     GTF_calcTimings(x,y,pixclk/1000000,GTF_PF,0,0,crtc_pass);
 //    printf("Flags: %x\n",(unsigned) crtc_pass->Flags);
-/*    
+/*
     printf("hTotal %d\n",crtc_pass->hTotal);
     printf("hSyncStart %d\n",crtc_pass->hSyncStart);
     printf("hSyncEnd %d\n",crtc_pass->hSyncEnd);
-    
+
     printf("vTotal %d\n",crtc_pass->vTotal);
     printf("vSyncStart %d\n",crtc_pass->vSyncStart);
     printf("vSyncEnd %d\n",crtc_pass->vSyncEnd);
-    
+
     printf("RR %d\n",crtc_pass->RefreshRate);
     printf("PixelCLK %d\n",(unsigned)crtc_pass->PixelClock);*/
-    
+
     if (!in_range(monitor_vfreq,crtc_pass->RefreshRate/100)||
 	!in_range(monitor_hfreq,H_freq*1000)) {
         mp_msg(MSGT_VO,MSGL_WARN, MSGTR_LIBVO_VESA_UnableToFitTheMode);
@@ -647,7 +632,7 @@ config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uin
 	{
 	  if(use_scaler) use_scaler = 2;
 	  else          fs_mode = 1;
-	} 
+	}
 	if((err=vbeInit()) != VBE_OK) { PRINT_VBE_ERR("vbeInit",err); return -1; }
 	memcpy(vib.VESASignature,"VBE2",4);
 	if(!vib_set && (err=vbeGetControllerInfo(&vib)) != VBE_OK)
@@ -735,9 +720,9 @@ config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uin
 	    dstH = d_height;
 	}
 	if(vo_screenwidth) w = vo_screenwidth;
-	else w = max(dstW,width);
+	else w = FFMAX(dstW, width);
 	if(vo_screenheight) h = vo_screenheight;
-	else h = max(dstH,height);
+	else h = FFMAX(dstH, height);
         for(i=0;i < num_modes;i++)
 	{
 		if((err=vbeGetModeInfo(mode_ptr[i],&vmib)) != VBE_OK)
@@ -802,7 +787,7 @@ config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uin
 		      if(use_scaler > 1
 #ifdef CONFIG_VIDIX
 				|| vidix_name
-#endif			  
+#endif
 			  )
 		      {
 		        aspect_save_orig(width,height);
@@ -822,7 +807,7 @@ config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uin
 #ifdef CONFIG_VIDIX
 		&& !vidix_name
 #endif
-		) 
+		)
 		{
 		    sws = sws_getContextFromCmdLine(srcW,srcH,srcFourcc,dstW,dstH,dstFourcc);
 		    if(!sws)
@@ -903,11 +888,11 @@ config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uin
 		if(HAS_DGA())
 		{
 		  dga_buffer = win.ptr; /* Trickly ;) */
-		  cpy_blk_fnc = __vbeCopyBlockFast;
+		  cpy_blk_fnc = vbeCopyBlockFast;
 		}
 		else
 		{
-		  cpy_blk_fnc = __vbeCopyBlock;
+		  cpy_blk_fnc = vbeCopyBlock;
 		  if(!lvo_name
 #ifdef CONFIG_VIDIX
 		   && !vidix_name
@@ -927,28 +912,28 @@ config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uin
 		{
 			PRINT_VBE_ERR("vbeSaveState",err);
 		}
-		
-		/* TODO: 
+
+		/* TODO:
 		         user might pass refresh value,
 			 GTF constants might be read from monitor
 			 for best results, I don't have a spec (RM)
 		*/
-		
+
 		if (((int)(vib.VESAVersion >> 8) & 0xff) > 2) {
-		
+
 		if (set_refresh(video_mode_info.XResolution,video_mode_info.YResolution,video_mode,&crtc_pass))
 		video_mode = video_mode | 0x800;
-		
+
 		}
-		
+
 		;
-		
+
 		if ((err=vbeSetMode(video_mode,&crtc_pass)) != VBE_OK)
 		{
 			PRINT_VBE_ERR("vbeSetMode",err);
 			return -1;
 		}
-		
+
 		if (neomagic_tvout) {
 		    err = vbeSetTV(video_mode,neomagic_tvnorm);
 		    if (err!=0x4f) {
@@ -956,7 +941,7 @@ config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uin
 		    }
 		    else {
  		    mp_msg(MSGT_VO,MSGL_INFO, MSGTR_LIBVO_VESA_OhYouReallyHavePictureOnTv);
-		    } 
+		    }
 		}
 		/* Now we are in video mode!!!*/
 		/* Below 'return -1' is impossible */
@@ -991,7 +976,7 @@ config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uin
 		  else mp_msg(MSGT_VO,MSGL_INFO, MSGTR_LIBVO_VESA_UsingVidix);
 		  vidix_start();
 
-		  /* set colorkey */       
+		  /* set colorkey */
 		  if (vidix_grkey_support())
 		  {
 		    vidix_grkey_get(&gr_key);
@@ -1007,7 +992,7 @@ config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uin
 #endif
 			gr_key.ckey.op = CKEY_FALSE;
 		    vidix_grkey_set(&gr_key);
-		  }         
+		  }
 		  vidix_opened = 1;
 		}
 #endif
@@ -1054,7 +1039,7 @@ config(uint32_t width, uint32_t height, uint32_t d_width, uint32_t d_height, uin
 static void
 uninit(void)
 {
-    // not inited
+    // not initialized
     vesa_term();
     if( mp_msg_test(MSGT_VO,MSGL_DBG3) )
         mp_msg(MSGT_VO,MSGL_DBG3, "vo_vesa: uninit was called\n");
@@ -1098,7 +1083,7 @@ static int preinit(const char *arg)
   return pre_init_err;
 }
 
-static int control(uint32_t request, void *data, ...)
+static int control(uint32_t request, void *data)
 {
   switch (request) {
   case VOCTRL_QUERY_FORMAT:
@@ -1107,30 +1092,6 @@ static int control(uint32_t request, void *data, ...)
 
 #ifdef CONFIG_VIDIX
   if (vidix_name) {
-    switch (request) {
-    case VOCTRL_SET_EQUALIZER:
-    {
-      va_list ap;
-      int value;
-    
-      va_start(ap, data);
-      value = va_arg(ap, int);
-      va_end(ap);
-
-      return vidix_control(request, data, (int *)value);
-    }
-    case VOCTRL_GET_EQUALIZER:
-    {
-      va_list ap;
-      int *value;
-    
-      va_start(ap, data);
-      value = va_arg(ap, int*);
-      va_end(ap);
-
-      return vidix_control(request, data, value);
-    }
-    }
     return vidix_control(request, data);
   }
 #endif

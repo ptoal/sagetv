@@ -1,26 +1,28 @@
 /* ------------------------------------------------------------------------- */
 
-/* 
- * vo_md5sum.c, md5sum Video Output Driver for MPlayer
+/*
+ * md5sum video output driver
  *
- * 
- * Written by Ivo van Poorten. (C) Copyright 2004, 2005.
- * Licensed under GNU General Public License version 2.
+ * Copyright (C) 2004, 2005, 2006 Ivo van Poorten
  *
+ * This file is part of MPlayer.
  *
- * Changelog
- * 
- * 2006-07-02   Removed imported md5sum code and rely on libavutil now
- * 2005-01-16   Replaced suboption parser by call to subopt-helper.
- * 2004-09-16   Second draft. It now acts on VOCTRL_DRAW_IMAGE and does not
- *              maintain a local copy of the image if the format is YV12.
- *              Speed improvement and uses less memory.
- * 2004-09-13   First draft.
+ * MPlayer is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  *
+ * MPlayer is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with MPlayer; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 /* ------------------------------------------------------------------------- */
-#include "config.h"
 
 /* Global Includes */
 
@@ -33,30 +35,22 @@
 
 /* Local Includes */
 
+#include "config.h"
 #include "subopt-helper.h"
 #include "mp_msg.h"
 #include "video_out.h"
+#define NO_DRAW_FRAME
+#define NO_DRAW_SLICE
 #include "video_out_internal.h"
-#include "mplayer.h"			/* for exit_player() */
+#include "mp_core.h"			/* for exit_player() */
 #include "help_mp.h"
-#ifdef USE_LIBAVUTIL_SO
-#include "ffmpeg/md5.h"
-#else
 #include "libavutil/md5.h"
-#endif
-
-/* ------------------------------------------------------------------------- */
-
-/* Defines */
-
-/* Used for temporary buffers to store file- and pathnames */
-#define BUFLENGTH 512
 
 /* ------------------------------------------------------------------------- */
 
 /* Info */
 
-static vo_info_t info=
+static const vo_info_t info=
 {
 	"md5sum of each frame",
 	"md5sum",
@@ -64,7 +58,7 @@ static vo_info_t info=
 	""
 };
 
-LIBVO_EXTERN (md5sum)
+const LIBVO_EXTERN (md5sum)
 
 /* ------------------------------------------------------------------------- */
 
@@ -87,7 +81,7 @@ int framenum = 0;
 
 static void md5sum_write_error(void) {
     mp_msg(MSGT_VO, MSGL_ERR, MSGTR_ErrorWritingFile, info.short_name);
-    exit_player(MSGTR_Exit_error);
+    exit_player(EXIT_ERROR);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -108,13 +102,13 @@ static void md5sum_write_error(void) {
 
 static int preinit(const char *arg)
 {
-    opt_t subopts[] = {
-        {"outfile",     OPT_ARG_MSTRZ,    &md5sum_outfile,   NULL, 0},
-        {NULL, 0, NULL, NULL, 0}
+    const opt_t subopts[] = {
+        {"outfile",     OPT_ARG_MSTRZ,    &md5sum_outfile,   NULL},
+        {NULL, 0, NULL, NULL}
     };
 
-    mp_msg(MSGT_VO, MSGL_INFO, "%s: %s\n", info.short_name,
-                                            MSGTR_VO_ParsingSuboptions);
+    mp_msg(MSGT_VO, MSGL_V, "%s: %s\n", info.short_name,
+           "Parsing suboptions.");
 
     md5sum_outfile = strdup("md5sums");
     if (subopt_parse(arg, subopts) != 0) {
@@ -124,8 +118,8 @@ static int preinit(const char *arg)
     mp_msg(MSGT_VO, MSGL_V, "%s: outfile --> %s\n", info.short_name,
                                                             md5sum_outfile);
 
-    mp_msg(MSGT_VO, MSGL_INFO, "%s: %s\n", info.short_name,
-                                            MSGTR_VO_SuboptionsParsedOK);
+    mp_msg(MSGT_VO, MSGL_V, "%s: %s\n", info.short_name,
+           "Suboptions parsed OK.");
     return 0;
 }
 
@@ -148,12 +142,15 @@ static int config(uint32_t width, uint32_t height, uint32_t d_width,
         return 0;
     }
 
+    if (strcmp(md5sum_outfile, "-") == 0)
+        md5sum_fd = stdout;
+    else
     if ( (md5sum_fd = fopen(md5sum_outfile, "w") ) == NULL ) {
         mp_msg(MSGT_VO, MSGL_ERR, "\n%s: %s\n", info.short_name,
                 MSGTR_VO_CantCreateFile);
         mp_msg(MSGT_VO, MSGL_ERR, "%s: %s: %s\n",
                 info.short_name, MSGTR_VO_GenericError, strerror(errno) );
-        exit_player(MSGTR_Exit_error);
+        exit_player(EXIT_ERROR);
     }
 
     return 0;
@@ -185,14 +182,6 @@ static void md5sum_output_sum(unsigned char *md5sum) {
 
 /* ------------------------------------------------------------------------- */
 
-static int draw_frame(uint8_t *src[])
-{
-    mp_msg(MSGT_VO, MSGL_V, "%s: draw_frame() is called!\n", info.short_name);
-    return -1;
-}
-
-/* ------------------------------------------------------------------------- */
-
 static uint32_t draw_image(mp_image_t *mpi)
 {
     unsigned char md5sum[16];
@@ -220,6 +209,8 @@ static uint32_t draw_image(mp_image_t *mpi)
             h = h / 2;
             for (i=0; i<h; i++) {
                 av_md5_update(md5_context, planeU + i * strideU, w);
+            }
+            for (i=0; i<h; i++) {
                 av_md5_update(md5_context, planeV + i * strideV, w);
             }
             av_md5_final(md5_context, md5sum);
@@ -230,7 +221,7 @@ static uint32_t draw_image(mp_image_t *mpi)
         }
     } else { /* Packed */
         if (mpi->flags & MP_IMGFLAG_YUV) { /* Packed YUV */
-            
+
             return VO_FALSE;
         } else { /* Packed RGB */
             av_md5_sum(md5sum, rgbimage, mpi->w * (mpi->bpp >> 3) * mpi->h);
@@ -244,20 +235,12 @@ static uint32_t draw_image(mp_image_t *mpi)
 
 /* ------------------------------------------------------------------------- */
 
-static int draw_slice(uint8_t *src[], int stride[], int w, int h,
-                           int x, int y)
-{
-    return 0;
-}
-
-/* ------------------------------------------------------------------------- */
-
 static int query_format(uint32_t format)
 {
     switch (format) {
         case IMGFMT_RGB24:
         case IMGFMT_YV12:
-            return VFCAP_CSP_SUPPORTED|VFCAP_CSP_SUPPORTED_BY_HW;
+            return VFCAP_CSP_SUPPORTED|VFCAP_CSP_SUPPORTED_BY_HW|VOCAP_NOSLICES;
         default:
             return 0;
     }
@@ -265,7 +248,7 @@ static int query_format(uint32_t format)
 
 /* ------------------------------------------------------------------------- */
 
-static int control(uint32_t request, void *data, ...)
+static int control(uint32_t request, void *data)
 {
     switch (request) {
         case VOCTRL_QUERY_FORMAT:
@@ -280,11 +263,9 @@ static int control(uint32_t request, void *data, ...)
 
 static void uninit(void)
 {
-    if (md5sum_outfile) {
-        free(md5sum_outfile);
-        md5sum_outfile = NULL;
-    }
-    if (md5sum_fd) fclose(md5sum_fd);
+    free(md5sum_outfile);
+    md5sum_outfile = NULL;
+    if (md5sum_fd && md5sum_fd != stdout) fclose(md5sum_fd);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -304,12 +285,3 @@ static void draw_osd(void)
 static void flip_page (void)
 {
 }
-
-/* ------------------------------------------------------------------------- */
-
-#undef BUFLENGTH
-#undef MD5SUM_RGB_MODE
-#undef MD5SUM_YUV_MODE
-
-/* ------------------------------------------------------------------------- */
-
